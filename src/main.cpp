@@ -92,6 +92,12 @@ static llvm::cl::opt<std::string> IROpt(
     llvm::cl::init("O0"),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<bool> NoIRCache(
+    "no-ir-cache",
+    llvm::cl::desc("Disable IR cache (force re-emission every run). "
+                    "Recommended for CI where header changes must invalidate."),
+    llvm::cl::cat(FaultlineCat));
+
 static faultline::Severity parseSeverity(const std::string &s) {
     if (s == "Critical")      return faultline::Severity::Critical;
     if (s == "High")          return faultline::Severity::High;
@@ -219,13 +225,36 @@ int main(int argc, const char **argv) {
                 }
             }
 
-            // Deterministic temp naming: MD5(source + compile args + tool version).
+            // Cache key: MD5(source content + mtime + compile args + tool version
+            //                 + dependency file contents if available).
+            // Header dependency gap: without a full -M dep scan, header changes
+            // may not invalidate cache. Use --no-ir-cache in CI for correctness.
             llvm::MD5 hasher;
             auto srcBuf = llvm::MemoryBuffer::getFile(srcPath);
             if (srcBuf)
                 hasher.update((*srcBuf)->getBuffer());
             else
                 hasher.update(srcPath);
+
+            // Include source mtime to detect filesystem-level changes.
+            llvm::sys::fs::file_status srcStat;
+            if (!llvm::sys::fs::status(srcPath, srcStat)) {
+                auto mtime = srcStat.getLastModificationTime()
+                                 .time_since_epoch().count();
+                hasher.update(llvm::StringRef(
+                    reinterpret_cast<const char *>(&mtime), sizeof(mtime)));
+            }
+
+            // Hash dependency file (.d) if present alongside source.
+            // Build systems often produce these; their content lists all
+            // included headers, so hashing the dep file transitively
+            // captures header changes.
+            llvm::SmallString<256> depPath(srcPath);
+            llvm::sys::path::replace_extension(depPath, ".d");
+            auto depBuf = llvm::MemoryBuffer::getFile(depPath);
+            if (depBuf)
+                hasher.update((*depBuf)->getBuffer());
+
             for (const auto &a : argv)
                 hasher.update(a);
             hasher.update(faultline::kToolVersion);
@@ -243,7 +272,7 @@ int main(int argc, const char **argv) {
                 "faultline-" + std::string(hashStr) + ".err");
 
             // Incremental cache: reuse existing IR if hash matches.
-            bool cached = llvm::sys::fs::exists(irPath);
+            bool cached = !NoIRCache && llvm::sys::fs::exists(irPath);
 
             argv.push_back("-o");
             argv.push_back(std::string(irPath));
