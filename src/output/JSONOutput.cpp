@@ -1,4 +1,5 @@
 #include "faultline/output/OutputFormatter.h"
+#include "faultline/core/Version.h"
 
 #include <sstream>
 
@@ -25,7 +26,10 @@ std::string escape(const std::string &s) {
 
 std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnostics) {
     std::ostringstream os;
-    os << "{\n  \"version\": \"0.1.0\",\n  \"diagnostics\": [\n";
+    os << "{\n";
+    os << "  \"version\": \"" << kToolVersion << "\",\n";
+    os << "  \"schemaVersion\": \"" << kOutputSchemaVersion << "\",\n";
+    os << "  \"diagnostics\": [\n";
 
     for (size_t i = 0; i < diagnostics.size(); ++i) {
         const auto &d = diagnostics[i];
@@ -67,6 +71,7 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
     std::ostringstream os;
     os << "{\n";
     os << "  \"version\": \"" << escape(meta.toolVersion) << "\",\n";
+    os << "  \"schemaVersion\": \"" << kOutputSchemaVersion << "\",\n";
     os << "  \"metadata\": {\n";
     os << "    \"timestamp\": " << meta.timestampEpochSec << ",\n";
     os << "    \"configPath\": \"" << escape(meta.configPath) << "\",\n";

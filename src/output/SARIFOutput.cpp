@@ -1,4 +1,5 @@
 #include "faultline/output/OutputFormatter.h"
+#include "faultline/core/Version.h"
 
 #include <sstream>
 
@@ -58,8 +59,9 @@ std::string SARIFOutputFormatter::format(
     os << "    \"tool\": {\n";
     os << "      \"driver\": {\n";
     os << "        \"name\": \"faultline\",\n";
-    os << "        \"version\": \"0.1.0\",\n";
+    os << "        \"version\": \"" << kToolVersion << "\",\n";
     os << "        \"informationUri\": \"https://github.com/abokhalill/faultline\",\n";
+    os << "        \"properties\": { \"outputSchemaVersion\": \"" << kOutputSchemaVersion << "\" },\n";
     os << "        \"rules\": [";
 
     // Collect unique rules.
@@ -170,6 +172,7 @@ std::string SARIFOutputFormatter::format(
     os << "        \"name\": \"faultline\",\n";
     os << "        \"version\": \"" << sarifEscape(meta.toolVersion) << "\",\n";
     os << "        \"informationUri\": \"https://github.com/abokhalill/faultline\",\n";
+    os << "        \"properties\": { \"outputSchemaVersion\": \"" << kOutputSchemaVersion << "\" },\n";
     os << "        \"rules\": [";
 
     std::vector<std::string> seenRules;

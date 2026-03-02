@@ -85,3 +85,14 @@ target_link_libraries(faultline
     clangRewrite
     LLVM
 )
+
+# --- Contract tests ---
+add_executable(output_schema_contract_test
+    test/output_schema_contract_test.cpp
+    src/output/JSONOutput.cpp
+    src/output/SARIFOutput.cpp
+    src/output/CLIOutput.cpp
+    src/core/Diagnostic.cpp
+    src/core/Severity.cpp
+)
+target_link_libraries(output_schema_contract_test PRIVATE LLVM)
