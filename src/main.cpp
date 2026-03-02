@@ -8,6 +8,7 @@
 #include "faultline/ir/IRAnalyzer.h"
 #include "faultline/ir/DiagnosticRefiner.h"
 #include "faultline/core/DiagnosticDedup.h"
+#include "faultline/core/DiagnosticInteraction.h"
 #include "faultline/core/PerfProfileParser.h"
 #include "faultline/core/PrecisionBudget.h"
 #include "faultline/output/OutputFormatter.h"
@@ -488,6 +489,12 @@ int main(int argc, const char **argv) {
     // Struct-level rules emit identical diagnostics when the same header
     // is included by multiple TUs. Merge duplicates, keep highest confidence.
     faultline::deduplicateDiagnostics(diagnostics);
+
+    // --- Hazard interaction synthesis ---
+    // Correlate diagnostics from different rules at the same site.
+    // Synthesize compound hazard diagnostics (FL090) with site-specific
+    // evidence drawn from the InteractionEligibilityMatrix.
+    faultline::synthesizeInteractions(diagnostics);
 
     // --- Precision budget governance ---
     // Per-rule confidence floors, severity caps, and emission limits.

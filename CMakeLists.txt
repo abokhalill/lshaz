@@ -30,6 +30,7 @@ set(FAULTLINE_SOURCES
     src/core/HotPathOracle.cpp
     src/core/Config.cpp
     src/core/DiagnosticDedup.cpp
+    src/core/DiagnosticInteraction.cpp
     src/core/PerfProfileParser.cpp
     src/core/PrecisionBudget.cpp
     src/output/CLIOutput.cpp
