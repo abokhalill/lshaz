@@ -26,11 +26,32 @@ bool HotPathOracle::isFunctionHot(const clang::FunctionDecl *FD) const {
     if (hotCache_.count(FD))
         return true;
 
-    if (hasHotAnnotation(FD) || matchesConfigPattern(FD)) {
+    if (hasHotAnnotation(FD) || matchesConfigPattern(FD) ||
+        matchesProfileFunction(FD)) {
         hotCache_.insert(FD);
         return true;
     }
 
+    return false;
+}
+
+void HotPathOracle::loadProfileHotFunctions(
+    std::unordered_set<std::string> names) {
+    profileHotFunctions_ = std::move(names);
+}
+
+bool HotPathOracle::matchesProfileFunction(
+    const clang::FunctionDecl *FD) const {
+    if (profileHotFunctions_.empty())
+        return false;
+    // Match by qualified name (demangled form).
+    std::string qualName = FD->getQualifiedNameAsString();
+    if (profileHotFunctions_.count(qualName))
+        return true;
+    // Match by bare name (perf symbols often lack namespace).
+    std::string name = FD->getNameAsString();
+    if (profileHotFunctions_.count(name))
+        return true;
     return false;
 }
 

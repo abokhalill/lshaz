@@ -21,9 +21,14 @@ bool isInSystemHeader(const clang::Decl *D, const clang::SourceManager &SM) {
 
 } // anonymous namespace
 
-FaultlineASTConsumer::FaultlineASTConsumer(const Config &cfg,
-                                           std::vector<Diagnostic> &diagnostics)
-    : config_(cfg), oracle_(cfg), diagnostics_(diagnostics) {}
+FaultlineASTConsumer::FaultlineASTConsumer(
+    const Config &cfg,
+    std::vector<Diagnostic> &diagnostics,
+    const std::unordered_set<std::string> &profileHotFuncs)
+    : config_(cfg), oracle_(cfg), diagnostics_(diagnostics) {
+    if (!profileHotFuncs.empty())
+        oracle_.loadProfileHotFunctions(profileHotFuncs);
+}
 
 void FaultlineASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     auto *TU = Ctx.getTranslationUnitDecl();

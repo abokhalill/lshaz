@@ -7,14 +7,17 @@
 #include <clang/Tooling/Tooling.h>
 
 #include <memory>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace faultline {
 
 class FaultlineAction : public clang::ASTFrontendAction {
 public:
-    explicit FaultlineAction(const Config &cfg,
-                             std::vector<Diagnostic> &diagnostics);
+    FaultlineAction(const Config &cfg,
+                    std::vector<Diagnostic> &diagnostics,
+                    const std::unordered_set<std::string> &profileHotFuncs);
 
     std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(clang::CompilerInstance &CI,
@@ -23,18 +26,21 @@ public:
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
+    const std::unordered_set<std::string> &profileHotFuncs_;
 };
 
 class FaultlineActionFactory : public clang::tooling::FrontendActionFactory {
 public:
-    explicit FaultlineActionFactory(const Config &cfg,
-                                   std::vector<Diagnostic> &diagnostics);
+    FaultlineActionFactory(const Config &cfg,
+                           std::vector<Diagnostic> &diagnostics,
+                           std::unordered_set<std::string> profileHotFuncs = {});
 
     std::unique_ptr<clang::FrontendAction> create() override;
 
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
+    std::unordered_set<std::string> profileHotFuncs_;
 };
 
 } // namespace faultline

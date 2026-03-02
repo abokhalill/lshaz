@@ -8,6 +8,7 @@
 #include "faultline/ir/IRAnalyzer.h"
 #include "faultline/ir/DiagnosticRefiner.h"
 #include "faultline/core/DiagnosticDedup.h"
+#include "faultline/core/PerfProfileParser.h"
 #include "faultline/output/OutputFormatter.h"
 
 #include <clang/Tooling/CommonOptionsParser.h>
@@ -99,6 +100,18 @@ static llvm::cl::opt<bool> NoIRCache(
                     "Recommended for CI where header changes must invalidate."),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<std::string> PerfProfile(
+    "perf-profile",
+    llvm::cl::desc("Path to perf profile data (flat or perf-script format). "
+                    "Functions exceeding --hotness-threshold are treated as hot."),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<double> HotnessThreshold(
+    "hotness-threshold",
+    llvm::cl::desc("Minimum sample percentage to consider a function hot (default: 1.0)"),
+    llvm::cl::init(1.0),
+    llvm::cl::cat(FaultlineCat));
+
 static faultline::Severity parseSeverity(const std::string &s) {
     if (s == "Critical")      return faultline::Severity::Critical;
     if (s == "High")          return faultline::Severity::High;
@@ -143,11 +156,33 @@ int main(int argc, const char **argv) {
     execMeta.sourceFiles.assign(parser->getSourcePathList().begin(),
                                 parser->getSourcePathList().end());
 
+    // --- Profile-guided hotness ---
+    std::unordered_set<std::string> profileHotFuncs;
+    std::string profilePath = PerfProfile.getValue();
+    if (profilePath.empty())
+        profilePath = cfg.perfProfilePath;
+    if (!profilePath.empty()) {
+        faultline::PerfProfileParser profParser;
+        if (profParser.parse(profilePath)) {
+            double threshold = HotnessThreshold.getValue();
+            if (cfg.hotnessThresholdPct > 0 && threshold == 1.0)
+                threshold = cfg.hotnessThresholdPct;
+            profileHotFuncs = profParser.hotFunctions(threshold);
+            llvm::errs() << "faultline: loaded " << profParser.totalSamples()
+                         << " samples, " << profileHotFuncs.size()
+                         << " hot function(s) at >=" << threshold << "%\n";
+        } else {
+            llvm::errs() << "faultline: warning: failed to parse profile '"
+                         << profilePath << "'\n";
+        }
+    }
+
     // Run analysis.
     ClangTool tool(parser->getCompilations(), parser->getSourcePathList());
 
     std::vector<faultline::Diagnostic> diagnostics;
-    faultline::FaultlineActionFactory factory(cfg, diagnostics);
+    faultline::FaultlineActionFactory factory(
+        cfg, diagnostics, std::move(profileHotFuncs));
 
     int ret = tool.run(&factory);
 
