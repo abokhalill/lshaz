@@ -26,6 +26,19 @@ const IRFunctionProfile *IRAnalyzer::lookup(const std::string &mangledName) cons
     return it != profiles_.end() ? &it->second : nullptr;
 }
 
+void IRAnalyzer::mergeFrom(IRAnalyzer &&other) {
+    for (auto &[name, profile] : other.profiles_) {
+        auto it = profiles_.find(name);
+        if (it == profiles_.end()) {
+            profiles_.emplace(std::move(name), std::move(profile));
+        } else {
+            // Keep the richer profile (more basic blocks → more IR info).
+            if (profile.basicBlockCount > it->second.basicBlockCount)
+                it->second = std::move(profile);
+        }
+    }
+}
+
 bool IRAnalyzer::isHeapAllocFunction(llvm::StringRef name) const {
     return name == "malloc" || name == "calloc" || name == "realloc" ||
            name == "aligned_alloc" || name == "posix_memalign" ||

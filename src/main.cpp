@@ -101,6 +101,19 @@ static llvm::cl::opt<bool> NoIRCache(
                     "Recommended for CI where header changes must invalidate."),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<unsigned> IRJobs(
+    "ir-jobs",
+    llvm::cl::desc("Max parallel IR emission jobs (default: hardware_concurrency)"),
+    llvm::cl::init(0),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<unsigned> IRBatchSize(
+    "ir-batch-size",
+    llvm::cl::desc("TUs per IR emission batch/shard (default: 1, i.e. per-TU). "
+                    "Higher values reduce subprocess overhead for large projects."),
+    llvm::cl::init(1),
+    llvm::cl::cat(FaultlineCat));
+
 static llvm::cl::opt<std::string> PerfProfile(
     "perf-profile",
     llvm::cl::desc("Path to perf profile data (flat or perf-script format). "
@@ -331,91 +344,129 @@ int main(int argc, const char **argv) {
                          << "skipping IR analysis pass\n";
         }
 
-        // Bounded parallel IR emission.
-        unsigned maxWorkers = std::max(1u, std::thread::hardware_concurrency());
-        maxWorkers = std::min(maxWorkers, static_cast<unsigned>(jobs.size()));
-        std::counting_semaphore<> sem(maxWorkers);
+        // --- Shard-based parallel IR emission and analysis ---
+        //
+        // Jobs are grouped into shards of --ir-batch-size TUs. Each shard:
+        //   1. Emits IR for its TUs (subprocess per TU, bounded by semaphore)
+        //   2. Parses IR into a shard-local LLVMContext + IRAnalyzer
+        //   3. Returns the shard IRAnalyzer for merge
+        //
+        // Shards run in parallel bounded by --ir-jobs. Each shard owns its
+        // LLVMContext, eliminating the single-context bottleneck.
+        unsigned maxWorkers = IRJobs.getValue();
+        if (maxWorkers == 0)
+            maxWorkers = std::max(1u, std::thread::hardware_concurrency());
+        unsigned batchSize = std::max(1u, IRBatchSize.getValue());
+
+        // Build shards: vector of job index ranges.
+        struct Shard {
+            size_t begin;
+            size_t end; // exclusive
+        };
+        std::vector<Shard> shards;
+        for (size_t i = 0; i < jobs.size(); i += batchSize)
+            shards.push_back({i, std::min(i + batchSize, jobs.size())});
+
+        unsigned shardWorkers = std::min(maxWorkers,
+                                          static_cast<unsigned>(shards.size()));
+        std::counting_semaphore<> sem(shardWorkers);
 
         struct IRResult {
             int exitCode = -1;
             std::string errMsg;
         };
-        std::vector<std::future<IRResult>> futures;
-        futures.reserve(jobs.size());
 
-        for (const auto &job : jobs) {
-            if (job.cached) {
-                // Cache hit: no compilation needed.
-                std::promise<IRResult> p;
-                p.set_value({0, {}});
-                futures.push_back(p.get_future());
-                continue;
-            }
+        // Emit a single job synchronously. Returns exit code.
+        auto emitOne = [](const IRJob &job) -> IRResult {
+            if (job.cached)
+                return {0, {}};
 
-            futures.push_back(std::async(std::launch::async,
-                [&sem](const std::string &program,
-                       const std::vector<std::string> &argvOwned,
-                       const std::string &errFile) -> IRResult {
+            std::vector<llvm::StringRef> argRefs;
+            argRefs.reserve(job.argv.size());
+            for (const auto &a : job.argv)
+                argRefs.push_back(a);
+
+            llvm::StringRef errRedirect(job.errFile);
+            std::optional<llvm::StringRef> redirects[] = {
+                std::nullopt, std::nullopt, errRedirect
+            };
+
+            IRResult result;
+            bool failed = false;
+            result.exitCode = llvm::sys::ExecuteAndWait(
+                job.compilerPath, argRefs,
+                /*Env=*/std::nullopt, redirects,
+                /*SecondsToWait=*/120, /*MemoryLimit=*/0,
+                &result.errMsg, &failed);
+            if (failed)
+                result.exitCode = -1;
+            return result;
+        };
+
+        struct ShardResult {
+            faultline::IRAnalyzer analyzer;
+            std::vector<std::pair<size_t, IRResult>> jobResults;
+        };
+
+        std::vector<std::future<ShardResult>> shardFutures;
+        shardFutures.reserve(shards.size());
+
+        for (const auto &shard : shards) {
+            shardFutures.push_back(std::async(std::launch::async,
+                [&sem, &jobs, &emitOne](size_t begin, size_t end) -> ShardResult {
                     sem.acquire();
 
-                    std::vector<llvm::StringRef> argRefs;
-                    argRefs.reserve(argvOwned.size());
-                    for (const auto &a : argvOwned)
-                        argRefs.push_back(a);
+                    ShardResult sr;
 
-                    // Redirect: stdin=none, stdout=none, stderr=errFile.
-                    llvm::StringRef errRedirect(errFile);
-                    std::optional<llvm::StringRef> redirects[] = {
-                        std::nullopt,   // stdin
-                        std::nullopt,   // stdout
-                        errRedirect     // stderr
-                    };
+                    // Phase 1: emit IR for all TUs in this shard.
+                    for (size_t i = begin; i < end; ++i)
+                        sr.jobResults.push_back({i, emitOne(jobs[i])});
 
-                    IRResult result;
-                    bool failed = false;
-                    result.exitCode = llvm::sys::ExecuteAndWait(
-                        program, argRefs,
-                        /*Env=*/std::nullopt, redirects,
-                        /*SecondsToWait=*/120, /*MemoryLimit=*/0,
-                        &result.errMsg, &failed);
-                    if (failed)
-                        result.exitCode = -1;
+                    // Phase 2: parse and analyze in shard-local context.
+                    llvm::LLVMContext llvmCtx;
+                    for (const auto &[idx, result] : sr.jobResults) {
+                        if (result.exitCode == 0) {
+                            llvm::SMDiagnostic parseErr;
+                            auto mod = llvm::parseIRFile(
+                                jobs[idx].irFile, parseErr, llvmCtx);
+                            if (mod)
+                                sr.analyzer.analyzeModule(*mod);
+                        }
+                    }
 
                     sem.release();
-                    return result;
+                    return sr;
                 },
-                job.compilerPath, job.argv, job.errFile));
+                shard.begin, shard.end));
         }
 
-        // Collect results and parse IR sequentially (LLVMContext is not thread-safe).
-        llvm::LLVMContext llvmCtx;
-        for (size_t i = 0; i < jobs.size(); ++i) {
-            auto result = futures[i].get();
+        // Collect shard results and merge into main analyzer.
+        for (auto &future : shardFutures) {
+            auto sr = future.get();
 
-            if (result.exitCode != 0) {
-                // Log compiler failure with captured stderr.
-                auto errBuf = llvm::MemoryBuffer::getFile(jobs[i].errFile);
-                if (errBuf && !(*errBuf)->getBuffer().empty()) {
-                    llvm::errs() << "faultline: IR emission failed for "
-                                 << jobs[i].srcPath << ":\n"
-                                 << (*errBuf)->getBuffer() << "\n";
-                } else if (!result.errMsg.empty()) {
-                    llvm::errs() << "faultline: IR emission failed for "
-                                 << jobs[i].srcPath << ": "
-                                 << result.errMsg << "\n";
+            // Log failures.
+            for (const auto &[idx, result] : sr.jobResults) {
+                if (result.exitCode != 0) {
+                    auto errBuf = llvm::MemoryBuffer::getFile(jobs[idx].errFile);
+                    if (errBuf && !(*errBuf)->getBuffer().empty()) {
+                        llvm::errs() << "faultline: IR emission failed for "
+                                     << jobs[idx].srcPath << ":\n"
+                                     << (*errBuf)->getBuffer() << "\n";
+                    } else if (!result.errMsg.empty()) {
+                        llvm::errs() << "faultline: IR emission failed for "
+                                     << jobs[idx].srcPath << ": "
+                                     << result.errMsg << "\n";
+                    }
                 }
-            } else {
-                llvm::SMDiagnostic parseErr;
-                auto mod = llvm::parseIRFile(jobs[i].irFile, parseErr, llvmCtx);
-                if (mod)
-                    irAnalyzer.analyzeModule(*mod);
+
+                // Cleanup: retain cached IR, remove err files and failed IR.
+                if (!jobs[idx].cached && result.exitCode != 0)
+                    llvm::sys::fs::remove(jobs[idx].irFile);
+                llvm::sys::fs::remove(jobs[idx].errFile);
             }
 
-            // Cached IR files are retained for future runs.
-            // Only clean up err files and failed non-cached IR.
-            if (!jobs[i].cached && result.exitCode != 0)
-                llvm::sys::fs::remove(jobs[i].irFile);
-            llvm::sys::fs::remove(jobs[i].errFile);
+            // Shard-level reduction: merge profiles into main analyzer.
+            irAnalyzer.mergeFrom(std::move(sr.analyzer));
         }
 
         if (!irAnalyzer.profiles().empty()) {
