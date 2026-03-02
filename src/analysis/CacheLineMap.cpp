@@ -2,6 +2,7 @@
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Type.h>
 
 namespace faultline {
@@ -26,8 +27,36 @@ bool CacheLineMap::isAtomicType(clang::QualType QT) {
     QT = QT.getCanonicalType();
     if (QT->isAtomicType())
         return true;
-    if (QT.getAsString().find("atomic") != std::string::npos)
+
+    // Resolve through typedefs/aliases to CXXRecordDecl.
+    QT = QT.getNonReferenceType();
+    const clang::CXXRecordDecl *RD = nullptr;
+    if (const auto *TST = QT->getAs<clang::TemplateSpecializationType>()) {
+        if (auto TD = TST->getTemplateName().getAsTemplateDecl())
+            RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(
+                TD->getTemplatedDecl());
+    }
+    if (!RD)
+        RD = QT->getAsCXXRecordDecl();
+
+    if (!RD)
+        return false;
+
+    // Direct qualified name match.
+    std::string qn = RD->getQualifiedNameAsString();
+    if (qn == "std::atomic" || qn == "std::atomic_ref")
         return true;
+
+    // ClassTemplateSpecializationDecl path for instantiated types.
+    if (const auto *CTSD =
+            llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
+        if (auto *TD = CTSD->getSpecializedTemplate()) {
+            std::string tn = TD->getQualifiedNameAsString();
+            if (tn == "std::atomic" || tn == "std::atomic_ref")
+                return true;
+        }
+    }
+
     return false;
 }
 
