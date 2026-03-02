@@ -109,13 +109,14 @@ NUMAPlacement NUMATopology::classifyStruct(const clang::CXXRecordDecl *RD,
     bool foundGlobal = false;
     bool foundThreadLocal = false;
 
+    auto structType = Ctx.getRecordType(RD).getCanonicalType();
+
     for (const auto *D : Ctx.getTranslationUnitDecl()->decls()) {
         const auto *VD = llvm::dyn_cast<clang::VarDecl>(D);
         if (!VD || !VD->hasGlobalStorage())
             continue;
 
         auto varType = VD->getType().getCanonicalType();
-        auto structType = Ctx.getRecordType(RD).getCanonicalType();
 
         // Direct type match.
         if (varType == structType) {
