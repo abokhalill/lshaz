@@ -169,9 +169,9 @@ public:
 
         const auto &SM = Ctx.getSourceManager();
 
-        for (auto &site : visitor.sites()) {
-            site.allocClass = topo.classify(site.kind);
-            double sevFactor = allocatorSeverityFactor(site.allocClass);
+        for (const auto &site : visitor.sites()) {
+            AllocatorClass ac = topo.classify(site.kind);
+            double sevFactor = allocatorSeverityFactor(ac);
 
             // Base severity modulated by allocator topology.
             Severity sev = Severity::Critical;
@@ -197,14 +197,14 @@ public:
                     sev = Severity::High;
             }
 
-            if (site.allocClass == AllocatorClass::ThreadLocal) {
+            if (ac == AllocatorClass::ThreadLocal) {
                 escalations.push_back(
                     "allocator-topology: thread-local cache path (" +
                     Cfg.linkedAllocator + "), reduced contention risk");
-            } else if (site.allocClass == AllocatorClass::PoolSlab) {
+            } else if (ac == AllocatorClass::PoolSlab) {
                 escalations.push_back(
                     "allocator-topology: pool/slab allocator, minimal latency");
-            } else if (site.allocClass == AllocatorClass::Syscall) {
+            } else if (ac == AllocatorClass::Syscall) {
                 escalations.push_back(
                     "allocator-topology: mmap/brk syscall path, page fault risk");
             }
@@ -226,12 +226,12 @@ public:
             std::ostringstream hw;
             hw << "'" << site.kind << "' in hot function '"
                << FD->getQualifiedNameAsString()
-               << "'. Allocator class: " << allocatorClassName(site.allocClass)
+               << "'. Allocator class: " << allocatorClassName(ac)
                << ". ";
-            if (site.allocClass == AllocatorClass::ThreadLocal) {
+            if (ac == AllocatorClass::ThreadLocal) {
                 hw << "Thread-local cache hit expected (" << Cfg.linkedAllocator
                    << "), low contention. Still incurs TLB pressure for new pages.";
-            } else if (site.allocClass == AllocatorClass::Syscall) {
+            } else if (ac == AllocatorClass::Syscall) {
                 hw << "Large allocation triggers mmap syscall. "
                    << "Page fault jitter, TLB shootdown on munmap.";
             } else {
@@ -243,7 +243,7 @@ public:
 
             std::ostringstream ev;
             ev << "alloc_type=" << site.kind
-               << "; allocator_class=" << allocatorClassName(site.allocClass)
+               << "; allocator_class=" << allocatorClassName(ac)
                << "; function=" << FD->getQualifiedNameAsString()
                << "; in_loop=" << (site.inLoop ? "yes" : "no")
                << "; hot_path=true";

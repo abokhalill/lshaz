@@ -255,19 +255,23 @@ void testJSONNaNInfConfidence() {
     faultline::JSONOutputFormatter jfmt;
     std::string jout = jfmt.format({d1, d2, d3});
 
-    // JSON must not contain nan, inf, -inf tokens.
-    check(!contains(jout, "nan"), "JSON: contains 'nan' token");
-    check(!contains(jout, "inf"), "JSON: contains 'inf' token");
-    check(!contains(jout, "NaN"), "JSON: contains 'NaN' token");
-    check(!contains(jout, "Inf"), "JSON: contains 'Inf' token");
+    // JSON must not contain bare nan/inf numeric tokens.
+    // Check for patterns that indicate actual numeric nan/inf, not substrings
+    // like "Informational" or "information".
+    check(!contains(jout, ": nan"), "JSON: contains ': nan' numeric token");
+    check(!contains(jout, ": inf"), "JSON: contains ': inf' numeric token");
+    check(!contains(jout, ": -inf"), "JSON: contains ': -inf' numeric token");
+    check(!contains(jout, ": NaN"), "JSON: contains ': NaN' numeric token");
+    check(!contains(jout, ": Infinity"), "JSON: contains ': Infinity' numeric token");
 
     faultline::SARIFOutputFormatter sfmt;
     std::string sout = sfmt.format({d1, d2, d3});
 
-    check(!contains(sout, "nan"), "SARIF: contains 'nan' token");
-    check(!contains(sout, "inf"), "SARIF: contains 'inf' token");
-    check(!contains(sout, "NaN"), "SARIF: contains 'NaN' token");
-    check(!contains(sout, "Inf"), "SARIF: contains 'Inf' token");
+    check(!contains(sout, ": nan"), "SARIF: contains ': nan' numeric token");
+    check(!contains(sout, ": inf"), "SARIF: contains ': inf' numeric token");
+    check(!contains(sout, ": -inf"), "SARIF: contains ': -inf' numeric token");
+    check(!contains(sout, ": NaN"), "SARIF: contains ': NaN' numeric token");
+    check(!contains(sout, ": Infinity"), "SARIF: contains ': Infinity' numeric token");
 }
 
 void testJSONEmptyFunctionName() {
