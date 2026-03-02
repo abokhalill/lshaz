@@ -3,6 +3,8 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
+#include <clang/AST/ExprCXX.h>
+#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Type.h>
 
 namespace faultline {
@@ -127,6 +129,7 @@ bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
     if (!RD)
         return false;
 
+    // Structural evidence.
     if (hasAtomicMembers(RD))
         return true;
     if (hasSyncPrimitives(RD))
@@ -136,7 +139,104 @@ bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
     if (hasVolatileMembers(RD))
         return true;
 
+    // Lazy TU-wide publication path scan on first query.
+    const_cast<EscapeAnalysis *>(this)->scanTranslationUnit(
+        ctx_.getTranslationUnitDecl());
+    if (hasPublicationEvidence(RD))
+        return true;
+
     return false;
+}
+
+bool EscapeAnalysis::hasPublicationEvidence(const clang::CXXRecordDecl *RD) const {
+    if (!RD || publishedTypes_.empty())
+        return false;
+    const auto *canon = RD->getCanonicalDecl();
+    if (!canon)
+        return false;
+    return publishedTypes_.count(canon->getQualifiedNameAsString()) > 0;
+}
+
+void EscapeAnalysis::markPublished(clang::QualType QT) {
+    QT = QT.getCanonicalType().getNonReferenceType();
+    // Strip pointer/reference layers.
+    while (QT->isPointerType() || QT->isReferenceType())
+        QT = QT->getPointeeType().getCanonicalType();
+    if (const auto *RD = QT->getAsCXXRecordDecl()) {
+        if (const auto *canon = RD->getCanonicalDecl())
+            publishedTypes_.insert(canon->getQualifiedNameAsString());
+    }
+}
+
+namespace {
+
+// Visitor that collects types passed to thread-creation APIs.
+class PublicationVisitor
+    : public clang::RecursiveASTVisitor<PublicationVisitor> {
+public:
+    explicit PublicationVisitor(EscapeAnalysis &ea) : ea_(ea) {}
+
+    bool VisitCXXConstructExpr(clang::CXXConstructExpr *E) {
+        const auto *CD = E->getConstructor();
+        if (!CD)
+            return true;
+        std::string parentName;
+        if (const auto *CTSD =
+                llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                    CD->getParent())) {
+            if (auto *TD = CTSD->getSpecializedTemplate())
+                parentName = TD->getQualifiedNameAsString();
+        }
+        if (parentName.empty())
+            parentName = CD->getParent()->getQualifiedNameAsString();
+
+        // std::thread, std::jthread constructor args are published.
+        if (parentName == "std::thread" || parentName == "std::jthread") {
+            for (unsigned i = 0; i < E->getNumArgs(); ++i)
+                ea_.markPublished(E->getArg(i)->getType());
+        }
+        return true;
+    }
+
+    bool VisitCallExpr(clang::CallExpr *E) {
+        if (const auto *callee = E->getDirectCallee()) {
+            std::string name = callee->getQualifiedNameAsString();
+            // std::async publishes all callable and argument types.
+            if (name == "std::async") {
+                for (unsigned i = 0; i < E->getNumArgs(); ++i)
+                    ea_.markPublished(E->getArg(i)->getType());
+            }
+        }
+        return true;
+    }
+
+private:
+    EscapeAnalysis &ea_;
+};
+
+} // anonymous namespace
+
+void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
+    if (tuScanned_ || !TU)
+        return;
+    tuScanned_ = true;
+
+    // Pass 1: global/static mutable variable types.
+    for (const auto *D : TU->decls()) {
+        if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D)) {
+            if (isGlobalSharedMutable(VD))
+                markPublished(VD->getType());
+        }
+    }
+
+    // Pass 2: thread-creation call sites across all function bodies.
+    PublicationVisitor visitor(*this);
+    for (auto *D : TU->decls()) {
+        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+            if (FD->doesThisDeclarationHaveABody())
+                visitor.TraverseStmt(FD->getBody());
+        }
+    }
 }
 
 bool EscapeAnalysis::isFieldMutable(const clang::FieldDecl *FD) const {

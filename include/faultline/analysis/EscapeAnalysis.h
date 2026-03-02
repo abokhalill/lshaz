@@ -5,50 +5,61 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Type.h>
 
+#include <string>
+#include <unordered_set>
+
 namespace faultline {
 
-// Heuristic thread-escape analysis.
-// Conservative: if uncertain, assumes escape (per ROADMAP §3.5).
+// Thread-escape analysis with both structural and interprocedural evidence.
+// Conservative: if uncertain, assumes escape.
 //
-// A type is considered thread-escaping if any of:
-//   1. It has std::atomic member fields
-//   2. It is passed to a function taking std::thread, std::async, etc.
-//   3. It is stored in a global/static mutable variable
-//   4. It contains a std::mutex or similar synchronization primitive
-//   5. It is used as a template argument to std::shared_ptr
+// Structural evidence (per-type):
+//   1. std::atomic member fields
+//   2. std::mutex / synchronization primitive members
+//   3. std::shared_ptr / std::weak_ptr members
+//   4. volatile members
 //
-// Phase 1 implements checks 1, 3, 4 only. Interprocedural analysis is Phase 2+.
+// Publication evidence (TU-wide, collected via scanTranslationUnit):
+//   5. Type passed to std::thread / std::jthread / std::async constructor
+//   6. Type stored in a non-thread_local global/static mutable variable
+//   7. Type used as pointee of std::shared_ptr in global scope
 class EscapeAnalysis {
 public:
     explicit EscapeAnalysis(clang::ASTContext &Ctx);
 
+    // Run once per TU to collect interprocedural publication paths.
+    void scanTranslationUnit(const clang::TranslationUnitDecl *TU);
+
     // Does this record type contain evidence of cross-thread usage?
+    // Consults both structural members and publication path evidence.
     bool mayEscapeThread(const clang::CXXRecordDecl *RD) const;
 
-    // Does this specific field suggest shared-write access?
     bool isFieldMutable(const clang::FieldDecl *FD) const;
-
-    // Does the type contain atomic members?
     bool hasAtomicMembers(const clang::CXXRecordDecl *RD) const;
-
-    // Does the type contain synchronization primitives?
     bool hasSyncPrimitives(const clang::CXXRecordDecl *RD) const;
-
-    // Is this a global/static with mutable state?
     bool isGlobalSharedMutable(const clang::VarDecl *VD) const;
 
     bool isAtomicType(clang::QualType QT) const;
     bool isSyncType(clang::QualType QT) const;
 
-    // Phase 4: refined cross-thread sharing heuristics.
     bool hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const;
     bool hasCallbackMembers(const clang::CXXRecordDecl *RD) const;
     bool isSharedOwnershipType(clang::QualType QT) const;
     bool hasVolatileMembers(const clang::CXXRecordDecl *RD) const;
 
+    // Query publication evidence for a specific type (by canonical qualified name).
+    bool hasPublicationEvidence(const clang::CXXRecordDecl *RD) const;
+
+    // Mark a type as published to a cross-thread context.
+    void markPublished(clang::QualType QT);
+
 private:
 
     clang::ASTContext &ctx_;
+
+    // Canonical qualified names of types observed in publication paths.
+    std::unordered_set<std::string> publishedTypes_;
+    bool tuScanned_ = false;
 };
 
 } // namespace faultline
