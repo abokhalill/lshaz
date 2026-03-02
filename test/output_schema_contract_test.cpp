@@ -10,8 +10,10 @@
 #include "faultline/output/OutputFormatter.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -197,6 +199,106 @@ void testSARIFDeterminism() {
     check(a == b, "SARIF: non-deterministic output across calls");
 }
 
+// --- Adversarial regression tests ---
+
+void testJSONControlCharEscape() {
+    faultline::Diagnostic d;
+    d.ruleID = "FL001";
+    d.title = "test\r\n\b\f\x01\x1f";
+    d.severity = faultline::Severity::High;
+    d.confidence = 0.5;
+    d.evidenceTier = faultline::EvidenceTier::Likely;
+    d.location.file = "test.cpp";
+    d.location.line = 1;
+    d.location.column = 1;
+    d.hardwareReasoning = "reason\twith\ttabs";
+    d.structuralEvidence = "ev";
+    d.mitigation = "mit";
+
+    faultline::JSONOutputFormatter fmt;
+    std::string out = fmt.format({d});
+
+    // RFC 8259: no raw control chars U+0000-U+001F in strings.
+    for (size_t i = 0; i < out.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(out[i]);
+        if (c < 0x20 && c != '\n') {
+            // Only raw \n allowed (structural JSON whitespace).
+            // \r, \t, etc. inside string values must be escaped.
+            // Check if this is inside a string value by looking for context.
+            // Simplification: \t and \n in structural whitespace are OK,
+            // but \r \b \f \x01 must never appear raw.
+            if (c == '\t') continue; // could be structural indent
+            std::string msg = "JSON: raw control char 0x" +
+                std::to_string(c) + " at offset " + std::to_string(i);
+            check(false, msg.c_str());
+        }
+    }
+
+    // Verify escaped forms are present.
+    check(contains(out, "\\r"), "JSON: missing \\r escape");
+    check(contains(out, "\\b"), "JSON: missing \\b escape");
+    check(contains(out, "\\f"), "JSON: missing \\f escape");
+    check(contains(out, "\\u0001"), "JSON: missing \\u0001 escape");
+    check(contains(out, "\\u001f"), "JSON: missing \\u001f escape");
+}
+
+void testJSONNaNInfConfidence() {
+    auto d1 = makeDiag("FL001", "foo", "t.cpp", 1);
+    d1.confidence = std::numeric_limits<double>::quiet_NaN();
+
+    auto d2 = makeDiag("FL002", "bar", "t.cpp", 2);
+    d2.confidence = std::numeric_limits<double>::infinity();
+
+    auto d3 = makeDiag("FL010", "baz", "t.cpp", 3);
+    d3.confidence = -std::numeric_limits<double>::infinity();
+
+    faultline::JSONOutputFormatter jfmt;
+    std::string jout = jfmt.format({d1, d2, d3});
+
+    // JSON must not contain nan, inf, -inf tokens.
+    check(!contains(jout, "nan"), "JSON: contains 'nan' token");
+    check(!contains(jout, "inf"), "JSON: contains 'inf' token");
+    check(!contains(jout, "NaN"), "JSON: contains 'NaN' token");
+    check(!contains(jout, "Inf"), "JSON: contains 'Inf' token");
+
+    faultline::SARIFOutputFormatter sfmt;
+    std::string sout = sfmt.format({d1, d2, d3});
+
+    check(!contains(sout, "nan"), "SARIF: contains 'nan' token");
+    check(!contains(sout, "inf"), "SARIF: contains 'inf' token");
+    check(!contains(sout, "NaN"), "SARIF: contains 'NaN' token");
+    check(!contains(sout, "Inf"), "SARIF: contains 'Inf' token");
+}
+
+void testJSONEmptyFunctionName() {
+    auto d = makeDiag("FL001", "", "test.cpp", 10);
+    d.functionName = ""; // explicitly empty
+
+    faultline::JSONOutputFormatter fmt;
+    std::string out = fmt.format({d});
+
+    // functionName must always be present (even if empty string)
+    // for schema consistency.
+    check(contains(out, "\"functionName\""),
+          "JSON: functionName omitted when empty (schema inconsistency)");
+}
+
+void testJSONStress() {
+    std::vector<faultline::Diagnostic> diags;
+    for (int i = 0; i < 10000; ++i) {
+        auto d = makeDiag("FL001", "func", "file.cpp", i);
+        d.confidence = static_cast<double>(i) / 10000.0;
+        diags.push_back(std::move(d));
+    }
+
+    faultline::JSONOutputFormatter fmt;
+    std::string a = fmt.format(diags);
+    std::string b = fmt.format(diags);
+    check(a == b, "JSON stress: non-deterministic output with 10K diagnostics");
+    check(a.size() > 100000, "JSON stress: suspiciously small output for 10K diags");
+    check(contains(a, "\"schemaVersion\""), "JSON stress: missing schemaVersion");
+}
+
 } // anonymous namespace
 
 int main() {
@@ -208,6 +310,11 @@ int main() {
     testSARIFBasicSchema();
     testSARIFWithMetadata();
     testSARIFDeterminism();
+
+    testJSONControlCharEscape();
+    testJSONNaNInfConfidence();
+    testJSONEmptyFunctionName();
+    testJSONStress();
 
     if (failures > 0) {
         std::cerr << "\n" << failures << " contract test(s) FAILED\n";

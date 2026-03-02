@@ -1,6 +1,7 @@
 #include "faultline/output/OutputFormatter.h"
 #include "faultline/core/Version.h"
 
+#include <cmath>
 #include <sstream>
 
 namespace faultline {
@@ -15,11 +16,28 @@ std::string escape(const std::string &s) {
             case '"':  out += "\\\""; break;
             case '\\': out += "\\\\"; break;
             case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
             case '\t': out += "\\t";  break;
-            default:   out += c;      break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x",
+                             static_cast<unsigned>(static_cast<unsigned char>(c)));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+                break;
         }
     }
     return out;
+}
+
+double safeDouble(double v) {
+    if (std::isnan(v) || std::isinf(v)) return 0.0;
+    return v;
 }
 
 } // anonymous namespace
@@ -37,15 +55,14 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "      \"ruleID\": \"" << escape(d.ruleID) << "\",\n";
         os << "      \"title\": \"" << escape(d.title) << "\",\n";
         os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
-        os << "      \"confidence\": " << d.confidence << ",\n";
+        os << "      \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
         os << "      \"location\": {\n";
         os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
         os << "        \"line\": " << d.location.line << ",\n";
         os << "        \"column\": " << d.location.column << "\n";
         os << "      },\n";
-        if (!d.functionName.empty())
-            os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
+        os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
         os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
         os << "      \"structuralEvidence\": \"" << escape(d.structuralEvidence) << "\",\n";
         os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
@@ -98,15 +115,14 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "      \"ruleID\": \"" << escape(d.ruleID) << "\",\n";
         os << "      \"title\": \"" << escape(d.title) << "\",\n";
         os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
-        os << "      \"confidence\": " << d.confidence << ",\n";
+        os << "      \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
         os << "      \"location\": {\n";
         os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
         os << "        \"line\": " << d.location.line << ",\n";
         os << "        \"column\": " << d.location.column << "\n";
         os << "      },\n";
-        if (!d.functionName.empty())
-            os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
+        os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
         os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
         os << "      \"structuralEvidence\": \"" << escape(d.structuralEvidence) << "\",\n";
         os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";

@@ -1,11 +1,17 @@
 #include "faultline/output/OutputFormatter.h"
 #include "faultline/core/Version.h"
 
+#include <cmath>
 #include <sstream>
 
 namespace faultline {
 
 namespace {
+
+double safeDouble(double v) {
+    if (std::isnan(v) || std::isinf(v)) return 0.0;
+    return v;
+}
 
 std::string sarifEscape(const std::string &s) {
     std::string out;
@@ -130,7 +136,7 @@ std::string SARIFOutputFormatter::format(
 
         // Properties: confidence, evidence tier, mitigation, escalations.
         os << "        \"properties\": {\n";
-        os << "          \"confidence\": " << d.confidence << ",\n";
+        os << "          \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "          \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
         os << "          \"structuralEvidence\": \"" << sarifEscape(d.structuralEvidence) << "\",\n";
         os << "          \"mitigation\": \"" << sarifEscape(d.mitigation) << "\"";
@@ -260,7 +266,7 @@ std::string SARIFOutputFormatter::format(
         os << "\n        }],\n";
 
         os << "        \"properties\": {\n";
-        os << "          \"confidence\": " << d.confidence << ",\n";
+        os << "          \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "          \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
         os << "          \"structuralEvidence\": \"" << sarifEscape(d.structuralEvidence) << "\",\n";
         os << "          \"mitigation\": \"" << sarifEscape(d.mitigation) << "\"";
