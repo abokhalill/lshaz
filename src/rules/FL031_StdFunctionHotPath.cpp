@@ -230,6 +230,47 @@ public:
             diag.escalations = std::move(escalations);
             out.push_back(std::move(diag));
         }
+
+        // Emit diagnostic for std::function parameter when no body sites found.
+        // The parameter itself forces type-erased indirect dispatch on any call.
+        if (hasStdFuncParam && visitor.sites().empty()) {
+            auto loc = FD->getLocation();
+
+            Diagnostic diag;
+            diag.ruleID    = "FL031";
+            diag.title     = "std::function in Hot Path";
+            diag.severity  = Severity::High;
+            diag.confidence = 0.65;
+            diag.evidenceTier = EvidenceTier::Likely;
+            diag.functionName = FD->getQualifiedNameAsString();
+
+            if (loc.isValid()) {
+                diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
+                diag.location.line   = SM.getSpellingLineNumber(loc);
+                diag.location.column = SM.getSpellingColumnNumber(loc);
+            }
+
+            std::ostringstream hw;
+            hw << "Hot function '" << FD->getQualifiedNameAsString()
+               << "' accepts std::function parameter. Any caller invocation "
+               << "routes through type-erased indirect call (BTB lookup, "
+               << "pipeline flush on mispredict). Prevents inlining.";
+            diag.hardwareReasoning = hw.str();
+
+            std::ostringstream ev;
+            ev << "std_function_parameter"
+               << "; caller=" << FD->getQualifiedNameAsString()
+               << "; hot_path=true";
+            diag.structuralEvidence = ev.str();
+
+            diag.mitigation =
+                "Use template parameter for callable type. "
+                "Use auto lambda. "
+                "Use raw function pointer if target is known. "
+                "Use std::variant + visitor for closed type sets.";
+
+            out.push_back(std::move(diag));
+        }
     }
 };
 

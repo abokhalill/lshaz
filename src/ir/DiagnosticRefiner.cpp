@@ -358,9 +358,13 @@ void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
     bool hasAtomicCmpXchg = false;
     bool siteCorrelated = false;
 
-    for (const auto &csi : profile->heapAllocCalls) {
+    for (const auto &csi : profile->allCalls) {
+        if (csi.isIndirect)
+            continue;
         if (csi.calleeName.find("pthread_mutex") != std::string::npos ||
-            csi.calleeName.find("__gthread_mutex") != std::string::npos)
+            csi.calleeName.find("__gthread_mutex") != std::string::npos ||
+            csi.calleeName.find("pthread_spin") != std::string::npos ||
+            csi.calleeName.find("pthread_rwlock") != std::string::npos)
             hasMutexCall = true;
     }
     for (const auto &ai : profile->atomics) {

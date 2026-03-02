@@ -207,25 +207,25 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
 
                 const auto *callee = CI->getCalledFunction();
                 if (!callee) {
-                    // Indirect call.
                     ++profile.indirectCallCount;
                     IRCallSiteInfo csi;
                     csi.isIndirect = true;
                     csi.isInLoop = bbInLoop;
-                    profile.heapAllocCalls.push_back(std::move(csi));
+                    profile.allCalls.push_back(std::move(csi));
                     continue;
                 }
 
                 ++profile.directCallCount;
                 llvm::StringRef name = callee->getName();
 
-                if (isHeapAllocFunction(name) || isHeapFreeFunction(name)) {
-                    IRCallSiteInfo csi;
-                    csi.calleeName = name.str();
-                    csi.isIndirect = false;
-                    csi.isInLoop = bbInLoop;
+                IRCallSiteInfo csi;
+                csi.calleeName = name.str();
+                csi.isIndirect = false;
+                csi.isInLoop = bbInLoop;
+                profile.allCalls.push_back(csi);
+
+                if (isHeapAllocFunction(name) || isHeapFreeFunction(name))
                     profile.heapAllocCalls.push_back(std::move(csi));
-                }
                 continue;
             }
 
@@ -237,20 +237,21 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                     IRCallSiteInfo csi;
                     csi.isIndirect = true;
                     csi.isInLoop = bbInLoop;
-                    profile.heapAllocCalls.push_back(std::move(csi));
+                    profile.allCalls.push_back(std::move(csi));
                     continue;
                 }
 
                 ++profile.directCallCount;
                 llvm::StringRef name = callee->getName();
 
-                if (isHeapAllocFunction(name) || isHeapFreeFunction(name)) {
-                    IRCallSiteInfo csi;
-                    csi.calleeName = name.str();
-                    csi.isIndirect = false;
-                    csi.isInLoop = bbInLoop;
+                IRCallSiteInfo csi;
+                csi.calleeName = name.str();
+                csi.isIndirect = false;
+                csi.isInLoop = bbInLoop;
+                profile.allCalls.push_back(csi);
+
+                if (isHeapAllocFunction(name) || isHeapFreeFunction(name))
                     profile.heapAllocCalls.push_back(std::move(csi));
-                }
                 continue;
             }
         }

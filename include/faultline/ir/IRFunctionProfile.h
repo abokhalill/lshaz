@@ -39,6 +39,9 @@ struct IRFunctionProfile {
     // Heap allocation calls (post-inlining)
     std::vector<IRCallSiteInfo> heapAllocCalls;
 
+    // All non-intrinsic call sites (for lock/sync correlation)
+    std::vector<IRCallSiteInfo> allCalls;
+
     // Indirect calls (post-devirtualization)
     unsigned indirectCallCount = 0;
     unsigned directCallCount = 0;
