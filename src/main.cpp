@@ -126,6 +126,13 @@ static llvm::cl::opt<double> HotnessThreshold(
     llvm::cl::init(1.0),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<std::string> LinkedAllocator(
+    "allocator",
+    llvm::cl::desc("Linked allocator library (tcmalloc|jemalloc|mimalloc). "
+                    "Affects FL020 severity: thread-local cache allocators "
+                    "reduce contention risk classification."),
+    llvm::cl::cat(FaultlineCat));
+
 static faultline::Severity parseSeverity(const std::string &s) {
     if (s == "Critical")      return faultline::Severity::Critical;
     if (s == "High")          return faultline::Severity::High;
@@ -157,6 +164,8 @@ int main(int argc, const char **argv) {
     if (!OutputFile.empty())
         cfg.outputFile = OutputFile;
     cfg.minSeverity = parseSeverity(MinSev);
+    if (!LinkedAllocator.empty())
+        cfg.linkedAllocator = LinkedAllocator;
 
     // Build execution metadata for output provenance.
     faultline::ExecutionMetadata execMeta;

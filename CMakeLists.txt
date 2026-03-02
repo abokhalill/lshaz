@@ -40,6 +40,7 @@ set(FAULTLINE_SOURCES
     src/analysis/StructLayoutVisitor.cpp
     src/analysis/EscapeAnalysis.cpp
     src/analysis/CacheLineMap.cpp
+    src/analysis/AllocatorTopology.cpp
     src/rules/FL001_CacheLineSpanning.cpp
     src/rules/FL002_FalseSharing.cpp
     src/rules/FL020_HeapAllocHotPath.cpp

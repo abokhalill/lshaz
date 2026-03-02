@@ -44,6 +44,10 @@ struct Config {
     std::string perfProfilePath;          // Path to perf profile data
     double hotnessThresholdPct  = 1.0;    // Functions with >= N% of samples are hot
 
+    // Allocator topology: linked allocator library name.
+    // "tcmalloc", "jemalloc", "mimalloc", or "" (default glibc).
+    std::string linkedAllocator;
+
     static Config loadFromFile(const std::string &path);
     static Config defaults();
 };

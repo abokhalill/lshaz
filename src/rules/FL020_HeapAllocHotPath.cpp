@@ -1,6 +1,7 @@
 #include "faultline/core/Rule.h"
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
+#include "faultline/analysis/AllocatorTopology.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -23,6 +24,7 @@ struct AllocSite {
     clang::SourceLocation loc;
     std::string kind; // "new", "delete", "malloc", "std::make_shared", etc.
     unsigned inLoop = 0;
+    AllocatorClass allocClass = AllocatorClass::Unknown;
 };
 
 class AllocVisitor : public clang::RecursiveASTVisitor<AllocVisitor> {
@@ -147,7 +149,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
-                 const Config & /*Cfg*/,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(D);
@@ -160,23 +162,56 @@ public:
         AllocVisitor visitor(Ctx);
         visitor.TraverseStmt(FD->getBody());
 
+        // Classify allocation sites by allocator topology.
+        AllocatorTopology topo;
+        if (!Cfg.linkedAllocator.empty())
+            topo.setLinkedAllocator(Cfg.linkedAllocator);
+
         const auto &SM = Ctx.getSourceManager();
 
-        for (const auto &site : visitor.sites()) {
+        for (auto &site : visitor.sites()) {
+            site.allocClass = topo.classify(site.kind);
+            double sevFactor = allocatorSeverityFactor(site.allocClass);
+
+            // Base severity modulated by allocator topology.
             Severity sev = Severity::Critical;
+            if (sevFactor < 0.4)
+                sev = Severity::Medium;
+            else if (sevFactor < 0.8)
+                sev = Severity::High;
+
+            double confidence = 0.75 * sevFactor;
+            if (confidence < 0.20)
+                confidence = 0.20;
+
             std::vector<std::string> escalations;
 
             if (site.inLoop) {
                 escalations.push_back(
                     "Allocation inside loop: per-iteration allocator pressure, "
                     "compounding TLB and fragmentation cost");
+                // Loop escalation overrides topology demotion.
+                if (sev < Severity::High)
+                    sev = Severity::High;
+            }
+
+            if (site.allocClass == AllocatorClass::ThreadLocal) {
+                escalations.push_back(
+                    "allocator-topology: thread-local cache path (" +
+                    Cfg.linkedAllocator + "), reduced contention risk");
+            } else if (site.allocClass == AllocatorClass::PoolSlab) {
+                escalations.push_back(
+                    "allocator-topology: pool/slab allocator, minimal latency");
+            } else if (site.allocClass == AllocatorClass::Syscall) {
+                escalations.push_back(
+                    "allocator-topology: mmap/brk syscall path, page fault risk");
             }
 
             Diagnostic diag;
             diag.ruleID    = "FL020";
             diag.title     = "Heap Allocation in Hot Path";
             diag.severity  = sev;
-            diag.confidence = 0.75;
+            diag.confidence = confidence;
             diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
@@ -189,13 +224,24 @@ public:
             std::ostringstream hw;
             hw << "'" << site.kind << "' in hot function '"
                << FD->getQualifiedNameAsString()
-               << "'. Each allocation may contend on allocator arena locks, "
-               << "trigger mmap/brk syscalls, fault new pages into the TLB, "
-               << "and fragment the heap reducing spatial locality.";
+               << "'. Allocator class: " << allocatorClassName(site.allocClass)
+               << ". ";
+            if (site.allocClass == AllocatorClass::ThreadLocal) {
+                hw << "Thread-local cache hit expected (" << Cfg.linkedAllocator
+                   << "), low contention. Still incurs TLB pressure for new pages.";
+            } else if (site.allocClass == AllocatorClass::Syscall) {
+                hw << "Large allocation triggers mmap syscall. "
+                   << "Page fault jitter, TLB shootdown on munmap.";
+            } else {
+                hw << "May contend on allocator arena locks, "
+                   << "trigger mmap/brk syscalls, fault new pages into the TLB, "
+                   << "and fragment the heap reducing spatial locality.";
+            }
             diag.hardwareReasoning = hw.str();
 
             std::ostringstream ev;
             ev << "alloc_type=" << site.kind
+               << "; allocator_class=" << allocatorClassName(site.allocClass)
                << "; function=" << FD->getQualifiedNameAsString()
                << "; in_loop=" << (site.inLoop ? "yes" : "no")
                << "; hot_path=true";
