@@ -89,6 +89,7 @@ void DiagnosticRefiner::refine(std::vector<Diagnostic> &diagnostics) const {
         else if (diag.ruleID == "FL030") refineFL030(diag);
         else if (diag.ruleID == "FL031") refineFL031(diag);
         else if (diag.ruleID == "FL090") refineFL090(diag);
+        else if (diag.ruleID == "FL091") refineFL091(diag);
     }
 }
 
@@ -416,6 +417,12 @@ void DiagnosticRefiner::refineFL090(Diagnostic &diag) const {
            << totalIndirectCalls << " indirect call(s) across module";
         diag.escalations.push_back(ss.str());
     }
+}
+
+void DiagnosticRefiner::refineFL091(Diagnostic &diag) const {
+    // FL091 synthesized interactions are struct-level; reuse FL090's
+    // aggregate IR scan for corroborating atomic/fence/indirect evidence.
+    refineFL090(diag);
 }
 
 } // namespace lshaz

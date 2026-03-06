@@ -19,11 +19,12 @@ std::string diagnosticSiteKey(const Diagnostic &d);
 
 // Post-analysis pass: correlate diagnostics from different rules at
 // the same site. When eligible interaction pairs/triples are found,
-// synthesize compound hazard diagnostics with site-specific evidence
-// drawn from the participating diagnostics.
+// synthesize compound hazard diagnostics (FL091) with site-specific
+// evidence drawn from the participating diagnostics.
 //
-// This replaces the static 3-signal check in FL090 with a dynamic
-// model driven by the InteractionEligibilityMatrix.
+// FL091 is distinct from FL090 (native structural compound hazard).
+// FL090 fires from AST analysis on a single struct; FL091 is
+// synthesized post-hoc from the InteractionEligibilityMatrix.
 void synthesizeInteractions(std::vector<Diagnostic> &diagnostics);
 
 } // namespace lshaz

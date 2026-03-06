@@ -12,7 +12,7 @@ namespace {
 bool isStructLevelRule(const std::string &ruleID) {
     return ruleID == "FL001" || ruleID == "FL002" || ruleID == "FL040" ||
            ruleID == "FL041" || ruleID == "FL060" || ruleID == "FL061" ||
-           ruleID == "FL090";
+           ruleID == "FL090" || ruleID == "FL091";
 }
 
 std::string makeKey(const Diagnostic &d) {

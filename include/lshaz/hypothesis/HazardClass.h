@@ -21,7 +21,8 @@ enum class HazardClass : uint8_t {
     DeepConditional,     // FL050
     NUMALocality,        // FL060
     CentralizedDispatch, // FL061
-    HazardAmplification, // FL090
+    HazardAmplification,      // FL090
+    SynthesizedInteraction,  // FL091
 };
 
 constexpr std::string_view hazardClassName(HazardClass hc) {
@@ -40,7 +41,8 @@ constexpr std::string_view hazardClassName(HazardClass hc) {
         case HazardClass::DeepConditional:     return "DeepConditional";
         case HazardClass::NUMALocality:        return "NUMALocality";
         case HazardClass::CentralizedDispatch: return "CentralizedDispatch";
-        case HazardClass::HazardAmplification: return "HazardAmplification";
+        case HazardClass::HazardAmplification:    return "HazardAmplification";
+        case HazardClass::SynthesizedInteraction: return "SynthesizedInteraction";
     }
     return "Unknown";
 }

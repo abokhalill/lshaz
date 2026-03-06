@@ -24,6 +24,7 @@ private:
     void refineFL031(Diagnostic &diag) const;
     void refineFL012(Diagnostic &diag) const;
     void refineFL090(Diagnostic &diag) const;
+    void refineFL091(Diagnostic &diag) const;
 
     // Extract mangled function name from structural evidence.
     std::string extractFunctionName(const Diagnostic &diag) const;

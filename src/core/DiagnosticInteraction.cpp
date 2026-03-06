@@ -23,6 +23,7 @@ std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID) {
     if (ruleID == "FL060") return HazardClass::NUMALocality;
     if (ruleID == "FL061") return HazardClass::CentralizedDispatch;
     if (ruleID == "FL090") return HazardClass::HazardAmplification;
+    if (ruleID == "FL091") return HazardClass::SynthesizedInteraction;
     return std::nullopt;
 }
 
@@ -44,8 +45,8 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
     // Group diagnostics by site key.
     std::unordered_map<std::string, std::vector<size_t>> siteGroups;
     for (size_t i = 0; i < diagnostics.size(); ++i) {
-        // Skip already-synthesized interaction diagnostics.
-        if (diagnostics[i].ruleID == "FL090")
+        // Skip native compound (FL090) and synthesized interaction (FL091) diagnostics.
+        if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
             continue;
         auto hc = ruleToHazardClass(diagnostics[i].ruleID);
         if (!hc)
@@ -57,7 +58,7 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
     // from structural evidence (struct=Name pattern).
     std::unordered_map<std::string, std::vector<size_t>> structGroups;
     for (size_t i = 0; i < diagnostics.size(); ++i) {
-        if (diagnostics[i].ruleID == "FL090")
+        if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
             continue;
         const auto &ev = diagnostics[i].structuralEvidence;
         auto pos = ev.find("struct=");
@@ -140,8 +141,8 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
 
                 // Synthesize compound hazard diagnostic.
                 Diagnostic compound;
-                compound.ruleID = "FL090";
-                compound.title = "Hazard Interaction: " +
+                compound.ruleID = "FL091";
+                compound.title = "Synthesized Interaction: " +
                     std::string(hazardClassName(entries[i].hc)) + " × " +
                     std::string(hazardClassName(entries[j].hc));
                 compound.severity = std::max(dA.severity, dB.severity);
@@ -226,8 +227,8 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 const auto &dC = diagnostics[matchedIndices[2]];
 
                 Diagnostic compound;
-                compound.ruleID = "FL090";
-                compound.title = "Hazard Interaction: " +
+                compound.ruleID = "FL091";
+                compound.title = "Synthesized Interaction: " +
                     std::string(hazardClassName(tmpl.components[0])) + " × " +
                     std::string(hazardClassName(tmpl.components[1])) + " × " +
                     std::string(hazardClassName(tmpl.components[2]));

@@ -512,7 +512,7 @@ int main(int argc, const char **argv) {
 
     // --- Hazard interaction synthesis ---
     // Correlate diagnostics from different rules at the same site.
-    // Synthesize compound hazard diagnostics (FL090) with site-specific
+    // Synthesize compound hazard diagnostics (FL091) with site-specific
     // evidence drawn from the InteractionEligibilityMatrix.
     lshaz::synthesizeInteractions(diagnostics);
 

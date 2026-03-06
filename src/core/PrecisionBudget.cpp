@@ -41,8 +41,11 @@ PrecisionBudget::PrecisionBudget() {
     add("FL060", 20, 0.35, Severity::High);
     add("FL061", 20, 0.40, Severity::High);
 
-    // Compound hazard: requires multiple signals.
+    // Compound hazard: requires multiple signals (native structural).
     add("FL090", 0, 0.55, Severity::Critical);
+
+    // Synthesized interaction: post-hoc correlation, tighter confidence floor.
+    add("FL091", 0, 0.60, Severity::Critical);
 }
 
 void PrecisionBudget::setPolicy(const RulePrecisionPolicy &policy) {

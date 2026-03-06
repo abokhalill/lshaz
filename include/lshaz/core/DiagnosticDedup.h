@@ -9,7 +9,7 @@ namespace lshaz {
 // Cross-TU diagnostic deduplication.
 //
 // When multiple TUs include the same header, struct-level rules (FL001,
-// FL002, FL040, FL041, FL060, FL090) emit identical diagnostics per TU.
+// FL002, FL040, FL041, FL060, FL090, FL091) emit identical diagnostics per TU.
 // Function-level rules may also duplicate if inline/template functions
 // appear in multiple TUs.
 //

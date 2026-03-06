@@ -178,7 +178,7 @@ All adjustments are clamped and recorded in the diagnostic's `escalations` array
 ### Stage 3: Post-Processing
 
 - **Deduplication** — When multiple TUs include the same header, struct-level rules emit duplicate diagnostics. Dedup key: `(ruleID, file, line)` for struct rules; `(ruleID, functionName)` for function rules. Keeps the instance with highest confidence. Merges escalation traces from all instances.
-- **Interaction synthesis** — Correlates diagnostics from different rules at the same code site using the `InteractionEligibilityMatrix`. Eligible pairs or triples produce compound hazard findings (FL090) with site-specific evidence.
+- **Interaction synthesis** — Correlates diagnostics from different rules at the same code site using the `InteractionEligibilityMatrix`. Eligible pairs or triples produce compound hazard findings (FL091) with site-specific evidence. Distinct from FL090 (native structural compound hazard on a single struct).
 - **Precision budget** — Per-rule governance: configurable max emissions per TU, minimum confidence floor, severity cap. Rules exceeding their FP rate threshold are auto-demoted.
 - **Calibration suppression** — If `--calibration-store` is provided, suppresses diagnostics matching known false-positive feature neighborhoods (Euclidean distance, radius 0.25). Safety rail: Critical or High severity findings with Proven evidence tier are never suppressed.
 - **Filtering and sorting** — Suppressed diagnostics, findings below `--min-severity`, and findings below `--min-evidence` are removed. Remaining diagnostics are sorted: Critical first, then by file path, then by line number.
@@ -215,9 +215,10 @@ Generates formal experiment designs for runtime validation of flagged hazards.
 | FL050 | Deep conditional | Conditional nesting depth exceeding threshold (default 4) in a function | Function |
 | FL060 | NUMA locality | Shared mutable structure with unfavorable inferred NUMA placement | Struct |
 | FL061 | Centralized dispatch | Single dispatcher function routing to many handlers (branch predictor stress) | Function (hot) |
-| FL090 | Hazard amplification | Compound hazard: multiple rules fire at the same site, interaction is super-additive | Synthesized |
+| FL090 | Hazard amplification | Compound structural hazard: cache line spanning + atomic contention + thread escape on a single struct (native AST rule) | Struct |
+| FL091 | Synthesized interaction | Post-hoc correlation: multiple rules fire at the same site, interaction is super-additive (from InteractionEligibilityMatrix) | Synthesized |
 
-### Interaction Templates (FL090)
+### Interaction Templates (FL091)
 
 Seven defined interaction templates model compound hazard amplification:
 

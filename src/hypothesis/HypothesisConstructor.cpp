@@ -22,6 +22,7 @@ HazardClass HypothesisConstructor::mapRuleToHazardClass(std::string_view ruleID)
     if (ruleID == "FL060") return HazardClass::NUMALocality;
     if (ruleID == "FL061") return HazardClass::CentralizedDispatch;
     if (ruleID == "FL090") return HazardClass::HazardAmplification;
+    if (ruleID == "FL091") return HazardClass::SynthesizedInteraction;
     return HazardClass::CacheGeometry;
 }
 
