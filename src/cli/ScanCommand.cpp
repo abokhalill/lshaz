@@ -3,6 +3,7 @@
 #include "lshaz/core/Config.h"
 #include "lshaz/core/Version.h"
 #include "lshaz/output/OutputFormatter.h"
+#include "lshaz/pipeline/RepoProvider.h"
 #include "lshaz/pipeline/ScanPipeline.h"
 
 #include <llvm/Support/FileSystem.h>
@@ -181,16 +182,26 @@ int runScanCommand(int argc, const char **argv) {
         return 3;
     }
 
-    // Resolve target: if it's a file ending in .json, treat as compile DB.
-    // Otherwise treat as project root directory.
+    // Resolve target: URL -> clone, .json -> compile DB, directory -> project root.
     std::string target = args.target;
     bool isCompileDB = false;
+    RepoAcquisition repoAcq;
 
-    if (llvm::sys::path::extension(target) == ".json") {
+    if (RepoProvider::isRemoteURL(target)) {
+        llvm::errs() << "lshaz: cloning " << target << "...\n";
+        repoAcq = RepoProvider::acquire(target);
+        if (!repoAcq.error.empty()) {
+            llvm::errs() << "lshaz scan: " << repoAcq.error << "\n";
+            RepoProvider::cleanup(repoAcq);
+            return 3;
+        }
+        target = repoAcq.localPath;
+        llvm::errs() << "lshaz: cloned to " << target << "\n";
+    } else if (llvm::sys::path::extension(target) == ".json") {
         isCompileDB = true;
     } else if (!llvm::sys::fs::is_directory(target)) {
         llvm::errs() << "lshaz scan: '" << target
-                     << "' is not a directory or .json file\n";
+                     << "' is not a directory, .json file, or remote URL\n";
         return 3;
     }
 
@@ -250,7 +261,12 @@ int runScanCommand(int argc, const char **argv) {
         llvm::errs() << "lshaz: suppressed " << result.suppressedByCalibration
                      << " diagnostic(s) via calibration feedback\n";
 
-    return emitOutput(result, request, args.format, args.outputFile);
+    int exitCode = emitOutput(result, request, args.format, args.outputFile);
+
+    // Cleanup cloned repo if we created one.
+    RepoProvider::cleanup(repoAcq);
+
+    return exitCode;
 }
 
 } // namespace lshaz
