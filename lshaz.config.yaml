@@ -21,3 +21,10 @@ hot_file_patterns:
   - "*/critical/*"
 
 disabled_rules: []
+
+# Profile-guided hotness
+perf_profile_path: ""
+hotness_threshold_pct: 1.0
+
+# Allocator topology: "tcmalloc", "jemalloc", "mimalloc", or "" (glibc default)
+linked_allocator: ""

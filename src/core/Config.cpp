@@ -29,6 +29,9 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("hot_file_patterns",      cfg.hotFilePatterns);
         io.mapOptional("disabled_rules",         cfg.disabledRules);
         io.mapOptional("page_size",              cfg.pageSize);
+        io.mapOptional("perf_profile_path",      cfg.perfProfilePath);
+        io.mapOptional("hotness_threshold_pct",  cfg.hotnessThresholdPct);
+        io.mapOptional("linked_allocator",       cfg.linkedAllocator);
     }
 };
 
