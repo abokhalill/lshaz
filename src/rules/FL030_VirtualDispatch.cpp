@@ -34,13 +34,12 @@ public:
         if (!MD->isVirtual())
             return true;
 
-        // Skip calls where the object is fully typed (non-pointer, non-reference)
-        // — the compiler will devirtualize these.
+        // Skip calls on value-typed objects: the compiler will devirtualize.
+        // Only pointer/reference receivers carry genuine indirect dispatch.
         const auto *obj = E->getImplicitObjectArgument();
         if (obj) {
             clang::QualType QT = obj->getType();
-            if (!QT->isPointerType() && !QT->isReferenceType() &&
-                !QT->isRecordType()) {
+            if (!QT->isPointerType() && !QT->isReferenceType()) {
                 return true;
             }
         }
