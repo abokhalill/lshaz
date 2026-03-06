@@ -137,10 +137,10 @@ static llvm::cl::opt<std::string> LinkedAllocator(
 
 static llvm::cl::opt<std::string> PMUTracePath(
     "pmu-trace",
-    llvm::cl::desc("Path to production PMU trace data (JSON lines format). "
-                    "Each line: {\"function\", \"file\", \"line\", \"counters\": "
-                    "[{\"name\", \"value\", \"duration_ns\"}], ...}. "
-                    "Used for closed-loop learning to update hazard priors."),
+    llvm::cl::desc("Path to production PMU trace data (TSV, one sample per line). "
+                    "Format: function<TAB>file<TAB>line<TAB>counter<TAB>value[<TAB>duration_ns]. "
+                    "Lines starting with '#' are ignored. Multiple samples per "
+                    "function are accumulated. Used for closed-loop hazard prior learning."),
     llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> PMUPriorsPath(
@@ -571,9 +571,9 @@ int main(int argc, const char **argv) {
         if (!PMUPriorsPath.empty())
             feedbackLoop.loadPriors(PMUPriorsPath);
 
-        // Parse and ingest PMU trace file (JSON-lines: one record per line).
-        // Format: function<TAB>file<TAB>line<TAB>counter_name<TAB>value<TAB>duration_ns
-        // Multiple counter lines per function are accumulated.
+        // Parse and ingest PMU trace file (TSV, one sample per line).
+        // Fields: function<TAB>file<TAB>line<TAB>counter<TAB>value[<TAB>duration_ns]
+        // Multiple sample lines per function/location are accumulated.
         if (!PMUTracePath.empty()) {
             auto traceBuf = llvm::MemoryBuffer::getFile(PMUTracePath.getValue());
             if (traceBuf) {
