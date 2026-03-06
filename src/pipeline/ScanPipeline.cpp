@@ -1,4 +1,5 @@
 #include "lshaz/pipeline/ScanPipeline.h"
+#include "lshaz/pipeline/CompileDBResolver.h"
 
 #include "lshaz/analysis/LshazAction.h"
 #include "lshaz/core/DiagnosticDedup.h"
@@ -437,10 +438,39 @@ static void filterAndSort(const FilterOptions &filter,
 // --- Entry points ---
 
 ScanResult ScanPipeline::execute(const ScanRequest &request) {
-    report("compile_db", "Loading " + request.compileDBPath);
+    std::string dbPath = request.compileDBPath;
+
+    // Autodiscover compile_commands.json if not explicitly provided.
+    if (dbPath.empty() && !request.workingDirectory.empty()) {
+        report("compile_db", "Searching for compile_commands.json");
+        dbPath = CompileDBResolver::discover(request.workingDirectory);
+        if (dbPath.empty()) {
+            llvm::errs() << "lshaz: error: no compile_commands.json found in "
+                         << request.workingDirectory << "\n"
+                         << "  searched: ";
+            for (const auto &p : CompileDBResolver::candidatePaths(
+                     request.workingDirectory))
+                llvm::errs() << "\n    " << p;
+            llvm::errs() << "\n";
+            ScanResult result;
+            result.status = ScanStatus::ToolError;
+            return result;
+        }
+        report("compile_db", "Found " + dbPath);
+    }
+
+    if (dbPath.empty()) {
+        llvm::errs() << "lshaz: error: no compile database path specified "
+                     << "and no working directory for autodiscovery\n";
+        ScanResult result;
+        result.status = ScanStatus::ToolError;
+        return result;
+    }
+
+    report("compile_db", "Loading " + dbPath);
     std::string dbError;
     auto compDB = clang::tooling::JSONCompilationDatabase::loadFromFile(
-        request.compileDBPath, dbError,
+        dbPath, dbError,
         clang::tooling::JSONCommandLineSyntax::AutoDetect);
     if (!compDB) {
         llvm::errs() << "lshaz: error: " << dbError << "\n";
