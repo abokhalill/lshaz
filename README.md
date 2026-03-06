@@ -75,7 +75,71 @@ The build produces two binaries:
 
 ---
 
-## Usage
+## Install
+
+```bash
+curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
+```
+
+Requires Linux x86-64, LLVM/Clang 16+ dev libraries, CMake 3.20+, and a C++20 compiler. Installs to `~/.local/bin` by default. Override with `LSHAZ_INSTALL_DIR`.
+
+---
+
+## Scan Command
+
+The primary interface for analyzing projects:
+
+```bash
+# Scan a local project (autodiscovers compile_commands.json)
+lshaz scan /path/to/project
+
+# Scan a GitHub repository (clones, configures, analyzes)
+lshaz scan https://github.com/org/repo
+
+# Explicit compile database
+lshaz scan /path/to/project --compile-db /path/to/compile_commands.json
+
+# Filter files
+lshaz scan . --include "*.cpp" --exclude "*test*" --max-files 50
+
+# JSON output, high severity only
+lshaz scan . --format json --min-severity High --output report.json
+
+# SARIF for CI integration
+lshaz scan . --format sarif --output results.sarif
+```
+
+The scan command:
+1. **Resolves the target** — local directory, `compile_commands.json` path, or remote Git URL
+2. **Acquires the repo** — clones remote URLs into a temp directory (depth 1)
+3. **Discovers or generates compile DB** — searches standard locations (`build/`, `.`, `out/`, etc.), falls back to `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`
+4. **Runs the analysis pipeline** — AST analysis, IR refinement, deduplication, interaction synthesis, precision budget, calibration feedback
+5. **Emits results** — CLI, JSON, or SARIF format
+
+### Scan Options
+
+| Flag | Description |
+|---|---|
+| `--compile-db <path>` | Explicit path to `compile_commands.json` |
+| `--config <path>` | Path to `lshaz.config.yaml` |
+| `--format <cli\|json\|sarif>` | Output format (default: `cli`) |
+| `--output <path>` | Write output to file instead of stdout |
+| `--min-severity <level>` | Minimum severity to report |
+| `--min-evidence <tier>` | Minimum evidence tier to report |
+| `--include <pattern>` | Only analyze files matching pattern (repeatable) |
+| `--exclude <pattern>` | Skip files matching pattern (repeatable) |
+| `--max-files <N>` | Maximum translation units to analyze |
+| `--no-ir` | Disable LLVM IR analysis pass |
+| `--ir-opt <O0\|O1\|O2>` | IR optimization level |
+| `--ir-jobs <N>` | Max parallel IR jobs |
+| `--perf-profile <path>` | Perf profile for hotness guidance |
+| `--allocator <name>` | Linked allocator library |
+
+---
+
+## Legacy Usage
+
+The original Clang-tooling interface remains available for direct invocation with `--` compiler flags:
 
 ```bash
 # Single file, default CLI output
