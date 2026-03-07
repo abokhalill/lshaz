@@ -51,7 +51,8 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 info "cloning lshaz..."
-git clone --depth 1 "$REPO" "$TMPDIR/lshaz" 2>&1 | tail -1
+git clone --depth 1 "$REPO" "$TMPDIR/lshaz" > "$TMPDIR/clone.log" 2>&1 \
+    || { cat "$TMPDIR/clone.log"; die "clone failed"; }
 
 # Build.
 info "building (${BUILD_TYPE})..."
@@ -72,7 +73,8 @@ cmake --build "$TMPDIR/lshaz/build" -j"$(nproc)" \
 # Run contract tests.
 info "running contract tests..."
 "$TMPDIR/lshaz/build/output_contract_test" \
-    || die "contract tests failed"
+    > "$TMPDIR/test.log" 2>&1 \
+    || { cat "$TMPDIR/test.log"; die "contract tests failed"; }
 
 # Install.
 mkdir -p "$INSTALL_DIR"
