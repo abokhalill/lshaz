@@ -148,6 +148,9 @@ int main(int argc, const char **argv) {
            << " (output schema " << lshaz::kOutputSchemaVersion << ")\n";
     });
 
+    llvm::errs() << "lshaz: warning: legacy CLI is deprecated. "
+                    "Use 'lshaz scan <path>' instead.\n";
+
     auto parser = CommonOptionsParser::create(argc, argv, LshazCat);
     if (!parser) {
         llvm::errs() << parser.takeError();
