@@ -71,6 +71,7 @@ lshaz scan <path> [options]
 | `--pmu-priors <file>` | Persist/load Bayesian hazard priors across runs |
 | `--watch` | Watch mode: re-scan on file changes |
 | `--watch-interval <N>` | Seconds between watch polls (default: 2) |
+| `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
 | `--help` | Show help with exit code reference |
 
 ---
@@ -132,9 +133,47 @@ The comment must appear on the diagnostic's line or the line immediately above i
 
 ---
 
+## Init CLI Options
+
+```
+lshaz init [path] [options]
+```
+
+Detects the build system (CMake, Meson, Make/Bear), generates `compile_commands.json`, and writes a starter `lshaz.config.yaml`.
+
+| Flag | Description |
+|---|---|
+| `[path]` | Project root (default: current directory) |
+| `--no-config` | Skip `lshaz.config.yaml` generation |
+| `--force` | Regenerate `compile_commands.json` even if it exists |
+| `--help` | Show help |
+
+---
+
+## Diff CLI Options
+
+```
+lshaz diff <before.json> <after.json>
+```
+
+Compares two JSON scan results and reports new and resolved findings. Exit code 0 if no new findings, 1 if regressions introduced.
+
+Diff key: `(ruleID, file, line)`.
+
+**CI usage:**
+
+```bash
+lshaz scan . --format json --output before.json
+# ... apply changes ...
+lshaz scan . --format json --output after.json
+lshaz diff before.json after.json
+```
+
+---
+
 ## Legacy CLI
 
-The original Clang-tooling interface remains available:
+The original Clang-tooling interface remains available but is **deprecated since 0.2.0** and will be **removed in 0.4.0**:
 
 ```bash
 ./build/lshaz src/engine.cpp -- -std=c++20
@@ -142,4 +181,4 @@ The original Clang-tooling interface remains available:
 ./build/lshaz --no-ir src/engine.cpp -- -std=c++20
 ```
 
-Arguments after `--` are passed to Clang. Source files before `--` are the analysis targets. A deprecation warning is emitted; prefer `lshaz scan`.
+Arguments after `--` are passed to Clang. Source files before `--` are the analysis targets. Use `lshaz scan` instead.

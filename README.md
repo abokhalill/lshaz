@@ -32,7 +32,7 @@ lshaz scan https://github.com/abseil/abseil-cpp
 lshaz scan /path/to/your/project
 ```
 
-> Requires `compile_commands.json`. CMake generates it with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
+> Requires `compile_commands.json`. Run `lshaz init` to generate it, or use CMake with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
 
 ### Build from source
 
@@ -73,6 +73,9 @@ lshaz: 157/157 TU(s) parsed, 246 diagnostic(s)
 ## Usage
 
 ```bash
+# Generate compile_commands.json (detects CMake, Meson, Make/Bear)
+lshaz init /path/to/project
+
 # Scan a project (autodiscovers compile_commands.json)
 lshaz scan /path/to/project
 
@@ -87,6 +90,9 @@ lshaz scan . --format sarif --output results.sarif
 
 # Parallel, AST-only (fast)
 lshaz scan . --jobs 8 --no-ir
+
+# Compare two scan results (CI gating)
+lshaz diff before.json after.json
 
 # Explain a rule
 lshaz explain FL002
