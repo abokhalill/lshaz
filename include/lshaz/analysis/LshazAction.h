@@ -17,16 +17,21 @@ class LshazAction : public clang::ASTFrontendAction {
 public:
     LshazAction(const Config &cfg,
                     std::vector<Diagnostic> &diagnostics,
-                    const std::unordered_set<std::string> &profileHotFuncs);
+                    const std::unordered_set<std::string> &profileHotFuncs,
+                    std::vector<std::string> &failedTUs);
 
     std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(clang::CompilerInstance &CI,
                       llvm::StringRef file) override;
 
+    void EndSourceFileAction() override;
+
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
     const std::unordered_set<std::string> &profileHotFuncs_;
+    std::vector<std::string> &failedTUs_;
+    std::string currentFile_;
 };
 
 class LshazActionFactory : public clang::tooling::FrontendActionFactory {
@@ -37,10 +42,13 @@ public:
 
     std::unique_ptr<clang::FrontendAction> create() override;
 
+    const std::vector<std::string> &failedTUs() const { return failedTUs_; }
+
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
     std::unordered_set<std::string> profileHotFuncs_;
+    std::vector<std::string> failedTUs_;
 };
 
 } // namespace lshaz

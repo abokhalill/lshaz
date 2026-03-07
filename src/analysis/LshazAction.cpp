@@ -8,15 +8,23 @@ namespace lshaz {
 LshazAction::LshazAction(
     const Config &cfg,
     std::vector<Diagnostic> &diagnostics,
-    const std::unordered_set<std::string> &profileHotFuncs)
+    const std::unordered_set<std::string> &profileHotFuncs,
+    std::vector<std::string> &failedTUs)
     : config_(cfg), diagnostics_(diagnostics),
-      profileHotFuncs_(profileHotFuncs) {}
+      profileHotFuncs_(profileHotFuncs), failedTUs_(failedTUs) {}
 
 std::unique_ptr<clang::ASTConsumer>
 LshazAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
-                                   llvm::StringRef /*file*/) {
+                                   llvm::StringRef file) {
+    currentFile_ = file.str();
     return std::make_unique<LshazASTConsumer>(
         config_, diagnostics_, profileHotFuncs_);
+}
+
+void LshazAction::EndSourceFileAction() {
+    auto &diags = getCompilerInstance().getDiagnostics();
+    if (diags.hasFatalErrorOccurred() || diags.hasUncompilableErrorOccurred())
+        failedTUs_.push_back(currentFile_);
 }
 
 // --- Factory ---
@@ -29,7 +37,7 @@ LshazActionFactory::LshazActionFactory(
 
 std::unique_ptr<clang::FrontendAction> LshazActionFactory::create() {
     return std::make_unique<LshazAction>(
-        config_, diagnostics_, profileHotFuncs_);
+        config_, diagnostics_, profileHotFuncs_, failedTUs_);
 }
 
 } // namespace lshaz

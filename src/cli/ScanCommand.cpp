@@ -290,6 +290,26 @@ int runScanCommand(int argc, const char **argv) {
 
     auto result = pipeline.execute(request);
 
+    // Summary on stderr.
+    {
+        unsigned ok = result.totalTUsAnalyzed - result.totalTUsFailed;
+        llvm::errs() << "lshaz: " << ok << "/" << result.totalTUsAnalyzed
+                     << " TU(s) parsed, " << result.diagnostics.size()
+                     << " diagnostic(s)";
+        if (result.totalTUsFailed > 0)
+            llvm::errs() << ", " << result.totalTUsFailed << " failed";
+        llvm::errs() << "\n";
+
+        if (result.totalTUsFailed > 0) {
+            unsigned cap = std::min(result.totalTUsFailed, 10u);
+            for (unsigned i = 0; i < cap; ++i)
+                llvm::errs() << "  failed: " << result.failedTUs[i] << "\n";
+            if (result.totalTUsFailed > cap)
+                llvm::errs() << "  ... and "
+                             << (result.totalTUsFailed - cap) << " more\n";
+        }
+    }
+
     if (result.suppressedByCalibration > 0)
         llvm::errs() << "lshaz: suppressed " << result.suppressedByCalibration
                      << " diagnostic(s) via calibration feedback\n";

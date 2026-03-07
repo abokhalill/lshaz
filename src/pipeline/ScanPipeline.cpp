@@ -539,6 +539,7 @@ ScanResult ScanPipeline::run(
         LshazActionFactory factory(
             request.config, result.diagnostics, profileHotFuncs);
         toolRet = tool.run(&factory);
+        result.failedTUs = factory.failedTUs();
     } else {
         // Shard sources across threads. Thread-safety:
         //   - compDB: read-only, shared safely.
@@ -551,6 +552,7 @@ ScanResult ScanPipeline::run(
             shards[i % jobs].push_back(sources[i]);
 
         std::vector<std::vector<Diagnostic>> shardDiags(jobs);
+        std::vector<std::vector<std::string>> shardFailed(jobs);
         std::vector<int> shardRet(jobs, 0);
         std::vector<std::thread> threads;
         threads.reserve(jobs);
@@ -562,6 +564,7 @@ ScanResult ScanPipeline::run(
                 LshazActionFactory factory(
                     request.config, shardDiags[j], profileHotFuncs);
                 shardRet[j] = tool.run(&factory);
+                shardFailed[j] = factory.failedTUs();
             });
         }
 
@@ -574,6 +577,8 @@ ScanResult ScanPipeline::run(
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(shardDiags[j].begin()),
                 std::make_move_iterator(shardDiags[j].end()));
+            result.failedTUs.insert(result.failedTUs.end(),
+                shardFailed[j].begin(), shardFailed[j].end());
         }
     }
 
@@ -619,8 +624,14 @@ ScanResult ScanPipeline::run(
     // Filter and sort.
     filterAndSort(request.filter, result.diagnostics);
 
+    // Summary counts.
+    result.totalTUsFailed = static_cast<unsigned>(result.failedTUs.size());
+    result.metadata.totalTUs = result.totalTUsAnalyzed;
+    result.metadata.failedTUCount = result.totalTUsFailed;
+    result.metadata.failedTUs = result.failedTUs;
+
     // Status.
-    bool parseError = (toolRet != 0);
+    bool parseError = (toolRet != 0 || result.totalTUsFailed > 0);
     bool hasFindings = !result.diagnostics.empty();
 
     if (parseError && hasFindings)

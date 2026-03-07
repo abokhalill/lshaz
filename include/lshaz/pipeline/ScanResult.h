@@ -21,6 +21,9 @@ struct ScanResult {
     std::vector<Diagnostic> diagnostics;
     ExecutionMetadata metadata;
 
+    // Per-TU parse failure tracking.
+    std::vector<std::string> failedTUs;
+
     // Counts for summary reporting.
     unsigned suppressedByCalibration = 0;
     unsigned suppressedByFilter      = 0;

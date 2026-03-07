@@ -114,6 +114,14 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "{\"path\": \"" << escape(meta.compilers[i].path) << "\"}";
         if (i + 1 < meta.compilers.size()) os << ", ";
     }
+    os << "],\n";
+    os << "    \"totalTUs\": " << meta.totalTUs << ",\n";
+    os << "    \"failedTUCount\": " << meta.failedTUCount << ",\n";
+    os << "    \"failedTUs\": [";
+    for (size_t i = 0; i < meta.failedTUs.size(); ++i) {
+        os << "\"" << escape(meta.failedTUs[i]) << "\"";
+        if (i + 1 < meta.failedTUs.size()) os << ", ";
+    }
     os << "]\n";
     os << "  },\n";
     os << "  \"diagnostics\": [\n";
