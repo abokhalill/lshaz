@@ -17,7 +17,7 @@ set -uo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-readonly FAULTLINE="$ROOT_DIR/build/faultline"
+readonly LSHAZ="$ROOT_DIR/build/lshaz"
 readonly CORPUS_DIR="$ROOT_DIR/validation/tier1/corpora"
 readonly RESULTS_DIR="$ROOT_DIR/validation/tier1/results"
 
@@ -39,8 +39,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ ! -x "$FAULTLINE" ]]; then
-    echo "FATAL: faultline binary not found at $FAULTLINE" >&2
+if [[ ! -x "$LSHAZ" ]]; then
+    echo "FATAL: lshaz binary not found at $LSHAZ" >&2
     echo "       Run: cmake --build build -j\$(nproc)" >&2
     exit 1
 fi
@@ -201,18 +201,18 @@ run_internal_corpus() {
 
         # Run 1 (CLI output)
         local exit_code=0
-        "$FAULTLINE" --no-ir "$src" -- -std=c++20 > "$out1" 2>&1 || exit_code=$?
+        "$LSHAZ" --no-ir "$src" -- -std=c++20 > "$out1" 2>&1 || exit_code=$?
         assert_no_crash "$exit_code" "$corpus" "$basename"
 
         # Run 2 (determinism check)
-        "$FAULTLINE" --no-ir "$src" -- -std=c++20 > "$out2" 2>&1 || true
+        "$LSHAZ" --no-ir "$src" -- -std=c++20 > "$out2" 2>&1 || true
         assert_deterministic "$out1" "$out2" "$corpus" "$basename"
 
         # Location validity
         assert_valid_locations "$out1" "$ROOT_DIR" "$corpus" "$basename"
 
         # JSON output for distribution and evidence checks
-        "$FAULTLINE" --no-ir --json "$src" -- -std=c++20 > "$json_out" 2>&1 || true
+        "$LSHAZ" --no-ir --json "$src" -- -std=c++20 > "$json_out" 2>&1 || true
         assert_distribution_sanity "$json_out" "$corpus" "$basename"
         assert_evidence_parseable "$json_out" "$corpus" "$basename"
     done
@@ -259,17 +259,17 @@ run_external_corpus() {
 
         # shellcheck disable=SC2086
         local exit_code=0
-        "$FAULTLINE" --no-ir "$src" -- $flags > "$out1" 2>&1 || exit_code=$?
+        "$LSHAZ" --no-ir "$src" -- $flags > "$out1" 2>&1 || exit_code=$?
         assert_no_crash "$exit_code" "$name" "$relpath"
 
         # shellcheck disable=SC2086
-        "$FAULTLINE" --no-ir "$src" -- $flags > "$out2" 2>&1 || true
+        "$LSHAZ" --no-ir "$src" -- $flags > "$out2" 2>&1 || true
         assert_deterministic "$out1" "$out2" "$name" "$relpath"
 
         assert_valid_locations "$out1" "$clone_dir" "$name" "$relpath"
 
         # shellcheck disable=SC2086
-        "$FAULTLINE" --no-ir --json "$src" -- $flags > "$json_out" 2>&1 || true
+        "$LSHAZ" --no-ir --json "$src" -- $flags > "$json_out" 2>&1 || true
         assert_distribution_sanity "$json_out" "$name" "$relpath"
         assert_evidence_parseable "$json_out" "$name" "$relpath"
     done
@@ -277,7 +277,7 @@ run_external_corpus() {
 
 # --- Main ---
 
-echo "Faultline Tier 1: Corpus-Scale Regression"
+echo "lshaz Tier 1: Corpus-Scale Regression"
 echo "=========================================="
 echo ""
 

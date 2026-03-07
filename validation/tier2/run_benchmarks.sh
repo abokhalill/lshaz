@@ -20,7 +20,7 @@ set -uo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-readonly FAULTLINE="$ROOT_DIR/build/faultline"
+readonly LSHAZ="$ROOT_DIR/build/lshaz"
 readonly BENCH_DIR="$SCRIPT_DIR/benchmarks"
 readonly BUILD_DIR="$SCRIPT_DIR/build"
 readonly RESULTS_DIR="$SCRIPT_DIR/results"
@@ -45,8 +45,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ ! -x "$FAULTLINE" ]]; then
-    echo "FATAL: faultline binary not found at $FAULTLINE" >&2
+if [[ ! -x "$LSHAZ" ]]; then
+    echo "FATAL: lshaz binary not found at $LSHAZ" >&2
     echo "       Run: cmake --build build -j\$(nproc)" >&2
     exit 1
 fi
@@ -122,19 +122,19 @@ run_benchmark_suite() {
     # --- Phase 1: Faultline Analysis Validation ---
     echo "  Phase 1: Static analysis validation"
 
-    local faultline_out="$RESULTS_DIR/${rule}_faultline.json"
-    "$FAULTLINE" --no-ir --json "$src_path" -- -std=c++20 > "$faultline_out" 2>&1 || true
+    local lshaz_out="$RESULTS_DIR/${rule}_lshaz.json"
+    "$LSHAZ" --no-ir --json "$src_path" -- -std=c++20 > "$lshaz_out" 2>&1 || true
 
-    # Check: faultline should flag the hazardous struct/function
-    if grep -q "\"$rule\"" "$faultline_out"; then
-        log_pass "$rule: faultline detected hazard"
+    # Check: lshaz should flag the hazardous struct/function
+    if grep -q "\"$rule\"" "$lshaz_out"; then
+        log_pass "$rule: lshaz detected hazard"
     else
-        log_fail "$rule: faultline did NOT detect hazard"
+        log_fail "$rule: lshaz did NOT detect hazard"
     fi
 
     # Check: count diagnostics for this rule
     local diag_count
-    diag_count=$(grep "\"$rule\"" "$faultline_out" 2>/dev/null | wc -l)
+    diag_count=$(grep "\"$rule\"" "$lshaz_out" 2>/dev/null | wc -l)
     diag_count=$((diag_count + 0))
     echo "    Diagnostics emitted: $diag_count"
 
@@ -179,7 +179,7 @@ run_benchmark_suite() {
 
 # --- Main ---
 
-echo "Faultline Tier 2: Ground Truth Microbenchmarks"
+echo "lshaz Tier 2: Ground Truth Microbenchmarks"
 echo "==============================================="
 echo "Perf counters: $($PERF_AVAILABLE && echo "available" || echo "unavailable")"
 echo ""

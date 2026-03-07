@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Faultline Validation Harness — Top-Level Runner
+# lshaz Validation Harness — Top-Level Runner
 # Executes Tier 1 (corpus regression) and/or Tier 2 (ground truth benchmarks).
 #
 # Usage:
@@ -43,8 +43,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Ensure binary is built.
-if [[ ! -x "$ROOT_DIR/build/faultline" ]]; then
-    echo "Building faultline..."
+if [[ ! -x "$ROOT_DIR/build/lshaz" ]]; then
+    echo "Building lshaz..."
     cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
     cmake --build "$ROOT_DIR/build" -j"$(nproc)" 2>&1
     echo ""
@@ -54,7 +54,7 @@ TIER1_EXIT=0
 TIER2_EXIT=0
 
 echo "╔══════════════════════════════════════════════╗"
-echo "║       Faultline Validation Harness           ║"
+echo "║       lshaz Validation Harness               ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 

@@ -1,6 +1,6 @@
-# Faultline Validation Harness
+# lshaz Validation Harness
 
-Ground-truth validation for Faultline's microarchitectural diagnostic claims.
+Ground-truth validation for lshaz's microarchitectural diagnostic claims.
 Inspired by [Jepsen](https://jepsen.io/) — every claim the tool makes must be
 backed by reproducible evidence on real hardware.
 
@@ -8,7 +8,7 @@ backed by reproducible evidence on real hardware.
 
 ### Tier 1: Corpus-Scale Regression
 
-Runs faultline against internal test samples and external open-source C++
+Runs lshaz against internal test samples and external open-source C++
 codebases (folly, abseil, seastar). Five assertions per file:
 
 | Assertion | Description |
@@ -28,7 +28,7 @@ Each benchmark runs through four phases:
 
 | Phase | Description |
 |-------|-------------|
-| **1. Static analysis** | Faultline must emit the target rule's diagnostic on the benchmark file |
+| **1. Static analysis** | lshaz must emit the target rule's diagnostic on the benchmark file |
 | **2. Build** | Compile the benchmark with `-O2 -march=native` |
 | **3. Execute** | Run 5 trials, collect wall-clock timings |
 | **4. Perf counters** | Collect hardware counters via `perf stat` (optional) |
@@ -91,7 +91,7 @@ fails.
 
 | Dependency | Required | Purpose |
 |------------|----------|---------|
-| `build/faultline` | Yes | The analyzer binary under test |
+| `build/lshaz` | Yes | The analyzer binary under test |
 | `clang++` (any version) | Yes | Benchmark compilation |
 | `git` | Tier 1 only | Cloning external corpora |
 | `perf` | Optional | Hardware counter collection (Phase 4) |
