@@ -1,3 +1,4 @@
+#include "cli/ExplainCommand.h"
 #include "cli/ScanCommand.h"
 
 #include "lshaz/core/Config.h"
@@ -142,6 +143,8 @@ int main(int argc, const char **argv) {
     // before LLVM's CommandLine parser consumes argv.
     if (argc >= 2 && std::strcmp(argv[1], "scan") == 0)
         return lshaz::runScanCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "explain") == 0)
+        return lshaz::runExplainCommand(argc - 2, argv + 2);
 
     llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
         OS << lshaz::kToolName << " version " << lshaz::kToolVersion
