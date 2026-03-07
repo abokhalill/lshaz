@@ -10,8 +10,12 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <thread>
+#include <unordered_map>
 
 namespace lshaz {
 
@@ -40,6 +44,8 @@ struct ScanArgs {
     std::vector<std::string> excludeFiles;
     bool noIR = false;
     bool noIRCache = false;
+    bool watch = false;
+    unsigned watchInterval = 2;
     bool help = false;
 };
 
@@ -68,6 +74,8 @@ void printScanUsage() {
         << "  --exclude <pattern>      Skip files matching pattern (repeatable)\n"
         << "  --perf-profile <path>    Path to perf profile for hotness guidance\n"
         << "  --allocator <name>       Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
+        << "  --watch                  Watch mode: re-scan on file changes\n"
+        << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
         << "  --help                   Show this help\n";
 }
 
@@ -117,6 +125,8 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArg(i, argc, argv, "--pmu-priors", args.pmuPriors)) continue;
         if (std::strcmp(argv[i], "--no-ir") == 0) { args.noIR = true; continue; }
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
+        if (std::strcmp(argv[i], "--watch") == 0) { args.watch = true; continue; }
+        if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {
             llvm::errs() << "lshaz scan: unknown option '" << argv[i] << "'\n";
@@ -285,6 +295,68 @@ int runScanCommand(int argc, const char **argv) {
                      << " diagnostic(s) via calibration feedback\n";
 
     int exitCode = emitOutput(result, request, args.format, args.outputFile);
+
+    if (args.watch && !isCompileDB) {
+        namespace fs = std::filesystem;
+
+        auto snapshotMtimes = [](const std::string &dir)
+            -> std::unordered_map<std::string, std::int64_t> {
+            std::unordered_map<std::string, std::int64_t> mtimes;
+            std::error_code ec;
+            auto it = fs::recursive_directory_iterator(
+                dir, fs::directory_options::skip_permission_denied, ec);
+            if (ec) return mtimes;
+            for (auto end = fs::recursive_directory_iterator(); it != end;
+                 it.increment(ec)) {
+                if (ec) break;
+                if (!it->is_regular_file()) continue;
+                auto ext = it->path().extension().string();
+                if (ext != ".cpp" && ext != ".cc" && ext != ".cxx" &&
+                    ext != ".c" && ext != ".h" && ext != ".hpp" &&
+                    ext != ".hxx" && ext != ".yaml" && ext != ".yml")
+                    continue;
+                auto mtime = it->last_write_time()
+                                 .time_since_epoch().count();
+                mtimes[it->path().string()] = mtime;
+            }
+            return mtimes;
+        };
+
+        auto prev = snapshotMtimes(target);
+        llvm::errs() << "lshaz: [watch] monitoring " << prev.size()
+                     << " files (interval: " << args.watchInterval << "s)\n";
+
+        while (true) {
+            std::this_thread::sleep_for(
+                std::chrono::seconds(args.watchInterval));
+
+            auto curr = snapshotMtimes(target);
+            bool changed = (curr.size() != prev.size());
+            if (!changed) {
+                for (const auto &[path, mtime] : curr) {
+                    auto it = prev.find(path);
+                    if (it == prev.end() || it->second != mtime) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!changed) continue;
+
+            llvm::errs() << "lshaz: [watch] change detected, re-scanning...\n";
+            prev = curr;
+
+            result = pipeline.execute(request);
+
+            if (result.suppressedByCalibration > 0)
+                llvm::errs() << "lshaz: suppressed "
+                             << result.suppressedByCalibration
+                             << " diagnostic(s) via calibration feedback\n";
+
+            exitCode = emitOutput(result, request, args.format, args.outputFile);
+        }
+    }
 
     // Cleanup cloned repo if we created one.
     RepoProvider::cleanup(repoAcq);

@@ -109,6 +109,8 @@ fs::path isolateFixture(const std::string &fixture, const std::string &suffix) {
     fs::copy(fixture, tmp / "project",
              fs::copy_options::recursive |
              fs::copy_options::overwrite_existing);
+    // Remove stale build dir to avoid CMakeCache.txt path mismatch.
+    fs::remove_all(tmp / "project" / "build");
     return tmp;
 }
 
