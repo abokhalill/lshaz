@@ -215,6 +215,16 @@ int runScanCommand(int argc, const char **argv) {
     }
 
     // Build ScanRequest.
+    // Config autodiscovery: look for lshaz.config.yaml in the project root.
+    if (args.configPath.empty() && !isCompileDB) {
+        llvm::SmallString<256> candidate(target);
+        llvm::sys::path::append(candidate, "lshaz.config.yaml");
+        if (llvm::sys::fs::exists(candidate)) {
+            args.configPath = std::string(candidate);
+            llvm::errs() << "lshaz: using config " << candidate << "\n";
+        }
+    }
+
     Config cfg = args.configPath.empty()
         ? Config::defaults()
         : Config::loadFromFile(args.configPath);

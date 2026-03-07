@@ -487,6 +487,43 @@ void testParallelDeterminism(const std::string &bin, const std::string &fixture)
     fs::remove_all(tmp);
 }
 
+// ===== Config autodiscovery =====
+
+void testConfigAutodiscovery(const std::string &bin, const std::string &fixture) {
+    std::cerr << "test: config autodiscovery (no --config flag)\n";
+    auto tmp = isolateFixture(fixture, "autoconf");
+    auto project = (tmp / "project").string();
+
+    // No --config flag. lshaz should find lshaz.config.yaml in project root.
+    auto r = run(bin + " scan " + project + " --no-ir --format json");
+
+    check(contains(r.err, "using config"), "autodiscovered lshaz.config.yaml");
+    check(r.exitCode == 1, "exit 1 (findings)");
+
+    // Hot-path rules should fire because config patterns are active.
+    check(contains(r.out, "FL012") || contains(r.out, "FL020") ||
+          contains(r.out, "FL050") || contains(r.out, "FL010"),
+          "hot-path rules fire via autodiscovered config");
+
+    fs::remove_all(tmp);
+}
+
+void testConfigAutodiscoveryAbsent(const std::string &bin, const std::string &fixture) {
+    std::cerr << "test: config autodiscovery absent (no config file)\n";
+    auto tmp = isolateFixture(fixture, "noconf");
+    auto project = (tmp / "project").string();
+
+    // Remove the config file.
+    fs::remove(fs::path(project) / "lshaz.config.yaml");
+
+    auto r = run(bin + " scan " + project + " --no-ir --format json");
+    check(!contains(r.err, "using config"), "no config autodiscovered");
+    // Should still produce some diagnostics (struct-level rules).
+    check(r.exitCode == 0 || r.exitCode == 1, "valid exit code");
+
+    fs::remove_all(tmp);
+}
+
 // ===== Exit code semantics =====
 
 void testExitCodeClean(const std::string &bin, const std::string &fixture) {
@@ -551,6 +588,10 @@ int main() {
     // Determinism.
     testDeterminism(bin, fixture);
     testParallelDeterminism(bin, fixture);
+
+    // Config autodiscovery.
+    testConfigAutodiscovery(bin, fixture);
+    testConfigAutodiscoveryAbsent(bin, fixture);
 
     // Exit code semantics.
     testExitCodeClean(bin, fixture);
