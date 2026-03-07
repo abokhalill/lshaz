@@ -25,6 +25,7 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/SourceMgr.h>
+#include <llvm/Support/CrashRecoveryContext.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
@@ -533,15 +534,39 @@ ScanResult ScanPipeline::run(
 
     int toolRet = 0;
 
+    llvm::CrashRecoveryContext::Enable();
+
     if (jobs <= 1 || sources.size() <= 1) {
-        // Sequential path.
-        clang::tooling::ClangTool tool(compDB, sources);
-        LshazActionFactory factory(
-            request.config, result.diagnostics, profileHotFuncs);
-        toolRet = tool.run(&factory);
-        result.failedTUs = factory.failedTUs();
+        // Sequential path: per-TU crash isolation.
+        for (const auto &src : sources) {
+            std::vector<std::string> singleTU = {src};
+            std::vector<Diagnostic> tuDiags;
+            LshazActionFactory factory(
+                request.config, tuDiags, profileHotFuncs);
+
+            llvm::CrashRecoveryContext CRC;
+            bool crashed = !CRC.RunSafely([&]() {
+                clang::tooling::ClangTool tool(compDB, singleTU);
+                int ret = tool.run(&factory);
+                if (ret != 0) toolRet = ret;
+            });
+
+            if (crashed) {
+                result.failedTUs.push_back(src);
+                llvm::errs() << "lshaz: [crash] " << src
+                             << " (recovered, continuing)\n";
+            } else {
+                auto &ff = factory.failedTUs();
+                result.failedTUs.insert(result.failedTUs.end(),
+                    ff.begin(), ff.end());
+            }
+            result.diagnostics.insert(result.diagnostics.end(),
+                std::make_move_iterator(tuDiags.begin()),
+                std::make_move_iterator(tuDiags.end()));
+        }
     } else {
-        // Shard sources across threads. Thread-safety:
+        // Parallel path: per-shard crash isolation.
+        // Thread-safety:
         //   - compDB: read-only, shared safely.
         //   - request.config: const ref, read-only.
         //   - profileHotFuncs: copied by value into each factory.
@@ -554,17 +579,22 @@ ScanResult ScanPipeline::run(
         std::vector<std::vector<Diagnostic>> shardDiags(jobs);
         std::vector<std::vector<std::string>> shardFailed(jobs);
         std::vector<int> shardRet(jobs, 0);
+        std::vector<bool> shardCrashed(jobs, false);
         std::vector<std::thread> threads;
         threads.reserve(jobs);
 
         for (unsigned j = 0; j < jobs; ++j) {
             if (shards[j].empty()) continue;
             threads.emplace_back([&, j]() {
-                clang::tooling::ClangTool tool(compDB, shards[j]);
-                LshazActionFactory factory(
-                    request.config, shardDiags[j], profileHotFuncs);
-                shardRet[j] = tool.run(&factory);
-                shardFailed[j] = factory.failedTUs();
+                llvm::CrashRecoveryContext CRC;
+                bool ok = CRC.RunSafely([&]() {
+                    clang::tooling::ClangTool tool(compDB, shards[j]);
+                    LshazActionFactory factory(
+                        request.config, shardDiags[j], profileHotFuncs);
+                    shardRet[j] = tool.run(&factory);
+                    shardFailed[j] = factory.failedTUs();
+                });
+                if (!ok) shardCrashed[j] = true;
             });
         }
 
@@ -579,8 +609,18 @@ ScanResult ScanPipeline::run(
                 std::make_move_iterator(shardDiags[j].end()));
             result.failedTUs.insert(result.failedTUs.end(),
                 shardFailed[j].begin(), shardFailed[j].end());
+            if (shardCrashed[j]) {
+                toolRet = 1;
+                for (const auto &src : shards[j])
+                    result.failedTUs.push_back(src);
+                llvm::errs() << "lshaz: [crash] shard " << j
+                             << " crashed (" << shards[j].size()
+                             << " TU(s), recovered)\n";
+            }
         }
     }
+
+    llvm::CrashRecoveryContext::Disable();
 
     // IR analysis pass.
     if (request.ir.enabled && toolRet == 0) {
