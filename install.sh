@@ -70,7 +70,7 @@ cmake --build "$TMPDIR/lshaz/build" -j"$(nproc)" \
 
 # Run contract tests.
 info "running contract tests..."
-"$TMPDIR/lshaz/build/output_schema_contract_test" \
+"$TMPDIR/lshaz/build/output_contract_test" \
     || die "contract tests failed"
 
 # Install.

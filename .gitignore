@@ -12,5 +12,3 @@ compile_commands.json
 *.swp
 *.swo
 *~
-*.md
-!README.md
