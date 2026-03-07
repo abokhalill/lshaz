@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cli/ExplainCommand.h"
+#include "cli/InitCommand.h"
 #include "cli/ScanCommand.h"
 
 #include "lshaz/core/Config.h"
@@ -144,6 +145,8 @@ int main(int argc, const char **argv) {
         return lshaz::runScanCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "explain") == 0)
         return lshaz::runExplainCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "init") == 0)
+        return lshaz::runInitCommand(argc - 2, argv + 2);
 
     // `lshaz version` as a first-class subcommand.
     if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
@@ -163,6 +166,7 @@ int main(int argc, const char **argv) {
             << "\n"
             << "Usage:\n"
             << "  lshaz scan <path> [options]   Analyze a project\n"
+            << "  lshaz init [path]             Generate compile_commands.json and config\n"
             << "  lshaz explain [rule]          Show rule documentation\n"
             << "  lshaz version                 Print version\n"
             << "  lshaz help                    Show this help\n"

@@ -73,6 +73,7 @@ set(LSHAZ_SOURCES
     src/pipeline/SourceFilter.cpp
     src/cli/ScanCommand.cpp
     src/cli/ExplainCommand.cpp
+    src/cli/InitCommand.cpp
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})
