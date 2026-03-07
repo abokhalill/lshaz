@@ -70,6 +70,7 @@ set(LSHAZ_SOURCES
     src/pipeline/ScanPipeline.cpp
     src/pipeline/CompileDBResolver.cpp
     src/pipeline/RepoProvider.cpp
+    src/pipeline/SourceFilter.cpp
     src/cli/ScanCommand.cpp
 )
 
@@ -104,6 +105,15 @@ add_executable(output_contract_test
     src/core/Severity.cpp
 )
 target_link_libraries(output_contract_test PRIVATE LLVM)
+
+# --- Pipeline unit test ---
+add_executable(pipeline_unit_test
+    test/pipeline_unit_test.cpp
+    src/pipeline/SourceFilter.cpp
+    src/pipeline/CompileDBResolver.cpp
+    src/pipeline/RepoProvider.cpp
+)
+target_link_libraries(pipeline_unit_test PRIVATE LLVM)
 
 # --- Scan E2E test ---
 add_executable(scan_e2e_test

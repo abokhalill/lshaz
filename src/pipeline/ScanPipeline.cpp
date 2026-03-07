@@ -1,5 +1,6 @@
 #include "lshaz/pipeline/ScanPipeline.h"
 #include "lshaz/pipeline/CompileDBResolver.h"
+#include "lshaz/pipeline/SourceFilter.h"
 
 #include "lshaz/analysis/LshazAction.h"
 #include "lshaz/core/DiagnosticDedup.h"
@@ -433,60 +434,6 @@ static void filterAndSort(const FilterOptions &filter,
                       return a.location.file < b.location.file;
                   return a.location.line < b.location.line;
               });
-}
-
-// --- Source file filtering ---
-
-static bool matchesGlob(const std::string &path, const std::string &pattern) {
-    // Simple suffix/substring match for common patterns.
-    // Supports: *.ext, *pattern*, and exact substring.
-    if (pattern.empty())
-        return false;
-
-    if (pattern.front() == '*' && pattern.back() == '*' && pattern.size() > 2) {
-        // *substring* match
-        std::string sub = pattern.substr(1, pattern.size() - 2);
-        return path.find(sub) != std::string::npos;
-    }
-    if (pattern.front() == '*') {
-        // suffix match: *.cpp, */dir/*
-        std::string suffix = pattern.substr(1);
-        return path.size() >= suffix.size() &&
-               path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0;
-    }
-    // Substring match fallback.
-    return path.find(pattern) != std::string::npos;
-}
-
-static std::vector<std::string> filterSources(
-        const std::vector<std::string> &sources,
-        const FilterOptions &filter) {
-    std::vector<std::string> result;
-    result.reserve(sources.size());
-
-    for (const auto &src : sources) {
-        // Include filter: if non-empty, source must match at least one pattern.
-        if (!filter.includeFiles.empty()) {
-            bool matched = false;
-            for (const auto &pat : filter.includeFiles) {
-                if (matchesGlob(src, pat)) { matched = true; break; }
-            }
-            if (!matched) continue;
-        }
-
-        // Exclude filter: source must not match any pattern.
-        bool excluded = false;
-        for (const auto &pat : filter.excludeFiles) {
-            if (matchesGlob(src, pat)) { excluded = true; break; }
-        }
-        if (excluded) continue;
-
-        result.push_back(src);
-
-        if (filter.maxFiles > 0 && result.size() >= filter.maxFiles)
-            break;
-    }
-    return result;
 }
 
 // --- Entry points ---
