@@ -16,6 +16,10 @@ public:
     // Returns true if the target looks like a remote URL (https:// or git@).
     static bool isRemoteURL(const std::string &target);
 
+    // Returns true if the URL is safe for automated cloning (HTTPS only,
+    // no embedded credentials, no shell metacharacters).
+    static bool isSafeURL(const std::string &url);
+
     // Acquire a repo: if target is a URL, clone into a temp directory.
     // If target is a local path, return it directly.
     // Options: ref (branch/tag/commit), depth (0 = full clone).

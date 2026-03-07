@@ -16,6 +16,31 @@ bool RepoProvider::isRemoteURL(const std::string &target) {
            target.find("git@") == 0;
 }
 
+bool RepoProvider::isSafeURL(const std::string &url) {
+    // Only HTTPS is safe for untrusted input. Reject:
+    //   file://  — local filesystem exfiltration
+    //   git://   — unauthenticated, MITM-able
+    //   ssh://   — may trigger unexpected key prompts
+    //   git@     — SSH shorthand, same concerns
+    //   http://  — MITM-able, no transport security
+    if (url.find("https://") != 0)
+        return false;
+    // Reject URLs with embedded credentials (user:pass@host).
+    auto hostStart = url.find("://") + 3;
+    auto atPos = url.find('@', hostStart);
+    auto slashPos = url.find('/', hostStart);
+    if (atPos != std::string::npos &&
+        (slashPos == std::string::npos || atPos < slashPos))
+        return false;
+    // Reject URLs containing shell metacharacters.
+    for (char c : url) {
+        if (c == ';' || c == '|' || c == '&' || c == '$' ||
+            c == '`' || c == '\n' || c == '\r')
+            return false;
+    }
+    return true;
+}
+
 RepoAcquisition RepoProvider::acquire(const std::string &target,
                                        const std::string &ref,
                                        unsigned depth) {
@@ -23,6 +48,12 @@ RepoAcquisition RepoProvider::acquire(const std::string &target,
 
     if (!isRemoteURL(target)) {
         acq.localPath = target;
+        return acq;
+    }
+
+    if (!isSafeURL(target)) {
+        acq.error = "rejected URL: only HTTPS URLs without embedded "
+                    "credentials or shell metacharacters are allowed";
         return acq;
     }
 
