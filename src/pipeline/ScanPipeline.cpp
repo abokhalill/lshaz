@@ -450,12 +450,20 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
     // Autodiscover compile_commands.json if not explicitly provided.
     if (dbPath.empty() && !request.workingDirectory.empty()) {
         report("compile_db", "Searching for compile_commands.json");
-        dbPath = CompileDBResolver::discoverOrGenerate(request.workingDirectory);
+        if (request.trustBuildSystem)
+            dbPath = CompileDBResolver::discoverOrGenerate(request.workingDirectory);
+        else
+            dbPath = CompileDBResolver::discover(request.workingDirectory);
         if (dbPath.empty()) {
             llvm::errs() << "lshaz: error: no compile_commands.json found in "
-                         << request.workingDirectory
-                         << " (also tried cmake generation)\n"
-                         << "  searched: ";
+                         << request.workingDirectory;
+            if (!request.trustBuildSystem)
+                llvm::errs() << "\n  Build system execution disabled for "
+                                "untrusted source. Use --trust-build-system "
+                                "to allow cmake/meson/bear.";
+            else
+                llvm::errs() << " (also tried cmake generation)";
+            llvm::errs() << "\n  searched: ";
             for (const auto &p : CompileDBResolver::candidatePaths(
                      request.workingDirectory))
                 llvm::errs() << "\n    " << p;

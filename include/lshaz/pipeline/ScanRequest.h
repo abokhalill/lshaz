@@ -55,6 +55,11 @@ struct ScanRequest {
     FilterOptions filter;
     OutputFormat outputFormat = OutputFormat::CLI;
 
+    // When false, refuse to run build system commands (cmake, meson, bear)
+    // to generate compile_commands.json. Only discover existing ones.
+    // Default true for local projects, false for cloned remote repos.
+    bool trustBuildSystem = true;
+
     // Parallel AST analysis. 0 = hardware_concurrency, 1 = sequential.
     unsigned analysisJobs = 0;
 

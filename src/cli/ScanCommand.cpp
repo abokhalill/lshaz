@@ -47,6 +47,7 @@ struct ScanArgs {
     bool noIRCache = false;
     bool watch = false;
     unsigned watchInterval = 2;
+    bool trustBuildSystem = false;
     bool help = false;
 };
 
@@ -77,6 +78,7 @@ void printScanUsage() {
         << "  --allocator <name>       Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
         << "  --watch                  Watch mode: re-scan on file changes\n"
         << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
+        << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
         << "  --help                   Show this help\n"
         << "\n"
         << "Exit Codes:\n"
@@ -133,6 +135,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--no-ir") == 0) { args.noIR = true; continue; }
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
         if (std::strcmp(argv[i], "--watch") == 0) { args.watch = true; continue; }
+        if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {
@@ -213,7 +216,9 @@ int runScanCommand(int argc, const char **argv) {
     bool isCompileDB = false;
     RepoAcquisition repoAcq;
 
+    bool isRemote = false;
     if (RepoProvider::isRemoteURL(target)) {
+        isRemote = true;
         llvm::errs() << "lshaz: cloning " << target << "...\n";
         repoAcq = RepoProvider::acquire(target);
         if (!repoAcq.error.empty()) {
@@ -252,6 +257,9 @@ int runScanCommand(int argc, const char **argv) {
 
     ScanRequest request;
     request.config = cfg;
+
+    // Local dirs: always trust. Remote clones: require explicit opt-in.
+    request.trustBuildSystem = isRemote ? args.trustBuildSystem : true;
 
     if (isCompileDB) {
         request.compileDBPath = target;
