@@ -202,18 +202,18 @@ run_internal_corpus() {
 
         # Run 1 (CLI output)
         local exit_code=0
-        "$LSHAZ" --no-ir "$src" -- -std=c++20 > "$out1" 2>&1 || exit_code=$?
+        "$LSHAZ" scan "$src" --no-ir -- -std=c++20 > "$out1" 2>&1 || exit_code=$?
         assert_no_crash "$exit_code" "$corpus" "$basename"
 
         # Run 2 (determinism check)
-        "$LSHAZ" --no-ir "$src" -- -std=c++20 > "$out2" 2>&1 || true
+        "$LSHAZ" scan "$src" --no-ir -- -std=c++20 > "$out2" 2>&1 || true
         assert_deterministic "$out1" "$out2" "$corpus" "$basename"
 
         # Location validity
         assert_valid_locations "$out1" "$ROOT_DIR" "$corpus" "$basename"
 
         # JSON output for distribution and evidence checks
-        "$LSHAZ" --no-ir --json "$src" -- -std=c++20 > "$json_out" 2>&1 || true
+        "$LSHAZ" scan "$src" --no-ir --format json -- -std=c++20 > "$json_out" 2>&1 || true
         assert_distribution_sanity "$json_out" "$corpus" "$basename"
         assert_evidence_parseable "$json_out" "$corpus" "$basename"
     done
@@ -260,17 +260,17 @@ run_external_corpus() {
 
         # shellcheck disable=SC2086
         local exit_code=0
-        "$LSHAZ" --no-ir "$src" -- $flags > "$out1" 2>&1 || exit_code=$?
+        "$LSHAZ" scan "$src" --no-ir -- $flags > "$out1" 2>&1 || exit_code=$?
         assert_no_crash "$exit_code" "$name" "$relpath"
 
         # shellcheck disable=SC2086
-        "$LSHAZ" --no-ir "$src" -- $flags > "$out2" 2>&1 || true
+        "$LSHAZ" scan "$src" --no-ir -- $flags > "$out2" 2>&1 || true
         assert_deterministic "$out1" "$out2" "$name" "$relpath"
 
         assert_valid_locations "$out1" "$clone_dir" "$name" "$relpath"
 
         # shellcheck disable=SC2086
-        "$LSHAZ" --no-ir --json "$src" -- $flags > "$json_out" 2>&1 || true
+        "$LSHAZ" scan "$src" --no-ir --format json -- $flags > "$json_out" 2>&1 || true
         assert_distribution_sanity "$json_out" "$name" "$relpath"
         assert_evidence_parseable "$json_out" "$name" "$relpath"
     done

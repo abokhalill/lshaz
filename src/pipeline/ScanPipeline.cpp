@@ -505,7 +505,7 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
     return run(request, *compDB, sources);
 }
 
-ScanResult ScanPipeline::executeLegacy(
+ScanResult ScanPipeline::executeWithDB(
         const ScanRequest &request,
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources) {

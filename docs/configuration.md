@@ -171,14 +171,14 @@ lshaz diff before.json after.json
 
 ---
 
-## Legacy CLI
+## Single-File Mode
 
-The original Clang-tooling interface remains available but is **deprecated since 0.2.0** and will be **removed in 0.4.0**:
+Analyze individual source files with explicit compiler flags:
 
 ```bash
-./build/lshaz src/engine.cpp -- -std=c++20
-./build/lshaz --format=json src/engine.cpp -- -std=c++20
-./build/lshaz --no-ir src/engine.cpp -- -std=c++20
+lshaz scan src/engine.cpp -- -std=c++20
+lshaz scan src/engine.cpp --format json -- -std=c++20 -I include
+lshaz scan src/engine.cpp --no-ir -- -std=c++20
 ```
 
-Arguments after `--` are passed to Clang. Source files before `--` are the analysis targets. Use `lshaz scan` instead.
+Arguments after `--` are passed to Clang. The source file before `--` is the analysis target.

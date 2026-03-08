@@ -124,7 +124,7 @@ run_benchmark_suite() {
     echo "  Phase 1: Static analysis validation"
 
     local lshaz_out="$RESULTS_DIR/${rule}_lshaz.json"
-    "$LSHAZ" --no-ir --json "$src_path" -- -std=c++20 > "$lshaz_out" 2>&1 || true
+    "$LSHAZ" scan "$src_path" --no-ir --format json -- -std=c++20 > "$lshaz_out" 2>&1 || true
 
     # Check: lshaz should flag the hazardous struct/function
     if grep -q "\"$rule\"" "$lshaz_out"; then

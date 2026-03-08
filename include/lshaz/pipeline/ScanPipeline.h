@@ -22,9 +22,9 @@ public:
     // Primary entry point: loads compile DB from request.compileDBPath.
     ScanResult execute(const ScanRequest &request);
 
-    // Legacy entry point: accepts a pre-existing CompilationDatabase.
-    // Used by the existing CLI which obtains its DB via CommonOptionsParser.
-    ScanResult executeLegacy(
+    // Execute with a caller-provided CompilationDatabase.
+    // Used for single-file analysis with explicit compiler flags.
+    ScanResult executeWithDB(
         const ScanRequest &request,
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources);
@@ -34,7 +34,7 @@ private:
 
     void report(const std::string &stage, const std::string &detail) const;
 
-    // Shared implementation: both execute() and executeLegacy() converge here.
+    // Shared implementation: both execute() and executeWithDB() converge here.
     ScanResult run(const ScanRequest &request,
                    const clang::tooling::CompilationDatabase &compDB,
                    const std::vector<std::string> &sources);

@@ -7,6 +7,7 @@
 #include "lshaz/pipeline/RepoProvider.h"
 #include "lshaz/pipeline/ScanPipeline.h"
 
+#include <clang/Tooling/CompilationDatabase.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
@@ -49,6 +50,7 @@ struct ScanArgs {
     unsigned watchInterval = 2;
     bool trustBuildSystem = false;
     bool help = false;
+    std::vector<std::string> compilerFlags;
 };
 
 void printScanUsage() {
@@ -81,6 +83,10 @@ void printScanUsage() {
         << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
         << "  --help                   Show this help\n"
         << "\n"
+        << "Single-file mode:\n"
+        << "  lshaz scan <file.cpp> -- <compiler-flags>\n"
+        << "  Analyzes a single file with explicit compiler flags.\n"
+        << "\n"
         << "Exit Codes:\n"
         << "  0  Clean — no diagnostics\n"
         << "  1  Findings — diagnostics emitted\n"
@@ -109,6 +115,12 @@ bool consumeArgUnsigned(int &i, int argc, const char **argv, const char *flag,
 
 bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
     for (int i = 0; i < argc; ++i) {
+        // Everything after -- is compiler flags (single-file mode).
+        if (std::strcmp(argv[i], "--") == 0) {
+            for (++i; i < argc; ++i)
+                args.compilerFlags.push_back(argv[i]);
+            break;
+        }
         if (std::strcmp(argv[i], "--help") == 0 ||
             std::strcmp(argv[i], "-h") == 0) {
             args.help = true;
@@ -209,6 +221,53 @@ int runScanCommand(int argc, const char **argv) {
         llvm::errs() << "lshaz scan: missing target path\n\n";
         printScanUsage();
         return 3;
+    }
+
+    // Single-file mode: lshaz scan <file> -- <compiler-flags>
+    if (!args.compilerFlags.empty()) {
+        std::string srcPath = args.target;
+        if (!llvm::sys::fs::exists(srcPath)) {
+            llvm::errs() << "lshaz scan: source file '" << srcPath
+                         << "' not found\n";
+            return 3;
+        }
+        llvm::SmallString<256> absSrc;
+        llvm::sys::fs::real_path(srcPath, absSrc);
+        srcPath = std::string(absSrc);
+
+        clang::tooling::FixedCompilationDatabase fixedDB(
+            ".", args.compilerFlags);
+
+        ScanRequest request;
+        request.config = args.configPath.empty()
+            ? Config::defaults()
+            : Config::loadFromFile(args.configPath);
+        if (!args.allocator.empty())
+            request.config.linkedAllocator = args.allocator;
+        request.config.minSeverity = parseSeverity(args.minSeverity);
+        request.ir.enabled = !args.noIR;
+        request.ir.optLevel = args.irOpt;
+        request.ir.cacheEnabled = !args.noIRCache;
+        request.ir.maxJobs = args.irJobs;
+        request.ir.batchSize = args.irBatchSize;
+        request.filter.minSeverity = request.config.minSeverity;
+        request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
+        if (args.format == "sarif")
+            request.outputFormat = OutputFormat::SARIF;
+        else if (args.format == "json")
+            request.outputFormat = OutputFormat::JSON;
+
+        ScanPipeline pipeline([](const std::string &stage,
+                                 const std::string &detail) {
+            llvm::errs() << "lshaz: [" << stage << "] " << detail << "\n";
+        });
+
+        auto result = pipeline.executeWithDB(
+            request, fixedDB, {srcPath});
+
+        llvm::errs() << "lshaz: 1/1 TU(s) parsed, "
+                     << result.diagnostics.size() << " diagnostic(s)\n";
+        return emitOutput(result, request, args.format, args.outputFile);
     }
 
     // Resolve target: URL -> clone, .json -> compile DB, directory -> project root.
