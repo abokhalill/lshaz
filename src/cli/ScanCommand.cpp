@@ -52,6 +52,7 @@ struct ScanArgs {
     unsigned watchInterval = 2;
     bool trustBuildSystem = false;
     std::string changedFilesPath;
+    std::string targetArch;
     bool help = false;
     std::vector<std::string> compilerFlags;
 };
@@ -85,6 +86,7 @@ void printScanUsage() {
         << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
         << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
         << "  --changed-files <path>   Only scan TUs affected by files listed in <path>\n"
+        << "  --target-arch <arch>     Target architecture: x86-64, arm64, arm64-apple\n"
         << "  --help                   Show this help\n"
         << "\n"
         << "Single-file mode:\n"
@@ -153,6 +155,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--watch") == 0) { args.watch = true; continue; }
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
+        if (consumeArg(i, argc, argv, "--target-arch", args.targetArch)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {
@@ -314,6 +317,25 @@ int runScanCommand(int argc, const char **argv) {
     Config cfg = args.configPath.empty()
         ? Config::defaults()
         : Config::loadFromFile(args.configPath);
+
+    if (!args.targetArch.empty()) {
+        if (args.targetArch == "arm64") {
+            cfg.targetArch = TargetArch::ARM64;
+            cfg.cacheLineBytes = 64;
+        } else if (args.targetArch == "arm64-apple") {
+            cfg.targetArch = TargetArch::ARM64Apple;
+            cfg.cacheLineBytes = 128;
+            cfg.cacheLineSpanWarn = 128;
+            cfg.cacheLineSpanCrit = 256;
+        } else if (args.targetArch == "x86-64") {
+            cfg.targetArch = TargetArch::X86_64;
+        } else {
+            llvm::errs() << "lshaz scan: unknown --target-arch '"
+                         << args.targetArch
+                         << "' (valid: x86-64, arm64, arm64-apple)\n";
+            return 3;
+        }
+    }
 
     if (!args.allocator.empty())
         cfg.linkedAllocator = args.allocator;

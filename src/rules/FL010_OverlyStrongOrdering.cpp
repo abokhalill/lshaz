@@ -238,7 +238,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
-                 const Config & /*Cfg*/,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(D);
@@ -256,33 +256,53 @@ public:
 
         const auto &SM = Ctx.getSourceManager();
         unsigned atomicCount = visitor.sites().size();
+        bool isARM = (Cfg.targetArch == TargetArch::ARM64 ||
+                      Cfg.targetArch == TargetArch::ARM64Apple);
 
         for (const auto &site : visitor.sites()) {
-            // seq_cst loads are free on x86-64 TSO (plain MOV, same as acquire).
-            if (site.opClass == AtomicOpClass::Load)
+            // On x86-64 TSO, seq_cst loads are free (plain MOV, same as acquire).
+            // On ARM64, seq_cst loads require LDAR which is costlier than relaxed.
+            if (site.opClass == AtomicOpClass::Load && !isARM)
                 continue;
 
-            // seq_cst RMW lowers to LOCK-prefixed op, same as acq_rel RMW.
-            // Still flag but at reduced severity — the cost delta is zero on
-            // x86-64, though weaker ordering enables compiler reordering.
             bool isStore = (site.opClass == AtomicOpClass::Store);
+            bool isLoad = (site.opClass == AtomicOpClass::Load);
 
-            Severity sev = isStore ? Severity::High : Severity::Medium;
+            // ARM64: all seq_cst ops have real fence cost vs weaker orderings.
+            Severity sev;
+            double confidence;
+            if (isARM) {
+                sev = isStore ? Severity::Critical : Severity::High;
+                confidence = isStore ? 0.90 : 0.80;
+            } else {
+                sev = isStore ? Severity::High : Severity::Medium;
+                confidence = isStore ? 0.85 : 0.55;
+            }
+
             std::vector<std::string> escalations;
-            double confidence = isStore ? 0.85 : 0.55;
 
             if (site.inLoop && isStore) {
                 sev = Severity::Critical;
-                confidence = 0.90;
-                escalations.push_back(
-                    "seq_cst store inside loop: XCHG per iteration, "
-                    "sustained store buffer drain");
+                confidence = 0.92;
+                if (isARM)
+                    escalations.push_back(
+                        "seq_cst store inside loop: DMB ISH + STR per iteration, "
+                        "full barrier drain each cycle");
+                else
+                    escalations.push_back(
+                        "seq_cst store inside loop: XCHG per iteration, "
+                        "sustained store buffer drain");
             } else if (site.inLoop) {
                 sev = Severity::High;
-                escalations.push_back(
-                    "seq_cst RMW inside loop: LOCK-prefixed op per iteration "
-                    "(same cost as acq_rel on x86-64, but prevents compiler "
-                    "reordering optimizations)");
+                if (isARM)
+                    escalations.push_back(
+                        "seq_cst " + std::string(isLoad ? "load" : "RMW") +
+                        " inside loop: barrier per iteration on ARM64");
+                else
+                    escalations.push_back(
+                        "seq_cst RMW inside loop: LOCK-prefixed op per iteration "
+                        "(same cost as acq_rel on x86-64, but prevents compiler "
+                        "reordering optimizations)");
             }
 
             if (atomicCount > 1) {
@@ -296,7 +316,7 @@ public:
             diag.title     = "Overly Strong Atomic Ordering";
             diag.severity  = sev;
             diag.confidence = confidence;
-            diag.evidenceTier = isStore ? EvidenceTier::Likely : EvidenceTier::Speculative;
+            diag.evidenceTier = (isStore || isARM) ? EvidenceTier::Likely : EvidenceTier::Speculative;
             diag.functionName = FD->getQualifiedNameAsString();
 
             if (site.loc.isValid()) {
@@ -306,44 +326,85 @@ public:
             }
 
             std::ostringstream hw;
-            if (isStore) {
-                hw << "seq_cst store on '" << site.varName
-                   << "' in '" << FD->getQualifiedNameAsString()
-                   << "': lowers to XCHG on x86-64 (implicit LOCK prefix, "
-                   << "store buffer drain). release ordering would emit "
-                   << "plain MOV with zero fence cost on TSO.";
+            if (isARM) {
+                if (isStore) {
+                    hw << "seq_cst store on '" << site.varName
+                       << "' in '" << FD->getQualifiedNameAsString()
+                       << "': lowers to DMB ISH + STR on ARM64 (full barrier "
+                       << "before store). release ordering emits STLR "
+                       << "(release-only, no preceding barrier).";
+                } else if (isLoad) {
+                    hw << "seq_cst load on '" << site.varName
+                       << "' in '" << FD->getQualifiedNameAsString()
+                       << "': lowers to LDAR + DMB ISH on ARM64 (acquire + "
+                       << "trailing barrier). acquire ordering emits LDAR "
+                       << "alone (no trailing barrier).";
+                } else {
+                    hw << "seq_cst " << site.atomicOp << " on '" << site.varName
+                       << "' in '" << FD->getQualifiedNameAsString()
+                       << "': lowers to LDAXR/STLXR loop + DMB ISH on ARM64. "
+                       << "acq_rel RMW emits LDAXR/STLXR without trailing barrier.";
+                }
             } else {
-                hw << "seq_cst " << site.atomicOp << " on '" << site.varName
-                   << "' in '" << FD->getQualifiedNameAsString()
-                   << "': lowers to LOCK-prefixed instruction on x86-64. "
-                   << "On TSO, acq_rel RMW emits the same LOCK-prefixed op "
-                   << "— no runtime cost difference, but seq_cst prevents "
-                   << "compiler reordering across the operation.";
+                if (isStore) {
+                    hw << "seq_cst store on '" << site.varName
+                       << "' in '" << FD->getQualifiedNameAsString()
+                       << "': lowers to XCHG on x86-64 (implicit LOCK prefix, "
+                       << "store buffer drain). release ordering would emit "
+                       << "plain MOV with zero fence cost on TSO.";
+                } else {
+                    hw << "seq_cst " << site.atomicOp << " on '" << site.varName
+                       << "' in '" << FD->getQualifiedNameAsString()
+                       << "': lowers to LOCK-prefixed instruction on x86-64. "
+                       << "On TSO, acq_rel RMW emits the same LOCK-prefixed op "
+                       << "— no runtime cost difference, but seq_cst prevents "
+                       << "compiler reordering across the operation.";
+                }
             }
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {
                 {"op", site.atomicOp},
-                {"op_class", isStore ? "store" : "rmw"},
+                {"op_class", isLoad ? "load" : (isStore ? "store" : "rmw")},
                 {"var", site.varName},
                 {"ordering", "seq_cst"},
                 {"function", FD->getQualifiedNameAsString()},
                 {"in_loop", site.inLoop ? "yes" : "no"},
                 {"total_seq_cst_in_func", std::to_string(atomicCount)},
+                {"target_arch", isARM ? "arm64" : "x86-64"},
             };
 
-            if (isStore) {
-                diag.mitigation =
-                    "Use memory_order_release for stores where total order is "
-                    "not required. On x86-64 TSO, release stores emit plain MOV "
-                    "(zero fence cost). Verify no downstream load depends on "
-                    "SC total order before weakening.";
+            if (isARM) {
+                if (isStore) {
+                    diag.mitigation =
+                        "Use memory_order_release for stores where total order is "
+                        "not required. On ARM64, release stores emit STLR (no "
+                        "preceding DMB barrier), saving ~10-20ns per operation.";
+                } else if (isLoad) {
+                    diag.mitigation =
+                        "Use memory_order_acquire for loads where total order is "
+                        "not required. On ARM64, acquire loads emit LDAR without "
+                        "trailing DMB barrier, saving ~10-20ns per operation.";
+                } else {
+                    diag.mitigation =
+                        "Use memory_order_acq_rel for RMW if total order is not "
+                        "required. On ARM64, this eliminates the trailing DMB ISH "
+                        "barrier, reducing per-operation cost measurably.";
+                }
             } else {
-                diag.mitigation =
-                    "Use memory_order_acq_rel for RMW if total order is not "
-                    "required. On x86-64, runtime cost is identical (LOCK prefix "
-                    "either way), but weaker ordering enables compiler "
-                    "reordering optimizations around the operation.";
+                if (isStore) {
+                    diag.mitigation =
+                        "Use memory_order_release for stores where total order is "
+                        "not required. On x86-64 TSO, release stores emit plain MOV "
+                        "(zero fence cost). Verify no downstream load depends on "
+                        "SC total order before weakening.";
+                } else {
+                    diag.mitigation =
+                        "Use memory_order_acq_rel for RMW if total order is not "
+                        "required. On x86-64, runtime cost is identical (LOCK prefix "
+                        "either way), but weaker ordering enables compiler "
+                        "reordering optimizations around the operation.";
+                }
             }
 
             diag.escalations = std::move(escalations);

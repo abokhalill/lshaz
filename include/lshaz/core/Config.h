@@ -9,7 +9,16 @@
 
 namespace lshaz {
 
+enum class TargetArch : uint8_t {
+    X86_64,     // 64B cache lines, TSO, MESI coherence
+    ARM64,      // 64B cache lines (Graviton), weak ordering
+    ARM64Apple, // 128B cache lines (M-series P-cores), weak ordering
+};
+
 struct Config {
+    // Target architecture (affects cache model, ordering cost model, rule text)
+    TargetArch targetArch       = TargetArch::X86_64;
+
     // Cache model
     size_t cacheLineBytes       = 64;
     size_t cacheLineSpanWarn    = 64;   // FL001 threshold

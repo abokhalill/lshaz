@@ -73,6 +73,7 @@ lshaz scan <path> [options]
 | `--watch-interval <N>` | Seconds between watch polls (default: 2) |
 | `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
 | `--changed-files <path>` | Incremental mode: only scan TUs affected by files listed in `<path>` (one per line). Header changes trigger full scan conservatively. |
+| `--target-arch <arch>` | Target architecture: `x86-64` (default, 64B lines, TSO), `arm64` (64B lines, weak ordering), `arm64-apple` (128B lines, weak ordering). Affects cache model, FL010 severity/reasoning, and mitigation text. |
 | `--help` | Show help with exit code reference |
 
 ---

@@ -156,7 +156,7 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
 - **Single-TU scope** — escape analysis does not cross translation unit boundaries.
 - **Requires `compile_commands.json`** — TUs that fail to parse (missing headers) are skipped, not crashed.
-- **x86-64 only** — assumes 64-byte cache lines, TSO memory model, MESI coherence.
+- **x86-64 default** — assumes 64-byte cache lines and TSO by default. Use `--target-arch arm64` or `--target-arch arm64-apple` (128B lines) for ARM64 analysis.
 
 ## Documentation
 
