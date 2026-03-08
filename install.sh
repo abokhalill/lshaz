@@ -46,6 +46,11 @@ if [ -z "$LLVM_PREFIX" ]; then
 fi
 info "using LLVM at $LLVM_PREFIX"
 
+# Verify static libraries exist (runtime packages don't include them).
+if [ ! -f "$LLVM_PREFIX/lib/libclangBasic.a" ]; then
+    die "LLVM found at $LLVM_PREFIX but static libraries missing. Install: sudo apt install llvm-${v:-18}-dev libclang-${v:-18}-dev clang-${v:-18}"
+fi
+
 # Clone into temp directory.
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT

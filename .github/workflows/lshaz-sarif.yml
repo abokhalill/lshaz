@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install LLVM/Clang build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq llvm-18-dev libclang-18-dev clang-18 cmake
+
       - name: Install lshaz
         run: |
           curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
