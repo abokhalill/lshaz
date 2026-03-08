@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+# lshaz PR Analysis — runs lshaz on the PR diff and gates on new findings.
+#
+# Usage: Copy this file to .github/workflows/ in any project that uses lshaz.
+# Requires compile_commands.json in the repo (run lshaz init first).
+
+name: lshaz PR Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lshaz-diff:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install lshaz
+        run: |
+          curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Scan baseline (main)
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          lshaz scan . --no-ir --format json --output /tmp/baseline.json 2>/dev/null || true
+          git checkout ${{ github.event.pull_request.head.sha }}
+
+      - name: Scan PR head
+        run: lshaz scan . --no-ir --format json --output /tmp/head.json 2>/dev/null || true
+
+      - name: Diff findings
+        id: diff
+        run: |
+          set +e
+          lshaz diff /tmp/baseline.json /tmp/head.json > /tmp/diff-output.txt 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat /tmp/diff-output.txt
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('/tmp/diff-output.txt', 'utf8');
+            const exitCode = '${{ steps.diff.outputs.exit_code }}';
+            const status = exitCode === '0' ? 'No new findings' : 'New findings introduced';
+            const body = `### lshaz ${status}\n\n\`\`\`\n${diff}\n\`\`\`\n`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('### lshaz'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Gate on new findings
+        if: steps.diff.outputs.exit_code != '0'
+        run: |
+          echo "::error::lshaz found new performance hazards in this PR"
+          exit 1

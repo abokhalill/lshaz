@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# lshaz SARIF Upload — runs lshaz and uploads results to GitHub Code Scanning.
+#
+# Usage: Copy this file to .github/workflows/ in any project that uses lshaz.
+# Requires compile_commands.json in the repo (run lshaz init first).
+
+name: lshaz Code Scanning
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  lshaz-sarif:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lshaz
+        run: |
+          curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run lshaz
+        run: lshaz scan . --no-ir --format sarif --output results.sarif 2>/dev/null || true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: lshaz

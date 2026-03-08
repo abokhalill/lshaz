@@ -140,6 +140,17 @@ lshaz explain FL002
 | 2 | Parse errors |
 | 3 | Infrastructure failure |
 
+## CI Integration
+
+Ready-to-use GitHub Actions workflows in `.github/workflows/`:
+
+| Workflow | File | What it does |
+|---|---|---|
+| PR Check | [`lshaz-pr.yml`](.github/workflows/lshaz-pr.yml) | Scans baseline + PR head, diffs findings, gates merge on regressions, posts PR comment |
+| Code Scanning | [`lshaz-sarif.yml`](.github/workflows/lshaz-sarif.yml) | Uploads SARIF to GitHub Security tab on push/PR/schedule |
+
+Copy these into any project that has `compile_commands.json` (run `lshaz init` first).
+
 ## Limitations
 
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
