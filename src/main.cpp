@@ -179,6 +179,17 @@ int main(int argc, const char **argv) {
         return 0;
     }
 
+    // Reject unknown subcommands. Only fall through to legacy CLI if
+    // argv[1] looks like a file path or flag (starts with '-', '/', '.',
+    // or contains '.' suggesting a filename).
+    if (argc >= 2 && argv[1][0] != '-' && argv[1][0] != '/' &&
+        argv[1][0] != '.' && !std::strchr(argv[1], '.')) {
+        llvm::errs() << "lshaz: unknown command '" << argv[1] << "'\n\n"
+                     << "Available commands: scan, init, diff, explain, version, help\n"
+                     << "Run 'lshaz help' for usage.\n";
+        return 3;
+    }
+
     // Legacy CLI: bare source files with `-- <flags>`.
     // Deprecated since 0.2.0, removal in 0.4.0.
     llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
