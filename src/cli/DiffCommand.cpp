@@ -38,15 +38,18 @@ struct DiagEntry {
 };
 
 // Minimal JSON string extraction. Finds "key": "value" pairs.
-// Not a general-purpose parser — sufficient for lshaz's own JSON output.
+// Handles backslash-escaped quotes within values.
 std::string extractString(const std::string &json, const std::string &key) {
     std::string needle = "\"" + key + "\": \"";
     auto pos = json.find(needle);
     if (pos == std::string::npos) return {};
     pos += needle.size();
-    auto end = json.find('"', pos);
-    if (end == std::string::npos) return {};
-    return json.substr(pos, end - pos);
+    // Scan for unescaped closing quote.
+    for (size_t i = pos; i < json.size(); ++i) {
+        if (json[i] == '\\') { ++i; continue; }
+        if (json[i] == '"') return json.substr(pos, i - pos);
+    }
+    return {};
 }
 
 unsigned extractUnsigned(const std::string &json, const std::string &key) {
@@ -136,11 +139,14 @@ void printDiffUsage() {
 } // anonymous namespace
 
 int runDiffCommand(int argc, const char **argv) {
-    if (argc < 1 ||
-        (argc >= 1 && (std::strcmp(argv[0], "--help") == 0 ||
-                       std::strcmp(argv[0], "-h") == 0))) {
+    if (argc < 1) {
         printDiffUsage();
-        return argc < 1 ? 3 : 0;
+        return 3;
+    }
+    if (std::strcmp(argv[0], "--help") == 0 ||
+        std::strcmp(argv[0], "-h") == 0) {
+        printDiffUsage();
+        return 0;
     }
 
     if (argc < 2) {
@@ -160,31 +166,38 @@ int runDiffCommand(int argc, const char **argv) {
         return 0;
     }
 
-    // Build key sets.
-    std::set<DiagKey> beforeKeys, afterKeys;
+    // Build multisets to handle duplicate keys correctly.
+    std::multiset<DiagKey> beforeKeys, afterKeys;
     for (const auto &e : before) beforeKeys.insert(e.key);
     for (const auto &e : after) afterKeys.insert(e.key);
 
-    // New: in after but not before.
+    // New: present in after more times than in before.
     std::vector<const DiagEntry *> newFindings;
-    for (const auto &e : after) {
-        if (beforeKeys.find(e.key) == beforeKeys.end())
-            newFindings.push_back(&e);
+    {
+        auto remaining = beforeKeys;
+        for (const auto &e : after) {
+            auto it = remaining.find(e.key);
+            if (it != remaining.end())
+                remaining.erase(it);
+            else
+                newFindings.push_back(&e);
+        }
     }
 
-    // Resolved: in before but not after.
+    // Resolved: present in before more times than in after.
     std::vector<const DiagEntry *> resolved;
-    for (const auto &e : before) {
-        if (afterKeys.find(e.key) == afterKeys.end())
-            resolved.push_back(&e);
+    {
+        auto remaining = afterKeys;
+        for (const auto &e : before) {
+            auto it = remaining.find(e.key);
+            if (it != remaining.end())
+                remaining.erase(it);
+            else
+                resolved.push_back(&e);
+        }
     }
 
-    // Unchanged count.
-    unsigned unchanged = 0;
-    for (const auto &e : after) {
-        if (beforeKeys.find(e.key) != beforeKeys.end())
-            ++unchanged;
-    }
+    unsigned unchanged = before.size() - resolved.size();
 
     // Output.
     if (!newFindings.empty()) {
