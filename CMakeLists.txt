@@ -75,6 +75,7 @@ set(LSHAZ_SOURCES
     src/cli/ExplainCommand.cpp
     src/cli/InitCommand.cpp
     src/cli/DiffCommand.cpp
+    src/cli/FixCommand.cpp
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})

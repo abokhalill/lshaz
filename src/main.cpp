@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cli/DiffCommand.h"
 #include "cli/ExplainCommand.h"
+#include "cli/FixCommand.h"
 #include "cli/InitCommand.h"
 #include "cli/ScanCommand.h"
 
@@ -19,6 +20,8 @@ int main(int argc, const char **argv) {
         return lshaz::runInitCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "diff") == 0)
         return lshaz::runDiffCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "fix") == 0)
+        return lshaz::runFixCommand(argc - 2, argv + 2);
 
     if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
                       std::strcmp(argv[1], "--version") == 0)) {
@@ -36,6 +39,7 @@ int main(int argc, const char **argv) {
             << "\n"
             << "Usage:\n"
             << "  lshaz scan <path> [options]   Analyze a project\n"
+            << "  lshaz fix <path> [options]    Auto-remediate fixable findings\n"
             << "  lshaz init [path]             Generate compile_commands.json and config\n"
             << "  lshaz diff <a.json> <b.json>  Compare two scan results\n"
             << "  lshaz explain [rule]          Show rule documentation\n"

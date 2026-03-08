@@ -172,6 +172,38 @@ lshaz diff before.json after.json
 
 ---
 
+## Fix Subcommand
+
+```
+lshaz fix <path> [options]
+lshaz fix <file.cpp> [options] -- <compiler-flags>
+```
+
+Applies mechanical auto-remediation for fixable diagnostics. Currently supports:
+
+| Rule | Fix |
+|---|---|
+| FL001 | Adds `alignas(64)` to cache-line-spanning structs |
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Show patches without modifying files |
+| `--rules <list>` | Comma-separated rules to fix (default: `FL001`) |
+| `--compile-db <path>` | Path to `compile_commands.json` |
+| `--config <path>` | Path to `lshaz.config.yaml` |
+
+**Example:**
+
+```bash
+# Preview fixes
+lshaz fix . --dry-run
+
+# Apply fixes to a single file
+lshaz fix src/engine.cpp -- -std=c++20
+```
+
+---
+
 ## Single-File Mode
 
 Analyze individual source files with explicit compiler flags:
