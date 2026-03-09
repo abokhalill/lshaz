@@ -238,6 +238,9 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
                 visitor.TraverseStmt(FD->getBody());
         }
     }
+
+    // Pass 3: count write sites per global for write-once analysis.
+    collectGlobalWriteSites(TU);
 }
 
 bool EscapeAnalysis::isFieldMutable(const clang::FieldDecl *FD) const {
@@ -350,6 +353,104 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::CXXRecordDecl *RD) const {
                 return true;
         }
     }
+
+    return false;
+}
+
+namespace {
+
+// Counts write references to global variables within function bodies.
+// A "write" is: LHS of assignment/compound-assignment, operand of
+// increment/decrement, or passed as non-const pointer/reference argument.
+class GlobalWriteVisitor
+    : public clang::RecursiveASTVisitor<GlobalWriteVisitor> {
+public:
+    std::unordered_map<const clang::VarDecl *, unsigned> &counts;
+    explicit GlobalWriteVisitor(
+        std::unordered_map<const clang::VarDecl *, unsigned> &c)
+        : counts(c) {}
+
+    bool VisitBinaryOperator(clang::BinaryOperator *BO) {
+        if (!BO->isAssignmentOp())
+            return true;
+        recordWrite(BO->getLHS());
+        return true;
+    }
+
+    bool VisitUnaryOperator(clang::UnaryOperator *UO) {
+        if (UO->isIncrementDecrementOp())
+            recordWrite(UO->getSubExpr());
+        return true;
+    }
+
+    bool VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr *CE) {
+        auto op = CE->getOperator();
+        if (op >= clang::OO_Equal && op <= clang::OO_PipeEqual) {
+            if (CE->getNumArgs() > 0)
+                recordWrite(CE->getArg(0));
+        }
+        if (op == clang::OO_PlusPlus || op == clang::OO_MinusMinus) {
+            if (CE->getNumArgs() > 0)
+                recordWrite(CE->getArg(0));
+        }
+        return true;
+    }
+
+private:
+    void recordWrite(const clang::Expr *E) {
+        if (!E) return;
+        E = E->IgnoreParenImpCasts();
+        if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
+            if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl())) {
+                if (VD->hasGlobalStorage())
+                    ++counts[VD->getCanonicalDecl()];
+            }
+        }
+        // Member access on a global: g.field = x counts as write to g.
+        if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+            recordWrite(ME->getBase());
+        }
+    }
+};
+
+} // anonymous namespace
+
+void EscapeAnalysis::collectGlobalWriteSites(
+    const clang::TranslationUnitDecl *TU) {
+    GlobalWriteVisitor visitor(globalWriteCounts_);
+    for (auto *D : TU->decls()) {
+        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+            if (FD->doesThisDeclarationHaveABody())
+                visitor.TraverseStmt(FD->getBody());
+        }
+    }
+}
+
+bool EscapeAnalysis::isWriteOnceGlobal(const clang::VarDecl *VD) const {
+    if (!VD || !VD->hasGlobalStorage())
+        return false;
+
+    const auto *canon = VD->getCanonicalDecl();
+
+    // Has a non-trivial initializer → one write at declaration.
+    bool hasInit = VD->hasInit() && !llvm::isa<clang::ImplicitValueInitExpr>(
+                                         VD->getInit()->IgnoreImplicit());
+
+    auto it = globalWriteCounts_.find(canon);
+    unsigned bodyCounts = (it != globalWriteCounts_.end()) ? it->second : 0;
+
+    // Zero writes in function bodies + has initializer → write-once.
+    if (hasInit && bodyCounts == 0)
+        return true;
+
+    // No initializer but exactly one write in function bodies → write-once.
+    if (!hasInit && bodyCounts <= 1)
+        return true;
+
+    // Has initializer and exactly one write → could be re-initialization, but
+    // still low contention. Accept as write-once.
+    if (hasInit && bodyCounts <= 1)
+        return true;
 
     return false;
 }

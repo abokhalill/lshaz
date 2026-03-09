@@ -42,6 +42,9 @@ public:
         if (!escape.isGlobalSharedMutable(VD))
             return;
 
+        // Trigger TU scan for write-site collection.
+        escape.scanTranslationUnit(Ctx.getTranslationUnitDecl());
+
         clang::QualType QT = VD->getType();
         bool hasAtomics = false;
         bool isRecord = false;
@@ -55,10 +58,19 @@ public:
         if (escape.isAtomicType(QT))
             hasAtomics = true;
 
+        bool writeOnce = escape.isWriteOnceGlobal(VD);
+
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
-        if (hasAtomics) {
+        if (writeOnce) {
+            // Write-once globals are initialized and never mutated at runtime.
+            // Contention risk is negligible. Demote to Informational.
+            sev = Severity::Informational;
+            escalations.push_back(
+                "write-once: initialized at declaration or assigned at most "
+                "once in function bodies — negligible runtime contention");
+        } else if (hasAtomics) {
             sev = Severity::Critical;
             escalations.push_back(
                 "Contains atomic fields: confirmed multi-writer intent, "
@@ -72,8 +84,9 @@ public:
         diag.ruleID    = "FL040";
         diag.title     = "Centralized Mutable Global State";
         diag.severity  = sev;
-        diag.confidence = hasAtomics ? 0.85 : 0.60;
-        diag.evidenceTier = hasAtomics ? EvidenceTier::Likely : EvidenceTier::Speculative;
+        diag.confidence = writeOnce ? 0.30 : (hasAtomics ? 0.85 : 0.60);
+        diag.evidenceTier = writeOnce ? EvidenceTier::Speculative
+                          : (hasAtomics ? EvidenceTier::Likely : EvidenceTier::Speculative);
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
@@ -98,6 +111,7 @@ public:
             {"const", "no"},
             {"thread_local", "no"},
             {"atomics", hasAtomics ? "yes" : "no"},
+            {"write_once", writeOnce ? "yes" : "no"},
         };
 
         diag.mitigation =

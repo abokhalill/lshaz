@@ -7,6 +7,7 @@
 #include <clang/AST/Type.h>
 
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace lshaz {
@@ -54,6 +55,11 @@ public:
     // Mark a type as published to a cross-thread context.
     void markPublished(clang::QualType QT);
 
+    // Write-once analysis: a global assigned at most once (at declaration or
+    // in an init function) is unlikely to cause runtime contention.
+    // Requires prior scanTranslationUnit() call.
+    bool isWriteOnceGlobal(const clang::VarDecl *VD) const;
+
 private:
 
     clang::ASTContext &ctx_;
@@ -61,6 +67,13 @@ private:
     // Canonical qualified names of types observed in publication paths.
     std::unordered_set<std::string> publishedTypes_;
     bool tuScanned_ = false;
+
+    // Per-global write site count, populated by scanTranslationUnit.
+    // Key: VarDecl canonical pointer. Value: number of write sites in TU
+    // (excluding the initializer expression on the VarDecl itself).
+    std::unordered_map<const clang::VarDecl *, unsigned> globalWriteCounts_;
+
+    void collectGlobalWriteSites(const clang::TranslationUnitDecl *TU);
 };
 
 } // namespace lshaz
