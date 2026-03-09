@@ -1,0 +1,1411 @@
+{
+  "version": "0.2.0",
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "timestamp": 1773065967,
+    "configPath": "",
+    "irOptLevel": "O0",
+    "irEnabled": false,
+    "sourceFiles": ["/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/casts.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/cycleclock.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/low_level_alloc.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/poison.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/raw_logging.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/scoped_set_env.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/spinlock.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/spinlock_wait.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/strerror.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/sysinfo.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/tracing.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/unscaledcycleclock.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/log_severity.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/throw_delegate.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler_force_weak_definition.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/raw_hash_set.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/crc32c.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/cpu_detect.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_cord_state.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_memcpy_fallback.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_memcpy_x86_arm_combined.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_non_temporal_memcpy.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_x86_arm_combined.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/failure_signal_handler.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/address_is_readable.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/borrowed_fixup_buffer.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/decode_rust_punycode.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/demangle.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/demangle_rust.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/elf_mem_image.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/examine_stack.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/utf8_for_code_point.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/vdso_support.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/leak_check.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/stacktrace.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/symbolize.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/commandlineflag.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/commandlineflag.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/flag.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/private_handle_accessor.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/program_name.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/usage.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/marshalling.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/parse.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/reflection.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/usage.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/usage_config.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/hash/internal/city.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/hash/internal/hash.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/die_if_null.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/flags.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/globals.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/initialize.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/check_op.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/conditions.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/fnmatch.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/globals.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/log_format.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/log_message.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/log_sink_set.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/nullguard.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/proto.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/structured_proto.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/vlog_config.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/log_entry.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/log_sink.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/numeric/int128.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/hashtable.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/internal/exponential_biased.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/internal/periodic_sampler.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/internal/profile_builder.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/discrete_distribution.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/gaussian_distribution.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/chi_square.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/distribution_test_util.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/entropy_pool.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/randen.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/randen_detect.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/randen_hwaes.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/randen_round_keys.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/randen_slow.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/seed_material.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/seed_gen_exception.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/seed_sequences.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/status/internal/status_internal.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/status/status.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/status/status_payload_printer.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/status/statusor.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/ascii.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/charconv.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/cord.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/cord_analysis.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/escaping.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/charconv_bigint.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/charconv_parse.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_internal.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_btree.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_btree_navigator.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_btree_reader.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_consume.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_crc.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_functions.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_handle.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_info.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_sample_token.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/damerau_levenshtein_distance.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/escaping.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/generic_printer.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/memutil.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/ostringstream.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/arg.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/bind.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/extension.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/float_conversion.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/output.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/parser.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/stringify_sink.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/utf8.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/match.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/numbers.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/str_cat.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/str_replace.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/str_split.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/substitute.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/barrier.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/blocking_counter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/create_thread_identity.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/futex_waiter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/graphcycles.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/kernel_timeout.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/per_thread_sem.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/pthread_waiter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/sem_waiter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/stdcpp_waiter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/waiter_base.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/win32_waiter.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/mutex.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/notification.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/civil_time.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/clock.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/clock_interface.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/duration.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/format.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/civil_time_detail.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_fixed.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_format.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_if.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_impl.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_info.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_libc.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_lookup.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_posix.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/zone_info_source.cc", "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/time.cc"],
+    "compilers": [],
+    "totalTUs": 157,
+    "failedTUCount": 0,
+    "failedTUs": []
+  },
+  "diagnostics": [
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/low_level_alloc.cc",
+        "line": 79,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'AllocList' occupies 280B across 5 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "7", "lines_spanned": "5", "straddling_fields": "1", "sizeof": "280B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 5 cache lines: elevated L1D eviction pressure", "field 'next' straddles line boundary at offset 40B (240B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/low_level_alloc.cc",
+        "line": 204,
+        "column": 23
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Arena' occupies 328B across 6 cache line(s). 2 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "1", "mutable_fields": "12", "lines_spanned": "6", "straddling_fields": "2", "sizeof": "328B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field 'next' straddles line boundary at offset 48B (240B): split load/store penalty", "field 'freelist' straddles line boundary at offset 8B (280B): split load/store penalty", "1 atomic field(s) across 1 line(s): RFO traffic on each distinct line"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/low_level_alloc.cc",
+        "line": 309,
+        "column": 28
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ArenaLock' occupies 144B across 3 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "5", "lines_spanned": "3", "straddling_fields": "2", "sizeof": "144B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field '__val' straddles line boundary at offset 8B (128B): split load/store penalty", "field 'mask_' straddles line boundary at offset 8B (128B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 142,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ThreadIdentity' occupies 352B across 6 cache line(s). 2 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "4", "mutable_fields": "21", "lines_spanned": "6", "straddling_fields": "2", "sizeof": "352B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field 'data' straddles line boundary at offset 64B (256B): split load/store penalty", "field 'waiter_state' straddles line boundary at offset 64B (256B): split load/store penalty", "4 atomic field(s) across 2 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 142,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ThreadIdentity' (352B, 6 line(s)): 105 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "3", "lines": "6", "mutable_pairs_same_line": "105", "sizeof": "352B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'ticker' and 'wait_start' share line 5: guaranteed cross-core invalidation on write", "atomic fields 'ticker' and 'is_idle' share line 5: guaranteed cross-core invalidation on write", "atomic fields 'wait_start' and 'is_idle' share line 5: guaranteed cross-core invalidation on write", "line 0: 1 atomic + 13 non-atomic mutable field(s) — mixed write surface", "line 5: 3 atomic + 2 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL090",
+      "title": "Hazard Amplification",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 142,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ThreadIdentity' (352B, 6 lines) exhibits compound hazard: 4 atomic field(s) across 2 line(s) with thread-escape evidence. Under multi-core contention, per-line RFO ownership transfer and coherence invalidation interact across the full footprint. [Assumes: struct is accessed concurrently from multiple cores under contention]",
+      "structuralEvidence": {"signal_count": "3", "straddling": "2", "mutable_fields": "21", "thread_escape": "yes", "atomic_lines": "2", "atomic_fields": "4", "cache_lines": "6", "sizeof": "352B", "struct": "ThreadIdentity"},
+      "mitigation": "Decompose into separate cache-line-aligned sub-structures. Isolate atomic fields with alignas(64) padding. Split hot (frequently written) and cold (rarely accessed) fields. Consider per-core replicas with periodic merge.",
+      "escalations": ["352B across 6 cache lines", "4 atomic field(s) on 2 line(s): per-line RFO ownership transfer", "thread-escaping: coherence traffic amplified across participating cores", "2 field(s) straddle line boundaries: split load/store penalty compounds with coherence cost", "21 mutable fields across 6 line(s): wide write surface", "3 atomic pair(s) share cache line(s): intra-line contention adds to cross-line RFO cost", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 150,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'WaiterState' occupies 256B across 4 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "1", "lines_spanned": "4", "straddling_fields": "1", "sizeof": "256B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 4 cache lines: elevated L1D eviction pressure", "field 'data' straddles line boundary at offset 0B (256B): split load/store penalty", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler.h",
+        "line": 66,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'HashtablezInfo' occupies 664B across 11 cache line(s). 1 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "10", "mutable_fields": "26", "lines_spanned": "11", "straddling_fields": "1", "sizeof": "664B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 11 cache lines: elevated L1D eviction pressure", "field 'stack' straddles line boundary at offset 128B (512B): split load/store penalty", "10 atomic field(s) across 2 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 7 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler.h",
+        "line": 66,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'HashtablezInfo' (664B, 11 line(s)): 117 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "20", "lines": "11", "mutable_pairs_same_line": "117", "sizeof": "664B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'mu_' and 'capacity' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'mu_' and 'size' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'mu_' and 'num_erases' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'mu_' and 'num_rehashes' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'capacity' and 'size' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'capacity' and 'num_erases' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'capacity' and 'num_rehashes' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'size' and 'num_erases' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'size' and 'num_rehashes' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'num_erases' and 'num_rehashes' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'max_probe_length' and 'total_probe_length' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'max_probe_length' and 'hashes_bitwise_or' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'max_probe_length' and 'hashes_bitwise_and' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'max_probe_length' and 'max_reserve' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'total_probe_length' and 'hashes_bitwise_or' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'total_probe_length' and 'hashes_bitwise_and' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'total_probe_length' and 'max_reserve' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'hashes_bitwise_or' and 'hashes_bitwise_and' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'hashes_bitwise_or' and 'max_reserve' share line 1: guaranteed cross-core invalidation on write", "atomic fields 'hashes_bitwise_and' and 'max_reserve' share line 1: guaranteed cross-core invalidation on write", "line 0: 5 atomic + 4 non-atomic mutable field(s) — mixed write surface", "line 1: 5 atomic + 8 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 7 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL090",
+      "title": "Hazard Amplification",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler.h",
+        "line": 66,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'HashtablezInfo' (664B, 11 lines) exhibits compound hazard: 10 atomic field(s) across 2 line(s) with thread-escape evidence. Under multi-core contention, per-line RFO ownership transfer and coherence invalidation interact across the full footprint. [Assumes: struct is accessed concurrently from multiple cores under contention]",
+      "structuralEvidence": {"signal_count": "3", "straddling": "1", "mutable_fields": "26", "thread_escape": "yes", "atomic_lines": "2", "atomic_fields": "10", "cache_lines": "11", "sizeof": "664B", "struct": "HashtablezInfo"},
+      "mitigation": "Decompose into separate cache-line-aligned sub-structures. Isolate atomic fields with alignas(64) padding. Split hot (frequently written) and cold (rarely accessed) fields. Consider per-core replicas with periodic merge.",
+      "escalations": ["664B across 11 cache lines", "10 atomic field(s) on 2 line(s): per-line RFO ownership transfer", "thread-escaping: coherence traffic amplified across participating cores", "1 field(s) straddle line boundaries: split load/store penalty compounds with coherence cost", "26 mutable fields across 11 line(s): wide write surface", "20 atomic pair(s) share cache line(s): intra-line contention adds to cross-line RFO cost", "cross-TU: deduplicated from 7 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_cord_state.h",
+        "line": 127,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'RefcountedRep' occupies 104B across 2 cache line(s). 4 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "1", "mutable_fields": "20", "lines_spanned": "2", "straddling_fields": "4", "sizeof": "104B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field '_M_start' straddles line boundary at offset 40B (32B): split load/store penalty", "field '_M_impl' straddles line boundary at offset 24B (80B): split load/store penalty", "field 'prefix_crc' straddles line boundary at offset 24B (80B): split load/store penalty", "field 'rep' straddles line boundary at offset 8B (96B): split load/store penalty", "1 atomic field(s) across 1 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 15 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_internal.h",
+        "line": 95,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CRC32' occupies 8200B across 129 cache line(s). 5 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "5", "lines_spanned": "129", "straddling_fields": "5", "sizeof": "8200B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 129 cache lines: elevated L1D eviction pressure", "field 'table0_' straddles line boundary at offset 8B (1024B): split load/store penalty", "field 'zeroes_' straddles line boundary at offset 1032B (1024B): split load/store penalty", "field 'table_' straddles line boundary at offset 2056B (4096B): split load/store penalty", "field 'reverse_table0_' straddles line boundary at offset 6152B (1024B): split load/store penalty", "field 'reverse_zeroes_' straddles line boundary at offset 7176B (1024B): split load/store penalty", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/failure_signal_handler.cc",
+        "line": 98,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FailureSignalData' occupies 168B across 3 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "8", "lines_spanned": "3", "straddling_fields": "3", "sizeof": "168B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field '__val' straddles line boundary at offset 24B (128B): split load/store penalty", "field 'sa_mask' straddles line boundary at offset 24B (128B): split load/store penalty", "field 'previous_action' straddles line boundary at offset 16B (152B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/borrowed_fixup_buffer.cc",
+        "line": 36,
+        "column": 29
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FixupStackBuffer' occupies 1544B across 25 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "4", "lines_spanned": "25", "straddling_fields": "2", "sizeof": "1544B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 25 cache lines: elevated L1D eviction pressure", "field 'frames' straddles line boundary at offset 8B (1024B): split load/store penalty", "field 'sizes' straddles line boundary at offset 1032B (512B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/demangle_rust.cc",
+        "line": 72,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'RustSymbolParser' occupies 432B across 7 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "11", "lines_spanned": "7", "straddling_fields": "3", "sizeof": "432B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 7 cache lines: elevated L1D eviction pressure", "field 'recursion_stack_' straddles line boundary at offset 0B (256B): split load/store penalty", "field 'namespace_stack_' straddles line boundary at offset 260B (64B): split load/store penalty", "field 'position_stack_' straddles line boundary at offset 328B (64B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/symbolize_elf.inc",
+        "line": 192,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ObjFile' occupies 328B across 6 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "23", "lines_spanned": "6", "straddling_fields": "3", "sizeof": "328B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field 'elf_header' straddles line boundary at offset 40B (64B): split load/store penalty", "field '_M_elems' straddles line boundary at offset 104B (224B): split load/store penalty", "field 'phdr' straddles line boundary at offset 104B (224B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/symbolize_elf.inc",
+        "line": 306,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Symbolizer' occupies 22560B across 353 cache line(s). 4 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "10", "lines_spanned": "353", "straddling_fields": "4", "sizeof": "22560B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 353 cache lines: elevated L1D eviction pressure", "field 'symbol_buf_' straddles line boundary at offset 26B (3072B): split load/store penalty", "field 'file_cache_' straddles line boundary at offset 3098B (8192B): split load/store penalty", "field 'tmp_buf_' straddles line boundary at offset 11296B (1024B): split load/store penalty", "field 'symbol_cache_' straddles line boundary at offset 12320B (10240B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/internal/flag.h",
+        "line": 583,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FlagImpl' occupies 88B across 2 cache line(s). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "2", "mutable_fields": "26", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "88B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["2 atomic field(s) across 1 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/reflection.cc",
+        "line": 49,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FlagRegistry' occupies 72B across 2 cache line(s). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "2", "mutable_fields": "21", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["2 atomic field(s) across 2 line(s): RFO traffic on each distinct line"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/usage_config.h",
+        "line": 68,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FlagsUsageConfig' occupies 160B across 3 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "50", "lines_spanned": "3", "straddling_fields": "0", "sizeof": "160B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "cross-TU: deduplicated from 5 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/hash/internal/hash.h",
+        "line": 163,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PiecewiseCombiner' occupies 1040B across 17 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "17", "straddling_fields": "1", "sizeof": "1040B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 17 cache lines: elevated L1D eviction pressure", "field 'buf_' straddles line boundary at offset 0B (1024B): split load/store penalty", "cross-TU: deduplicated from 22 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/check_op.h",
+        "line": 199,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CheckOpMessageBuilder' occupies 376B across 6 cache line(s). 5 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "60", "lines_spanned": "6", "straddling_fields": "5", "sizeof": "376B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field '_M_word_zero' straddles line boundary at offset 56B (16B): split load/store penalty", "field '_M_local_word' straddles line boundary at offset 72B (128B): split load/store penalty", "field '_M_local_word' straddles line boundary at offset 176B (128B): split load/store penalty", "field '_M_stringbuf' straddles line boundary at offset 8B (104B): split load/store penalty", "field 'stream_' straddles line boundary at offset 0B (376B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/conditions.h",
+        "line": 228,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'LogEveryNSecState' (16B, 1 line(s)): 1 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "1", "sizeof": "16B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'counter_' and 'next_log_time_cycles_' share line 0: guaranteed cross-core invalidation on write", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/log_message.cc",
+        "line": 152,
+        "column": 20
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'LogMessageData' occupies 30576B across 478 cache line(s). 15 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "75", "lines_spanned": "478", "straddling_fields": "15", "sizeof": "30576B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 478 cache lines: elevated L1D eviction pressure", "field '_M_local_buf' straddles line boundary at offset 120B (16B): split load/store penalty", "field '' straddles line boundary at offset 120B (16B): split load/store penalty", "field 'stacktrace_' straddles line boundary at offset 104B (32B): split load/store penalty", "field 'entry' straddles line boundary at offset 0B (136B): split load/store penalty", "field 'inlined_data' straddles line boundary at offset 152B (128B): split load/store penalty", "field 'inlined' straddles line boundary at offset 152B (128B): split load/store penalty", "field 'data_' straddles line boundary at offset 152B (128B): split load/store penalty", "field 'storage_' straddles line boundary at offset 144B (136B): split load/store penalty", "field 'extra_sinks' straddles line boundary at offset 144B (136B): split load/store penalty", "field '_M_local_word' straddles line boundary at offset 360B (128B): split load/store penalty", "field 'manipulated' straddles line boundary at offset 288B (272B): split load/store penalty", "field '_M_elems' straddles line boundary at offset 560B (15000B): split load/store penalty", "field 'encoded_buf' straddles line boundary at offset 560B (15000B): split load/store penalty", "field '_M_elems' straddles line boundary at offset 15576B (15000B): split load/store penalty", "field 'string_buf' straddles line boundary at offset 15576B (15000B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/vlog_config.h",
+        "line": 60,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'VLogSite' (24B, 1 line(s)): 1 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "1", "sizeof": "24B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'v_' and 'next_' share line 0: guaranteed cross-core invalidation on write", "cross-TU: deduplicated from 6 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/log_entry.h",
+        "line": 54,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'LogEntry' occupies 136B across 3 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "31", "lines_spanned": "3", "straddling_fields": "3", "sizeof": "136B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field '_M_local_buf' straddles line boundary at offset 120B (16B): split load/store penalty", "field '' straddles line boundary at offset 120B (16B): split load/store penalty", "field 'stacktrace_' straddles line boundary at offset 104B (32B): split load/store penalty", "cross-TU: deduplicated from 6 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/internal/profile_builder.h",
+        "line": 84,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ProfileBuilder' occupies 184B across 3 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "50", "lines_spanned": "3", "straddling_fields": "2", "sizeof": "184B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field '_M_impl' straddles line boundary at offset 112B (24B): split load/store penalty", "field 'sample_types_' straddles line boundary at offset 112B (24B): split load/store penalty", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/gaussian_distribution.h",
+        "line": 75,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Tables' occupies 2064B across 33 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "2", "lines_spanned": "33", "straddling_fields": "2", "sizeof": "2064B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 33 cache lines: elevated L1D eviction pressure", "field 'x' straddles line boundary at offset 0B (1032B): split load/store penalty", "field 'f' straddles line boundary at offset 1032B (1032B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/entropy_pool.cc",
+        "line": 51,
+        "column": 5
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'RandenPoolEntry' occupies 320B across 5 cache line(s). 1 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "1", "mutable_fields": "6", "lines_spanned": "5", "straddling_fields": "1", "sizeof": "320B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 5 cache lines: elevated L1D eviction pressure", "field 'state_' straddles line boundary at offset 0B (256B): split load/store penalty", "1 atomic field(s) across 1 line(s): RFO traffic on each distinct line"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/cord.h",
+        "line": 466,
+        "column": 9
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ChunkIterator' occupies 152B across 3 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "11", "lines_spanned": "3", "straddling_fields": "3", "sizeof": "152B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field 'node_' straddles line boundary at offset 56B (96B): split load/store penalty", "field 'navigator_' straddles line boundary at offset 40B (112B): split load/store penalty", "field 'btree_reader_' straddles line boundary at offset 32B (120B): split load/store penalty", "cross-TU: deduplicated from 10 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/cord.h",
+        "line": 627,
+        "column": 9
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CharIterator' occupies 152B across 3 cache line(s). 4 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "12", "lines_spanned": "3", "straddling_fields": "4", "sizeof": "152B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "field 'node_' straddles line boundary at offset 56B (96B): split load/store penalty", "field 'navigator_' straddles line boundary at offset 40B (112B): split load/store penalty", "field 'btree_reader_' straddles line boundary at offset 32B (120B): split load/store penalty", "field 'chunk_iterator_' straddles line boundary at offset 0B (152B): split load/store penalty", "cross-TU: deduplicated from 10 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/charconv_bigint.h",
+        "line": 427,
+        "column": 23
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'BigUnsigned' occupies 340B across 6 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "2", "lines_spanned": "6", "straddling_fields": "1", "sizeof": "340B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field 'words_' straddles line boundary at offset 4B (336B): split load/store penalty", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_handle.cc",
+        "line": 28,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Queue' (16B, 1 line(s)): 3 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "3", "sizeof": "16B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'mu_' and 'dq_tail' share line 0: guaranteed cross-core invalidation on write", "line 0: 2 atomic + 1 non-atomic mutable field(s) — mixed write surface"]
+    },
+    {
+      "ruleID": "FL041",
+      "title": "Contended Queue Pattern",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_handle.cc",
+        "line": 28,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Queue' (16B, 1 line(s)) has 2 atomic field(s) with 'mu_' and 'dq_tail' on the same cache line. Under MPMC workload, every enqueue/dequeue triggers cross-core RFO for the shared line.",
+      "structuralEvidence": {"queue_heuristic": "yes", "atomic_pairs_same_line": "1", "lines": "1", "head_tail_names": "yes", "atomic_fields": "2", "sizeof": "16B", "struct": "Queue"},
+      "mitigation": "Pad head and tail indices to separate 64B cache lines using alignas(64). Use per-core queues (SPSC) where possible. Consider cache-line-aware queue implementations.",
+      "escalations": ["Structure appears to be a concurrent queue: head/tail atomic indices on same cache line guarantee producer-consumer cache line ping-pong", "atomic fields 'mu_' and 'dq_tail' share line 0: concurrent writes trigger MESI invalidation"]
+    },
+    {
+      "ruleID": "FL090",
+      "title": "Hazard Amplification",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_info.h",
+        "line": 47,
+        "column": 21
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzInfo' (1344B, 21 lines) exhibits compound hazard: 3 atomic field(s) across 1 line(s) with thread-escape evidence. Under multi-core contention, per-line RFO ownership transfer and coherence invalidation interact across the full footprint. [Assumes: struct is accessed concurrently from multiple cores under contention]",
+      "structuralEvidence": {"signal_count": "3", "straddling": "4", "mutable_fields": "16", "thread_escape": "yes", "atomic_lines": "1", "atomic_fields": "3", "cache_lines": "21", "sizeof": "1344B", "struct": "CordzInfo"},
+      "mitigation": "Decompose into separate cache-line-aligned sub-structures. Isolate atomic fields with alignas(64) padding. Split hot (frequently written) and cold (rarely accessed) fields. Consider per-core replicas with periodic merge.",
+      "escalations": ["1344B across 21 cache lines", "3 atomic field(s) on 1 line(s): per-line RFO ownership transfer", "thread-escaping: coherence traffic amplified across participating cores", "4 field(s) straddle line boundaries: split load/store penalty compounds with coherence cost", "16 mutable fields across 21 line(s): wide write surface", "3 atomic pair(s) share cache line(s): intra-line contention adds to cross-line RFO cost", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_info.h",
+        "line": 47,
+        "column": 21
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzInfo' (1344B, 21 line(s)): 43 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "3", "lines": "21", "mutable_pairs_same_line": "43", "sizeof": "1344B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'ci_prev_' and 'ci_next_' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'ci_prev_' and 'mu_' share line 0: guaranteed cross-core invalidation on write", "atomic fields 'ci_next_' and 'mu_' share line 0: guaranteed cross-core invalidation on write", "line 0: 3 atomic + 3 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_info.h",
+        "line": 47,
+        "column": 21
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzInfo' occupies 1344B across 21 cache line(s). 4 field(s) straddle line boundaries (split load/store). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "3", "mutable_fields": "16", "lines_spanned": "21", "straddling_fields": "4", "sizeof": "1344B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 21 cache lines: elevated L1D eviction pressure", "field 'stack_' straddles line boundary at offset 72B (512B): split load/store penalty", "field 'parent_stack_' straddles line boundary at offset 584B (512B): split load/store penalty", "field 'values_' straddles line boundary at offset 1120B (200B): split load/store penalty", "field 'update_tracker_' straddles line boundary at offset 1120B (200B): split load/store penalty", "3 atomic field(s) across 1 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_statistics.h",
+        "line": 28,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzStatistics' occupies 336B across 6 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "21", "lines_spanned": "6", "straddling_fields": "3", "sizeof": "336B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field 'node_counts' straddles line boundary at offset 32B (96B): split load/store penalty", "field 'values_' straddles line boundary at offset 136B (200B): split load/store penalty", "field 'update_tracker' straddles line boundary at offset 136B (200B): split load/store penalty", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_update_tracker.h",
+        "line": 37,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzUpdateTracker' occupies 200B across 4 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "1", "lines_spanned": "4", "straddling_fields": "1", "sizeof": "200B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 4 cache lines: elevated L1D eviction pressure", "field 'values_' straddles line boundary at offset 0B (200B): split load/store penalty", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/ostringstream.h",
+        "line": 65,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'OStringStream' occupies 344B across 6 cache line(s). 4 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "52", "lines_spanned": "6", "straddling_fields": "4", "sizeof": "344B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 6 cache lines: elevated L1D eviction pressure", "field '_M_word_zero' straddles line boundary at offset 56B (16B): split load/store penalty", "field '_M_local_word' straddles line boundary at offset 72B (128B): split load/store penalty", "field '_M_local_word' straddles line boundary at offset 144B (128B): split load/store penalty", "field 'buf_' straddles line boundary at offset 8B (72B): split load/store penalty", "cross-TU: deduplicated from 11 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/extension.h",
+        "line": 66,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FormatSinkImpl' occupies 1056B across 17 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "6", "lines_spanned": "17", "straddling_fields": "1", "sizeof": "1056B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 17 cache lines: elevated L1D eviction pressure", "field 'buf_' straddles line boundary at offset 32B (1024B): split load/store penalty", "cross-TU: deduplicated from 28 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/blocking_counter.h",
+        "line": 64,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'BlockingCounter' (24B, 1 line(s)): 10 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "10", "sizeof": "24B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'mu_' and 'count_' share line 0: guaranteed cross-core invalidation on write", "line 0: 2 atomic + 3 non-atomic mutable field(s) — mixed write surface"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/graphcycles.cc",
+        "line": 278,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Node' occupies 464B across 8 cache line(s). 4 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "22", "lines_spanned": "8", "straddling_fields": "4", "sizeof": "464B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 8 cache lines: elevated L1D eviction pressure", "field 'table_' straddles line boundary at offset 24B (48B): split load/store penalty", "field 'in' straddles line boundary at offset 24B (56B): split load/store penalty", "field 'out' straddles line boundary at offset 80B (56B): split load/store penalty", "field 'stack' straddles line boundary at offset 144B (320B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/graphcycles.cc",
+        "line": 292,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PointerMap' occupies 1048568B across 16384 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "16384", "straddling_fields": "2", "sizeof": "1048568B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 16384 cache lines: elevated L1D eviction pressure", "field '_M_elems' straddles line boundary at offset 8B (1048556B): split load/store penalty", "field 'table_' straddles line boundary at offset 8B (1048556B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/graphcycles.cc",
+        "line": 345,
+        "column": 21
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Rep' occupies 1048936B across 16390 cache line(s). 10 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "39", "lines_spanned": "16390", "straddling_fields": "10", "sizeof": "1048936B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 16390 cache lines: elevated L1D eviction pressure", "field 'space_' straddles line boundary at offset 8B (64B): split load/store penalty", "field 'nodes_' straddles line boundary at offset 0B (80B): split load/store penalty", "field '_M_elems' straddles line boundary at offset 136B (1048556B): split load/store penalty", "field 'table_' straddles line boundary at offset 136B (1048556B): split load/store penalty", "field 'ptrmap_' straddles line boundary at offset 128B (1048568B): split load/store penalty", "field 'deltaf_' straddles line boundary at offset 1048696B (48B): split load/store penalty", "field 'space_' straddles line boundary at offset 1048752B (32B): split load/store penalty", "field 'deltab_' straddles line boundary at offset 1048744B (48B): split load/store penalty", "field 'list_' straddles line boundary at offset 1048792B (48B): split load/store penalty", "field 'stack_' straddles line boundary at offset 1048888B (48B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/mutex.cc",
+        "line": 130,
+        "column": 31
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'MutexGlobals' (64B, 1 line(s)): 36 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "36", "sizeof": "64B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'control_' and 'spinloop_iterations' share line 0: guaranteed cross-core invalidation on write", "line 0: 2 atomic + 7 non-atomic mutable field(s) — mixed write surface"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/mutex.cc",
+        "line": 527,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'SynchLocksHeld' occupies 968B across 16 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "16", "straddling_fields": "1", "sizeof": "968B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 16 cache lines: elevated L1D eviction pressure", "field 'locks' straddles line boundary at offset 8B (960B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/mutex.cc",
+        "line": 1359,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'DeadlockReportBuffers' occupies 6184B across 97 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "2", "lines_spanned": "97", "straddling_fields": "2", "sizeof": "6184B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 97 cache lines: elevated L1D eviction pressure", "field 'buf' straddles line boundary at offset 0B (6100B): split load/store penalty", "field 'path' straddles line boundary at offset 6104B (80B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/notification.h",
+        "line": 66,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Notification' (16B, 1 line(s)): 3 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "1", "mutable_pairs_same_line": "3", "sizeof": "16B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'mu_' and 'notified_yet_' share line 0: guaranteed cross-core invalidation on write", "line 0: 2 atomic + 1 non-atomic mutable field(s) — mixed write surface"]
+    },
+    {
+      "ruleID": "FL090",
+      "title": "Hazard Amplification",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_info.h",
+        "line": 66,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'TimeZoneInfo' (192B, 3 lines) exhibits compound hazard: 2 atomic field(s) across 1 line(s) with thread-escape evidence. Under multi-core contention, per-line RFO ownership transfer and coherence invalidation interact across the full footprint. [Assumes: struct is accessed concurrently from multiple cores under contention]",
+      "structuralEvidence": {"signal_count": "3", "straddling": "0", "mutable_fields": "36", "thread_escape": "yes", "atomic_lines": "1", "atomic_fields": "2", "cache_lines": "3", "sizeof": "192B", "struct": "TimeZoneInfo"},
+      "mitigation": "Decompose into separate cache-line-aligned sub-structures. Isolate atomic fields with alignas(64) padding. Split hot (frequently written) and cold (rarely accessed) fields. Consider per-core replicas with periodic merge.",
+      "escalations": ["192B across 3 cache lines", "2 atomic field(s) on 1 line(s): per-line RFO ownership transfer", "thread-escaping: coherence traffic amplified across participating cores", "36 mutable fields across 3 line(s): wide write surface", "1 atomic pair(s) share cache line(s): intra-line contention adds to cross-line RFO cost", "cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "Critical",
+      "confidence": 0.88,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_info.h",
+        "line": 66,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'TimeZoneInfo' (192B, 3 line(s)): 201 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "1", "lines": "3", "mutable_pairs_same_line": "201", "sizeof": "192B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["atomic fields 'local_time_hint_' and 'time_local_hint_' share line 2: guaranteed cross-core invalidation on write", "line 2: 2 atomic + 9 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "Critical",
+      "confidence": 0.9,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_info.h",
+        "line": 66,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'TimeZoneInfo' occupies 192B across 3 cache line(s). Atomic fields span multiple lines: each line requires independent RFO ownership transfer.",
+      "structuralEvidence": {"atomic_fields": "2", "mutable_fields": "36", "lines_spanned": "3", "straddling_fields": "0", "sizeof": "192B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["spans 3 cache lines: elevated L1D eviction pressure", "2 atomic field(s) across 1 line(s): RFO traffic on each distinct line", "cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/scoped_set_env.h",
+        "line": 28,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ScopedSetEnv' occupies 72B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "15", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "High",
+      "confidence": 0.68,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 49,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PerThreadSynch' (64B, 1 line(s)): 78 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "0", "lines": "1", "mutable_pairs_same_line": "78", "sizeof": "64B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["line 0: 1 atomic + 12 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL060",
+      "title": "NUMA-Unfriendly Shared Structure",
+      "severity": "High",
+      "confidence": 0.55,
+      "evidenceTier": "speculative",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/thread_identity.h",
+        "line": 142,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ThreadIdentity' (352B, 6 cache lines) with 7 mutable field(s) and thread-escape evidence. On multi-socket systems, at least one socket accesses this structure via remote NUMA interconnect. Each remote cache line fetch adds ~100-300ns. Atomic operations on remote lines require interconnect round-trip. [Assumes: deployment target is multi-socket NUMA; single-socket systems are unaffected]",
+      "structuralEvidence": {"numa_placement": "any-thread", "thread_escape": "yes", "atomics": "yes", "cache_lines": "6", "mutable_fields": "7", "sizeof": "352B", "struct": "ThreadIdentity"},
+      "mitigation": "Use numa_alloc_onnode() or mbind() for NUMA-aware placement. Replicate structure per-socket with periodic synchronization. Split into read-mostly (replicated) and write-heavy (local) parts. Consider interleaved allocation for balanced access patterns.",
+      "escalations": ["Contains atomic fields: cross-socket atomic RMW incurs interconnect round-trip (~200-400ns on QPI/UPI)", "numa-topology: allocated by arbitrary thread, unpredictable NUMA placement", "cross-TU: deduplicated from 36 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL060",
+      "title": "NUMA-Unfriendly Shared Structure",
+      "severity": "High",
+      "confidence": 0.55,
+      "evidenceTier": "speculative",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/hashtablez_sampler.h",
+        "line": 66,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'HashtablezInfo' (664B, 11 cache lines) with 16 mutable field(s) and thread-escape evidence. On multi-socket systems, at least one socket accesses this structure via remote NUMA interconnect. Each remote cache line fetch adds ~100-300ns. Atomic operations on remote lines require interconnect round-trip. [Assumes: deployment target is multi-socket NUMA; single-socket systems are unaffected]",
+      "structuralEvidence": {"numa_placement": "any-thread", "thread_escape": "yes", "atomics": "yes", "cache_lines": "11", "mutable_fields": "16", "sizeof": "664B", "struct": "HashtablezInfo"},
+      "mitigation": "Use numa_alloc_onnode() or mbind() for NUMA-aware placement. Replicate structure per-socket with periodic synchronization. Split into read-mostly (replicated) and write-heavy (local) parts. Consider interleaved allocation for balanced access patterns.",
+      "escalations": ["Contains atomic fields: cross-socket atomic RMW incurs interconnect round-trip (~200-400ns on QPI/UPI)", "16 mutable fields: wide write surface amplifies remote store buffer pressure", "numa-topology: allocated by arbitrary thread, unpredictable NUMA placement", "cross-TU: deduplicated from 7 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/container/internal/raw_hash_set.h",
+        "line": 1511,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PolicyFunctions' occupies 72B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "13", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["cross-TU: deduplicated from 5 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_cord_state.h",
+        "line": 71,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Rep' occupies 96B across 2 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "18", "lines_spanned": "2", "straddling_fields": "2", "sizeof": "96B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field '_M_impl' straddles line boundary at offset 16B (80B): split load/store penalty", "field 'prefix_crc' straddles line boundary at offset 16B (80B): split load/store penalty", "cross-TU: deduplicated from 15 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "High",
+      "confidence": 0.68,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/crc/internal/crc_cord_state.h",
+        "line": 127,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'RefcountedRep' (104B, 2 line(s)): 136 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "0", "lines": "2", "mutable_pairs_same_line": "136", "sizeof": "104B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["line 0: 1 atomic + 13 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 15 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/elf_mem_image.h",
+        "line": 55,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'ElfMemImage' occupies 72B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "9", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/vdso_support.h",
+        "line": 61,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'VDSOSupport' occupies 72B across 2 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "10", "lines_spanned": "2", "straddling_fields": "1", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'image_' straddles line boundary at offset 0B (72B): split load/store penalty", "cross-TU: deduplicated from 3 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/symbolize_elf.inc",
+        "line": 226,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'SymbolCacheLine' occupies 80B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "80B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "High",
+      "confidence": 0.68,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/flags/reflection.cc",
+        "line": 49,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'FlagRegistry' (72B, 2 line(s)): 172 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "0", "lines": "2", "mutable_pairs_same_line": "172", "sizeof": "72B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["line 0: 1 atomic + 18 non-atomic mutable field(s) — mixed write surface", "line 1: 1 atomic + 1 non-atomic mutable field(s) — mixed write surface"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/log/internal/log_message.h",
+        "line": 240,
+        "column": 9
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'OstreamView' occupies 120B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "18", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "120B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["cross-TU: deduplicated from 3 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/profiling/internal/profile_builder.h",
+        "line": 86,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Mapping' occupies 88B across 2 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "17", "lines_spanned": "2", "straddling_fields": "1", "sizeof": "88B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'build_id' straddles line boundary at offset 56B (32B): split load/store penalty", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "High",
+      "confidence": 0.68,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/status/internal/status_internal.h",
+        "line": 70,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'StatusRep' (48B, 1 line(s)): 91 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "0", "lines": "1", "mutable_pairs_same_line": "91", "sizeof": "48B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["line 0: 1 atomic + 13 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 4 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_btree_navigator.h",
+        "line": 46,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordRepBtreeNavigator' occupies 112B across 2 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "2", "straddling_fields": "1", "sizeof": "112B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'node_' straddles line boundary at offset 16B (96B): split load/store penalty", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cord_rep_btree_reader.h",
+        "line": 79,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordRepBtreeReader' occupies 120B across 2 cache line(s). 2 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "5", "lines_spanned": "2", "straddling_fields": "2", "sizeof": "120B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'node_' straddles line boundary at offset 24B (96B): split load/store penalty", "field 'navigator_' straddles line boundary at offset 8B (112B): split load/store penalty", "cross-TU: deduplicated from 11 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL060",
+      "title": "NUMA-Unfriendly Shared Structure",
+      "severity": "High",
+      "confidence": 0.55,
+      "evidenceTier": "speculative",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_info.h",
+        "line": 47,
+        "column": 21
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'CordzInfo' (1344B, 21 cache lines) with 7 mutable field(s) and thread-escape evidence. On multi-socket systems, at least one socket accesses this structure via remote NUMA interconnect. Each remote cache line fetch adds ~100-300ns. Atomic operations on remote lines require interconnect round-trip. [Assumes: deployment target is multi-socket NUMA; single-socket systems are unaffected]",
+      "structuralEvidence": {"numa_placement": "any-thread", "thread_escape": "yes", "atomics": "yes", "cache_lines": "21", "mutable_fields": "7", "sizeof": "1344B", "struct": "CordzInfo"},
+      "mitigation": "Use numa_alloc_onnode() or mbind() for NUMA-aware placement. Replicate structure per-socket with periodic synchronization. Split into read-mostly (replicated) and write-heavy (local) parts. Consider interleaved allocation for balanced access patterns.",
+      "escalations": ["Contains atomic fields: cross-socket atomic RMW incurs interconnect round-trip (~200-400ns on QPI/UPI)", "numa-topology: allocated by arbitrary thread, unpredictable NUMA placement", "cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/cordz_statistics.h",
+        "line": 32,
+        "column": 10
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'NodeCounts' occupies 96B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "12", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "96B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["cross-TU: deduplicated from 12 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.72,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/ostringstream.h",
+        "line": 91,
+        "column": 9
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Streambuf' occupies 72B across 2 cache line(s).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "9", "lines_spanned": "2", "straddling_fields": "0", "sizeof": "72B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["cross-TU: deduplicated from 11 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/bind.h",
+        "line": 180,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Streamable' occupies 80B across 2 cache line(s). 5 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "11", "lines_spanned": "2", "straddling_fields": "5", "sizeof": "80B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'inlined_data' straddles line boundary at offset 16B (64B): split load/store penalty", "field 'inlined' straddles line boundary at offset 16B (64B): split load/store penalty", "field 'data_' straddles line boundary at offset 16B (64B): split load/store penalty", "field 'storage_' straddles line boundary at offset 8B (72B): split load/store penalty", "field 'args_' straddles line boundary at offset 8B (72B): split load/store penalty", "cross-TU: deduplicated from 24 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/str_format/float_conversion.cc",
+        "line": 1074,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'Buffer' occupies 104B across 2 cache line(s). 1 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "3", "lines_spanned": "2", "straddling_fields": "1", "sizeof": "104B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field 'data' straddles line boundary at offset 0B (85B): split load/store penalty"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/pthread_waiter.h",
+        "line": 32,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PthreadWaiter' occupies 96B across 2 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "35", "lines_spanned": "2", "straddling_fields": "3", "sizeof": "96B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field '__data' straddles line boundary at offset 40B (48B): split load/store penalty", "field '__size' straddles line boundary at offset 40B (48B): split load/store penalty", "field 'cv_' straddles line boundary at offset 40B (48B): split load/store penalty", "cross-TU: deduplicated from 3 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL002",
+      "title": "False Sharing Candidate",
+      "severity": "High",
+      "confidence": 0.68,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/sem_waiter.h",
+        "line": 38,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'SemWaiter' (40B, 1 line(s)): 6 mutable field pair(s) share cache line(s) with thread-escape evidence. Concurrent writes to co-located fields trigger MESI invalidation per write.",
+      "structuralEvidence": {"thread_escape": "true", "atomics": "yes", "atomic_pairs_same_line": "0", "lines": "1", "mutable_pairs_same_line": "6", "sizeof": "40B"},
+      "mitigation": "Pad independently-written fields to separate 64B cache lines with alignas(64). Consider per-thread/per-core replicas.",
+      "escalations": ["line 0: 1 atomic + 3 non-atomic mutable field(s) — mixed write surface", "cross-TU: deduplicated from 3 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/synchronization/internal/stdcpp_waiter.h",
+        "line": 32,
+        "column": 7
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'StdcppWaiter' occupies 96B across 2 cache line(s). 5 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "38", "lines_spanned": "2", "straddling_fields": "5", "sizeof": "96B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field '__data' straddles line boundary at offset 40B (48B): split load/store penalty", "field '__size' straddles line boundary at offset 40B (48B): split load/store penalty", "field '_M_cond' straddles line boundary at offset 40B (48B): split load/store penalty", "field '_M_cond' straddles line boundary at offset 40B (48B): split load/store penalty", "field 'cv_' straddles line boundary at offset 40B (48B): split load/store penalty", "cross-TU: deduplicated from 3 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL001",
+      "title": "Cache Line Spanning Struct",
+      "severity": "High",
+      "confidence": 0.82,
+      "evidenceTier": "proven",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/time/internal/cctz/src/time_zone_posix.h",
+        "line": 111,
+        "column": 8
+      },
+      "functionName": "",
+      "hardwareReasoning": "Struct 'PosixTimeZone' occupies 128B across 2 cache line(s). 3 field(s) straddle line boundaries (split load/store).",
+      "structuralEvidence": {"atomic_fields": "0", "mutable_fields": "44", "lines_spanned": "2", "straddling_fields": "3", "sizeof": "128B"},
+      "mitigation": "Split hot/cold fields into separate structs. Consider AoS->SoA transformation. Apply alignas(64) to isolate write-heavy sub-structs.",
+      "escalations": ["field '_M_local_buf' straddles line boundary at offset 56B (16B): split load/store penalty", "field '' straddles line boundary at offset 56B (16B): split load/store penalty", "field 'dst_abbr' straddles line boundary at offset 40B (32B): split load/store penalty", "cross-TU: deduplicated from 2 translation unit(s)"]
+    },
+    {
+      "ruleID": "FL021",
+      "title": "Large Stack Frame",
+      "severity": "Medium",
+      "confidence": 0.8,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/base/internal/raw_logging.cc",
+        "line": 148,
+        "column": 6
+      },
+      "functionName": "absl::raw_log_internal::(anonymous namespace)::RawLogVA",
+      "hardwareReasoning": "Function 'absl::raw_log_internal::(anonymous namespace)::RawLogVA' estimated stack frame ~3029B. Spans ~1 page(s). Large stack frames increase D-TLB working set, pressure L1D capacity, and risk stack page faults on deep call chains.",
+      "structuralEvidence": {"estimated_frame": "3029B", "large_locals": "buffer(3000B)", "threshold": "2048B"},
+      "mitigation": "Move large arrays to heap with arena allocator. Use static/thread_local buffers for fixed-size data. Reduce local buffer sizes. Consider passing large structures by reference.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL021",
+      "title": "Large Stack Frame",
+      "severity": "Medium",
+      "confidence": 0.8,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/examine_stack.cc",
+        "line": 101,
+        "column": 6
+      },
+      "functionName": "absl::debugging_internal::(anonymous namespace)::DumpPCAndSymbol",
+      "hardwareReasoning": "Function 'absl::debugging_internal::(anonymous namespace)::DumpPCAndSymbol' estimated stack frame ~2064B. Spans ~1 page(s). Large stack frames increase D-TLB working set, pressure L1D capacity, and risk stack page faults on deep call chains.",
+      "structuralEvidence": {"estimated_frame": "2064B", "large_locals": "tmp(1024B), buf(1024B)", "threshold": "2048B"},
+      "mitigation": "Move large arrays to heap with arena allocator. Use static/thread_local buffers for fixed-size data. Reduce local buffer sizes. Consider passing large structures by reference.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL021",
+      "title": "Large Stack Frame",
+      "severity": "Medium",
+      "confidence": 0.8,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/debugging/internal/examine_stack.cc",
+        "line": 127,
+        "column": 6
+      },
+      "functionName": "absl::debugging_internal::(anonymous namespace)::DumpPCAndFrameSizeAndSymbol",
+      "hardwareReasoning": "Function 'absl::debugging_internal::(anonymous namespace)::DumpPCAndFrameSizeAndSymbol' estimated stack frame ~2060B. Spans ~1 page(s). Large stack frames increase D-TLB working set, pressure L1D capacity, and risk stack page faults on deep call chains.",
+      "structuralEvidence": {"estimated_frame": "2060B", "large_locals": "tmp(1024B), buf(1024B)", "threshold": "2048B"},
+      "mitigation": "Move large arrays to heap with arena allocator. Use static/thread_local buffers for fixed-size data. Reduce local buffer sizes. Consider passing large structures by reference.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL021",
+      "title": "Large Stack Frame",
+      "severity": "Medium",
+      "confidence": 0.8,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/random/internal/entropy_pool.cc",
+        "line": 155,
+        "column": 6
+      },
+      "functionName": "absl::random_internal::(anonymous namespace)::InitPoolURBG",
+      "hardwareReasoning": "Function 'absl::random_internal::(anonymous namespace)::InitPoolURBG' estimated stack frame ~2048B. Spans ~1 page(s). Large stack frames increase D-TLB working set, pressure L1D capacity, and risk stack page faults on deep call chains.",
+      "structuralEvidence": {"estimated_frame": "2048B", "large_locals": "seed_material(2048B)", "threshold": "2048B"},
+      "mitigation": "Move large arrays to heap with arena allocator. Use static/thread_local buffers for fixed-size data. Reduce local buffer sizes. Consider passing large structures by reference.",
+      "escalations": []
+    },
+    {
+      "ruleID": "FL021",
+      "title": "Large Stack Frame",
+      "severity": "Medium",
+      "confidence": 0.8,
+      "evidenceTier": "likely",
+      "location": {
+        "file": "/home/ousef/lshaz/validation/tier1/corpora/abseil/absl/strings/internal/damerau_levenshtein_distance.cc",
+        "line": 40,
+        "column": 9
+      },
+      "functionName": "absl::strings_internal::CappedDamerauLevenshteinDistance",
+      "hardwareReasoning": "Function 'absl::strings_internal::CappedDamerauLevenshteinDistance' estimated stack frame ~10442B. Spans ~3 page(s). Large stack frames increase D-TLB working set, pressure L1D capacity, and risk stack page faults on deep call chains.",
+      "structuralEvidence": {"estimated_frame": "10442B", "large_locals": "d(10404B)", "threshold": "2048B"},
+      "mitigation": "Move large arrays to heap with arena allocator. Use static/thread_local buffers for fixed-size data. Reduce local buffer sizes. Consider passing large structures by reference.",
+      "escalations": ["Stack frame exceeds page size (4KB): guaranteed TLB miss on first access, potential page fault"]
+    }
+  ]
+}
