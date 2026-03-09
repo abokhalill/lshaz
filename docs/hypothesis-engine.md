@@ -63,7 +63,37 @@ Closed-loop learning from production PMU traces:
 
 Priors persist across runs via `--pmu-priors`.
 
-## Usage
+## CLI Subcommands
+
+### `lshaz hyp` — Generate Hypotheses
+
+Reads a JSON scan result and emits formal hypotheses for each diagnostic:
+
+```bash
+# From a scan result file
+lshaz hyp scan-results.json
+
+# Pipe from scan
+lshaz scan . --format json | lshaz hyp -
+```
+
+Output includes H0/H1, required PMU counters, minimum detectable effect, and confound controls for each finding.
+
+### `lshaz exp` — Synthesize Experiments
+
+Generates runnable experiment bundles (treatment/control harnesses, build scripts, perf stat collection):
+
+```bash
+# Generate experiments into ./experiments/
+lshaz exp scan-results.json --output ./experiments
+
+# From pipe
+lshaz scan . --format json | lshaz exp - --output ./experiments
+```
+
+Each experiment directory contains a README, Makefile, harness sources, and hypothesis metadata.
+
+### Calibration Feedback
 
 ```bash
 # Run with calibration store

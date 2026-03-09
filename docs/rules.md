@@ -94,7 +94,7 @@ struct Counters {
 
 **Detection:** `std::atomic` operations with `memory_order_seq_cst` in hot path.
 
-**Escalation:** Inside tight loop. Multiple atomics in same function.
+**Escalation:** Inside tight loop. Multiple atomics in same function. Data-flow: atomic load result feeds branch condition (CAS retry loop or spin-wait pattern).
 
 **False Positives:** Correctness requires seq_cst.
 
@@ -148,7 +148,7 @@ On x86-64 TSO, `release` stores do not require `MFENCE` or `LOCK`-prefixed instr
 
 **Detection:** `new`/`delete`, `std::vector` growth, `std::function`, `std::shared_ptr`, `malloc` in hot path. IR-confirmed when available.
 
-**Escalation:** Allocation inside loop. Allocation size > 256 bytes.
+**Escalation:** Allocation inside loop. Allocation size > 256 bytes. Data-flow: allocated pointer escapes function (passed to callee, stored to field, or returned). Data-flow: allocation result flows into loop body.
 
 **Mitigation:** Preallocate. Use arena/slab. Object pools.
 

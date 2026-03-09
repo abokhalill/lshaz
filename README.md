@@ -88,11 +88,23 @@ lshaz scan . --format json --min-severity Critical
 # SARIF for GitHub Code Scanning
 lshaz scan . --format sarif --output results.sarif
 
+# clang-tidy-compatible output for CI parsers
+lshaz scan . --format tidy
+
+# Run a single rule (repeatable)
+lshaz scan . --format tidy --rule FL001
+
 # Parallel, AST-only (fast)
 lshaz scan . --jobs 8 --no-ir
 
 # Compare two scan results (CI gating)
 lshaz diff before.json after.json
+
+# Generate a hypothesis for a finding
+lshaz hyp scan-results.json
+
+# Synthesize a runnable experiment
+lshaz exp scan-results.json --output ./experiments
 
 # Explain a rule
 lshaz explain FL002
@@ -130,6 +142,7 @@ lshaz explain FL002
 | CLI | `--format cli` | Terminal (default) |
 | JSON | `--format json` | Programmatic consumption |
 | SARIF 2.1.0 | `--format sarif` | GitHub Code Scanning, VS Code |
+| Clang-Tidy | `--format tidy` | CI parsers, clang-tidy tooling integration |
 
 ## Exit Codes
 

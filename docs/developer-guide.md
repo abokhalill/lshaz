@@ -36,18 +36,20 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 | Binary | Purpose |
 |---|---|
 | `build/lshaz` | The analyzer |
+| `build/analysis_ground_truth_test` | Analysis ground truth tests |
 | `build/output_contract_test` | Output schema contract tests |
 | `build/pipeline_unit_test` | Pipeline unit tests |
 | `build/scan_e2e_test` | End-to-end scan tests |
 
 ## Testing
 
-170 tests across three suites:
+248 tests across four suites:
 
 ```bash
-./build/output_contract_test   # 55 tests — JSON, SARIF, CLI output contracts
-./build/pipeline_unit_test     # 44 tests — pipeline correctness
-./build/scan_e2e_test          # 71 tests — end-to-end scan behavior
+./build/analysis_ground_truth_test  # 78 tests — layout, cache line, escape analysis ground truth
+./build/output_contract_test        # 55 tests — JSON, SARIF, CLI output contracts
+./build/pipeline_unit_test          # 44 tests — pipeline correctness
+./build/scan_e2e_test               # 71 tests — end-to-end scan behavior
 ```
 
 All tests must pass before committing.
@@ -87,6 +89,9 @@ src/
   cli/
     ScanCommand.cpp            # lshaz scan implementation
     ExplainCommand.cpp         # lshaz explain implementation
+    HypCommand.cpp             # lshaz hyp — hypothesis generation
+    ExpCommand.cpp             # lshaz exp — experiment synthesis
+    ScanResultParser.cpp       # JSON scan result parser for hyp/exp
   analysis/
     LshazASTConsumer.cpp       # AST traversal, rule dispatch, suppression
     LshazAction.cpp            # Clang FrontendAction + factory
@@ -95,6 +100,8 @@ src/
     StructLayoutVisitor.cpp    # Recursive struct layout walker
     AllocatorTopology.cpp      # Allocator classification
     NUMATopology.cpp           # NUMA placement inference
+    CallGraph.cpp              # Per-TU call graph construction
+    DataFlowAnalyzer.cpp       # Intra-procedural data-flow analysis
   rules/
     FL001_CacheLineSpanning.cpp
     FL002_FalseSharing.cpp
@@ -118,6 +125,7 @@ src/
     JSONOutput.cpp             # JSON formatter
     SARIFOutput.cpp            # SARIF 2.1.0 formatter
     CLIOutput.cpp              # Terminal formatter
+    ClangTidyOutput.cpp        # clang-tidy-compatible formatter
 
 include/lshaz/
   core/                        # Diagnostic, Rule, Config, Severity, Version
@@ -155,6 +163,6 @@ Rules must map to a concrete hardware mechanism. If it cannot be tied to cache, 
 ## Commit Discipline
 
 - Each commit must be logically atomic and traceable to a specific change
-- All 170 tests must pass before pushing
+- All 248 tests must pass before pushing
 - No batching of unrelated changes
 - Prefer minimal upstream fixes over downstream workarounds

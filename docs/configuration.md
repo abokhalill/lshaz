@@ -50,7 +50,7 @@ lshaz scan <path> [options]
 |---|---|
 | `--compile-db <path>` | Explicit path to `compile_commands.json` |
 | `--config <path>` | Path to `lshaz.config.yaml` |
-| `--format <cli\|json\|sarif>` | Output format (default: `cli`) |
+| `--format <cli\|json\|sarif\|tidy>` | Output format (default: `cli`). `tidy` emits clang-tidy-compatible diagnostics. |
 | `--output <path>` | Write output to file instead of stdout |
 | `--min-severity <level>` | Minimum severity: `Informational`, `Medium`, `High`, `Critical` |
 | `--min-evidence <tier>` | Minimum evidence tier: `speculative`, `likely`, `proven` |
@@ -73,6 +73,7 @@ lshaz scan <path> [options]
 | `--watch-interval <N>` | Seconds between watch polls (default: 2) |
 | `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
 | `--changed-files <path>` | Incremental mode: only scan TUs affected by files listed in `<path>` (one per line). Header changes trigger full scan conservatively. |
+| `--rule <ID>` | Run only the specified rule (repeatable). Disables all other rules. Use for per-rule CI gating. |
 | `--target-arch <arch>` | Target architecture: `x86-64` (default, 64B lines, TSO), `arm64` (64B lines, weak ordering), `arm64-apple` (128B lines, weak ordering). Affects cache model, FL010 severity/reasoning, and mitigation text. |
 | `--help` | Show help with exit code reference |
 

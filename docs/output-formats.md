@@ -1,6 +1,6 @@
 # Output Formats
 
-lshaz supports three output formats: CLI (default), JSON, and SARIF 2.1.0.
+lshaz supports four output formats: CLI (default), JSON, SARIF 2.1.0, and Clang-Tidy.
 
 ## Diagnostic Model
 
@@ -108,6 +108,50 @@ Includes:
   with:
     sarif_file: results.sarif
 ```
+
+---
+
+## Clang-Tidy Format
+
+Compatible with clang-tidy tooling and CI log parsers. Use `--format tidy`.
+
+Each diagnostic is emitted as:
+
+```
+file:line:col: severity: message [lshaz-FLXXX]
+```
+
+Example output:
+
+```
+src/engine.h:42:8: error: False Sharing Candidate (Struct 'Counters' (16B, 1 line(s)): 3 mutable field pair(s) share cache line(s).) [lshaz-FL002]
+src/engine.h:42:8: note: atomic fields 'head' and 'tail' share line 0: guaranteed cross-core invalidation on write [lshaz-FL002]
+```
+
+Severity mapping: `Critical` → `error`, `High` → `error`, `Medium` → `warning`, `Informational` → `note`.
+
+### Per-Rule CI Gating
+
+Use `--rule` (repeatable) to run only specific rules. This enables per-check CI gates:
+
+```bash
+# Gate on cache layout issues only
+lshaz scan . --format tidy --rule FL001
+
+# Gate on false sharing only
+lshaz scan . --format tidy --rule FL002
+
+# Gate on multiple rules
+lshaz scan . --format tidy --rule FL001 --rule FL002
+```
+
+A convenience wrapper script is provided at `tools/lshaz-tidy`:
+
+```bash
+./tools/lshaz-tidy /path/to/project --rule FL001
+```
+
+See `tools/github-actions-example.yml` for a ready-to-use GitHub Actions workflow.
 
 ---
 

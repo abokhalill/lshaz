@@ -28,11 +28,13 @@ For each translation unit, walks all top-level declarations (recursing into name
 - **EscapeAnalysis** — Determines whether a type may be accessed from multiple threads. Uses seven evidence signals: `std::atomic` members, mutex/sync primitive members, `std::shared_ptr`/`std::weak_ptr` members, `volatile` members, types passed to `std::thread`/`std::jthread`/`std::async`, types stored in global mutable variables, and types used as `shared_ptr` pointees in global scope. Conservative: assumes escape when uncertain. Not interprocedural — scans the current TU only.
 - **AllocatorTopology** — Classifies allocator contention based on `--allocator` flag: glibc (arena-lock), tcmalloc/jemalloc (thread-local cache), mimalloc (pool/slab). Affects FL020 severity.
 - **NUMATopology** — Infers NUMA page placement via first-touch policy analysis: local-init, main-thread, any-thread, interleaved, explicit-bind, or unknown.
+- **CallGraph** — Per-TU call graph built by visiting `CallExpr` nodes in function bodies. Maps caller → callee relationships. Used by HotPathOracle for transitive hotness propagation.
+- **DataFlowAnalyzer** — Lightweight intra-procedural data-flow analysis. Two-pass AST walk: (1) identifies variable bindings to heap allocations and atomic load results, (2) tracks tainted variables through uses — detecting alloc-escapes (passed to callee, stored to field, returned), alloc-flows-to-loop, and atomic-feeds-branch patterns. Used by FL020 and FL010 for precision escalation.
 - **HotPathOracle** — Classifies functions as hot via:
   1. `[[clang::annotate("lshaz_hot")]]` attribute
   2. fnmatch glob patterns in config (`hot_function_patterns`, `hot_file_patterns`)
   3. `perf` profile sample threshold (`--perf-profile`, `--hotness-threshold`)
-  4. Transitive marking during AST walk
+  4. Transitive propagation via CallGraph: if a hot function calls `f`, then `f` is also marked hot
 
 ### Stage 2: IR Refinement
 
