@@ -94,13 +94,20 @@ When some TUs fail to parse but others succeed, exit code is 1 if findings are e
 
 ## Hot Path Annotation
 
-Functions can be marked hot in three ways:
+> **Important:** Rules FL010, FL011, FL012, FL020, FL030, FL031, FL050, and FL061 only fire on functions classified as hot. Without any hot-path signal, these rules produce no diagnostics. Structural rules (FL001, FL002, FL021, FL040, FL041, FL060, FL090) do not require hot-path classification.
+
+Functions can be marked hot in four ways:
 
 **1. Source annotation:**
 
 ```cpp
-[[clang::annotate("lshaz_hot")]]
+// GCC/Clang standard attribute (recommended)
+__attribute__((hot))
 void onMarketData(const Update& u);
+
+// lshaz-specific annotation
+[[clang::annotate("lshaz_hot")]]
+void processOrder(const Order& o);
 ```
 
 **2. Config patterns:**

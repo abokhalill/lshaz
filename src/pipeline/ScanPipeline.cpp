@@ -508,7 +508,11 @@ static void filterAndSort(const FilterOptions &filter,
                              static_cast<uint8_t>(b.severity);
                   if (a.location.file != b.location.file)
                       return a.location.file < b.location.file;
-                  return a.location.line < b.location.line;
+                  if (a.location.line != b.location.line)
+                      return a.location.line < b.location.line;
+                  if (a.location.column != b.location.column)
+                      return a.location.column < b.location.column;
+                  return a.ruleID < b.ruleID;
               });
 }
 

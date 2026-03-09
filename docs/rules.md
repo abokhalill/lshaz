@@ -118,7 +118,9 @@ On x86-64 TSO, `release` stores do not require `MFENCE` or `LOCK`-prefixed instr
 
 **Hardware Mechanism:** Cache line ownership thrashing. Store buffer pressure. Cross-core invalidation storms.
 
-**Detection:** Atomic variable written in hot path with thread-escape evidence.
+**Detection:** Atomic variable written in hot path with thread-escape evidence. Requires hot-path classification (see [Hot Path Annotation](configuration.md#hot-path-annotation)).
+
+> **Note:** FL011 is a *function-level* rule that detects atomic write contention in hot code paths. FL002 is a *struct-level* rule that detects false sharing from layout analysis. A struct may trigger FL002 (layout hazard) without triggering FL011 if no hot-path function writes to its atomic fields.
 
 **Escalation:** Multiple atomic writes per iteration. Adjacent atomics in same struct.
 

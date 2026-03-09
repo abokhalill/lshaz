@@ -31,7 +31,7 @@ For each translation unit, walks all top-level declarations (recursing into name
 - **CallGraph** — Per-TU call graph built by visiting `CallExpr` nodes in function bodies. Maps caller → callee relationships. Used by HotPathOracle for transitive hotness propagation.
 - **DataFlowAnalyzer** — Lightweight intra-procedural data-flow analysis. Two-pass AST walk: (1) identifies variable bindings to heap allocations and atomic load results, (2) tracks tainted variables through uses — detecting alloc-escapes (passed to callee, stored to field, returned), alloc-flows-to-loop, and atomic-feeds-branch patterns. Used by FL020 and FL010 for precision escalation.
 - **HotPathOracle** — Classifies functions as hot via:
-  1. `[[clang::annotate("lshaz_hot")]]` attribute
+  1. `__attribute__((hot))` or `[[clang::annotate("lshaz_hot")]]` attributes
   2. fnmatch glob patterns in config (`hot_function_patterns`, `hot_file_patterns`)
   3. `perf` profile sample threshold (`--perf-profile`, `--hotness-threshold`)
   4. Transitive propagation via CallGraph: if a hot function calls `f`, then `f` is also marked hot

@@ -9,9 +9,21 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <algorithm>
 #include <sstream>
 
 namespace lshaz {
+
+namespace {
+
+// Case-insensitive substring search.
+bool containsCI(const std::string &haystack, const char *needle) {
+    std::string lower = haystack;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower.find(needle) != std::string::npos;
+}
+
+} // anonymous namespace
 
 class FL041_ContendedQueue : public Rule {
 public:
@@ -46,25 +58,30 @@ public:
 
         std::string structName = RD->getNameAsString();
         bool looksLikeQueue =
-            structName.find("queue") != std::string::npos ||
-            structName.find("Queue") != std::string::npos ||
-            structName.find("buffer") != std::string::npos ||
-            structName.find("Buffer") != std::string::npos ||
-            structName.find("ring") != std::string::npos ||
-            structName.find("Ring") != std::string::npos;
+            containsCI(structName, "queue") ||
+            containsCI(structName, "buffer") ||
+            containsCI(structName, "ring") ||
+            containsCI(structName, "channel") ||
+            containsCI(structName, "spsc") ||
+            containsCI(structName, "mpmc") ||
+            containsCI(structName, "mpsc");
 
         bool hasHeadTail = false;
         for (const auto &f : map.fields()) {
             if (!f.isAtomic) continue;
             const auto &n = f.name;
-            if (n.find("head") != std::string::npos ||
-                n.find("tail") != std::string::npos ||
-                n.find("read") != std::string::npos ||
-                n.find("write") != std::string::npos ||
-                n.find("push") != std::string::npos ||
-                n.find("pop") != std::string::npos ||
-                n.find("front") != std::string::npos ||
-                n.find("back") != std::string::npos) {
+            if (containsCI(n, "head") ||
+                containsCI(n, "tail") ||
+                containsCI(n, "read") ||
+                containsCI(n, "write") ||
+                containsCI(n, "push") ||
+                containsCI(n, "pop") ||
+                containsCI(n, "front") ||
+                containsCI(n, "back") ||
+                containsCI(n, "enqueue") ||
+                containsCI(n, "dequeue") ||
+                containsCI(n, "prod") ||
+                containsCI(n, "cons")) {
                 hasHeadTail = true;
             }
         }

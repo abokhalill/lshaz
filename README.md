@@ -166,6 +166,7 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 
 ## Limitations
 
+- **Hot-path rules require classification** — FL010, FL011, FL012, FL020, FL030, FL031, FL050, FL061 only fire on functions marked hot via `__attribute__((hot))`, `[[clang::annotate("lshaz_hot")]]`, config patterns, or `--perf-profile`. Structural rules (FL001, FL002, FL021, FL041, FL060) work without any hot-path signal.
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
 - **Single-TU scope** — escape analysis does not cross translation unit boundaries.
 - **Requires `compile_commands.json`** — TUs that fail to parse (missing headers) are skipped, not crashed.

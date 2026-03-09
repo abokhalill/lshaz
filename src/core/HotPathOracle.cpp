@@ -64,10 +64,14 @@ void HotPathOracle::markHot(const clang::FunctionDecl *FD) {
 
 bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
     for (const auto *A : FD->attrs()) {
+        // [[clang::annotate("lshaz_hot")]]
         if (const auto *Ann = llvm::dyn_cast<clang::AnnotateAttr>(A)) {
             if (Ann->getAnnotation() == "lshaz_hot")
                 return true;
         }
+        // __attribute__((hot)) — GCC/Clang standard hot attribute
+        if (llvm::isa<clang::HotAttr>(A))
+            return true;
     }
     return false;
 }
