@@ -44,11 +44,16 @@ bool isStdAtomicType(clang::QualType QT) {
     std::string qn = RD->getQualifiedNameAsString();
     if (qn == "std::atomic" || qn == "std::atomic_ref")
         return true;
+    // libstdc++ dispatches atomic member functions through std::__atomic_base<T>.
+    // libc++ uses std::__1::__atomic_base<T>. Match these base classes.
+    if (qn.find("__atomic_base") != std::string::npos)
+        return true;
     if (const auto *CTSD =
             llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
         if (auto *TD = CTSD->getSpecializedTemplate()) {
             std::string tn = TD->getQualifiedNameAsString();
-            if (tn == "std::atomic" || tn == "std::atomic_ref")
+            if (tn == "std::atomic" || tn == "std::atomic_ref" ||
+                tn.find("__atomic_base") != std::string::npos)
                 return true;
         }
     }

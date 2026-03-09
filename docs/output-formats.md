@@ -155,6 +155,25 @@ See `tools/github-actions-example.yml` for a ready-to-use GitHub Actions workflo
 
 ---
 
+## Determinism
+
+Diagnostic output is **fully deterministic** across identical runs on the same input. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
+
+The only field that varies between runs is `metadata.timestamp` (epoch seconds at scan start). For byte-identical JSON comparison in CI, normalize or strip this field:
+
+```bash
+# Compare two runs (jq)
+diff <(jq 'del(.metadata.timestamp)' run1.json) \
+     <(jq 'del(.metadata.timestamp)' run2.json)
+
+# Or use the built-in diff command
+lshaz diff run1.json run2.json
+```
+
+Remote repository scans also produce unique temp directory paths in `metadata.sourceFiles`. Use `lshaz diff` which normalizes these automatically.
+
+---
+
 ## Parse Failure Reporting
 
 When TUs fail to parse, lshaz reports a summary on stderr:

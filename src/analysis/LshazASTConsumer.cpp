@@ -6,6 +6,7 @@
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclGroup.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <algorithm>
@@ -76,6 +77,19 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                 if (auto *RD = llvm::dyn_cast<clang::CXXRecordDecl>(D)) {
                     if (RD->isCompleteDefinition())
                         collect(RD);
+                }
+                // Recurse into class templates to visit implicit
+                // specializations — without this, struct-level rules
+                // never see instantiated template types.
+                if (auto *CTD = llvm::dyn_cast<clang::ClassTemplateDecl>(D)) {
+                    for (auto *Spec : CTD->specializations()) {
+                        if (Spec->isCompleteDefinition() &&
+                            !Spec->isInvalidDecl() &&
+                            !isInSystemHeader(Spec, SM)) {
+                            decls.push_back(Spec);
+                            collect(Spec);
+                        }
+                    }
                 }
             }
         };
