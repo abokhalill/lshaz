@@ -43,6 +43,7 @@ set(LSHAZ_SOURCES
     src/analysis/EscapeAnalysis.cpp
     src/analysis/CacheLineMap.cpp
     src/analysis/CallGraph.cpp
+    src/analysis/DataFlowAnalyzer.cpp
     src/analysis/AllocatorTopology.cpp
     src/analysis/NUMATopology.cpp
     src/rules/FL001_CacheLineSpanning.cpp

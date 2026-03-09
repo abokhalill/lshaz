@@ -3,6 +3,7 @@
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/analysis/AllocatorTopology.h"
+#include "lshaz/analysis/DataFlowAnalyzer.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -163,6 +164,10 @@ public:
         AllocVisitor visitor(Ctx);
         visitor.TraverseStmt(FD->getBody());
 
+        // Intra-procedural data-flow analysis for precision.
+        DataFlowAnalyzer dfa(Ctx);
+        DataFlowFacts dfFacts = dfa.analyze(FD);
+
         // Classify allocation sites by allocator topology.
         AllocatorTopology topo;
         if (!Cfg.linkedAllocator.empty())
@@ -243,12 +248,38 @@ public:
             hw << " [Assumes: allocation frequency is high at runtime on this path]";
             diag.hardwareReasoning = hw.str();
 
+            // Data-flow escalations.
+            bool escapes = false;
+            bool flowsToLoop = false;
+            if (diag.location.line > 0) {
+                escapes = dfFacts.allocEscapes.count(diag.location.line) > 0;
+                flowsToLoop = dfFacts.allocFlowsToLoop.count(diag.location.line) > 0;
+            }
+            if (escapes) {
+                escalations.push_back(
+                    "data-flow: allocated pointer escapes function "
+                    "(passed to callee, stored to field, or returned)");
+                if (confidence < 0.85)
+                    confidence = std::min(confidence + 0.10, 1.0);
+            }
+            if (flowsToLoop && !site.inLoop) {
+                escalations.push_back(
+                    "data-flow: allocation result flows into loop body");
+                if (sev < Severity::High)
+                    sev = Severity::High;
+            }
+
+            diag.severity = sev;
+            diag.confidence = confidence;
+
             diag.structuralEvidence = {
                 {"alloc_type", site.kind},
                 {"allocator_class", std::string(allocatorClassName(ac))},
                 {"function", FD->getQualifiedNameAsString()},
                 {"in_loop", site.inLoop ? "yes" : "no"},
                 {"hot_path", "true"},
+                {"alloc_escapes", escapes ? "yes" : "no"},
+                {"flows_to_loop", flowsToLoop ? "yes" : "no"},
             };
 
             diag.mitigation =

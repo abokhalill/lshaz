@@ -2,6 +2,7 @@
 #include "lshaz/core/Rule.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
+#include "lshaz/analysis/DataFlowAnalyzer.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -254,6 +255,10 @@ public:
         if (visitor.sites().empty())
             return;
 
+        // Intra-procedural data-flow: detect atomic results feeding branches.
+        DataFlowAnalyzer dfa(Ctx);
+        DataFlowFacts dfFacts = dfa.analyze(FD);
+
         const auto &SM = Ctx.getSourceManager();
         unsigned atomicCount = visitor.sites().size();
         bool isARM = (Cfg.targetArch == TargetArch::ARM64 ||
@@ -405,6 +410,15 @@ public:
                         "either way), but weaker ordering enables compiler "
                         "reordering optimizations around the operation.";
                 }
+            }
+
+            // Data-flow: atomic result feeds branch condition.
+            if (diag.location.line > 0 &&
+                dfFacts.atomicFeedsBranch.count(diag.location.line)) {
+                escalations.push_back(
+                    "data-flow: atomic result feeds branch condition "
+                    "(CAS retry loop or spin-wait pattern)");
+                diag.structuralEvidence["feeds_branch"] = "yes";
             }
 
             diag.escalations = std::move(escalations);
