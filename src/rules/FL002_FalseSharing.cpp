@@ -105,7 +105,7 @@ public:
         std::ostringstream hw;
         hw << "Struct '" << RD->getNameAsString() << "' ("
            << map.recordSizeBytes() << "B, "
-           << map.linesSpanned() << " line(s)): "
+           << map.maxLinesSpanned() << " line(s)): "
            << mutablePairs.size() << " mutable field pair(s) share cache line(s) "
            << "with thread-escape evidence. Concurrent writes to co-located "
            << "fields trigger MESI invalidation per write.";
@@ -113,7 +113,7 @@ public:
 
         diag.structuralEvidence = {
             {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
-            {"lines", std::to_string(map.linesSpanned())},
+            {"lines", std::to_string(map.maxLinesSpanned())},
             {"mutable_pairs_same_line", std::to_string(mutablePairs.size())},
             {"atomic_pairs_same_line", std::to_string(map.atomicPairsOnSameLine().size())},
             {"thread_escape", "true"},

@@ -132,7 +132,7 @@ public:
         std::ostringstream hw;
         hw << "Struct '" << structName << "' ("
            << map.recordSizeBytes() << "B, "
-           << map.linesSpanned() << " line(s)) has "
+           << map.maxLinesSpanned() << " line(s)) has "
            << map.totalAtomicFields() << " atomic field(s) with '"
            << field1 << "' and '" << field2
            << "' on the same cache line. Under MPMC workload, every "
@@ -142,7 +142,7 @@ public:
         diag.structuralEvidence = {
             {"struct", structName},
             {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
-            {"lines", std::to_string(map.linesSpanned())},
+            {"lines", std::to_string(map.maxLinesSpanned())},
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"atomic_pairs_same_line", std::to_string(atomicPairs.size())},
             {"queue_heuristic", looksLikeQueue ? "yes" : "no"},

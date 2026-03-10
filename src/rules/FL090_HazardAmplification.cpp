@@ -45,7 +45,7 @@ public:
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
         EscapeAnalysis escape(Ctx);
 
-        bool multiLine    = map.linesSpanned() >= 3;
+        bool multiLine    = map.maxLinesSpanned() >= 3;
         bool hasAtomics   = map.totalAtomicFields() > 0;
         bool threadEscape = escape.mayEscapeThread(RD);
 
@@ -69,7 +69,7 @@ public:
 
         escalations.push_back(
             std::to_string(map.recordSizeBytes()) + "B across " +
-            std::to_string(map.linesSpanned()) + " cache lines");
+            std::to_string(map.maxLinesSpanned()) + " cache lines");
 
         escalations.push_back(
             std::to_string(map.totalAtomicFields()) + " atomic field(s) on " +
@@ -119,7 +119,7 @@ public:
         std::ostringstream hw;
         hw << "Struct '" << RD->getNameAsString() << "' ("
            << map.recordSizeBytes() << "B, "
-           << map.linesSpanned() << " lines) exhibits compound hazard: "
+           << map.maxLinesSpanned() << " lines) exhibits compound hazard: "
            << map.totalAtomicFields() << " atomic field(s) across "
            << atomicLines << " line(s) with thread-escape evidence. "
            << "Under multi-core contention, per-line RFO ownership transfer "
@@ -130,7 +130,7 @@ public:
         diag.structuralEvidence = {
             {"struct", RD->getNameAsString()},
             {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
-            {"cache_lines", std::to_string(map.linesSpanned())},
+            {"cache_lines", std::to_string(map.maxLinesSpanned())},
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"atomic_lines", std::to_string(atomicLines)},
             {"mutable_fields", std::to_string(map.totalMutableFields())},
