@@ -720,6 +720,23 @@ ScanResult ScanPipeline::run(
 
     llvm::CrashRecoveryContext::Disable();
 
+    // Canonicalize diagnostic order before any order-dependent pass.
+    // In parallel mode, diagnostics arrive in non-deterministic order
+    // (thread scheduling). Sorting by a stable key ensures cross-TU
+    // suppression, dedup, and precision budget produce identical output
+    // regardless of thread count or execution order.
+    std::sort(result.diagnostics.begin(), result.diagnostics.end(),
+              [](const Diagnostic &a, const Diagnostic &b) {
+                  if (a.ruleID != b.ruleID) return a.ruleID < b.ruleID;
+                  if (a.location.file != b.location.file)
+                      return a.location.file < b.location.file;
+                  if (a.location.line != b.location.line)
+                      return a.location.line < b.location.line;
+                  if (a.location.column != b.location.column)
+                      return a.location.column < b.location.column;
+                  return a.functionName < b.functionName;
+              });
+
     // IR analysis pass.
     if (request.ir.enabled && toolRet == 0) {
         report("ir", "IR emission and analysis");
