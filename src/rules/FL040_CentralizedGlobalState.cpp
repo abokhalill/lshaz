@@ -10,6 +10,7 @@
 #include <clang/AST/RecordLayout.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <memory>
 #include <sstream>
 
 namespace lshaz {
@@ -37,13 +38,10 @@ public:
         if (!VD)
             return;
 
-        EscapeAnalysis escape(Ctx);
+        auto &escape = getOrCreateEscape(Ctx);
 
         if (!escape.isGlobalSharedMutable(VD))
             return;
-
-        // Trigger TU scan for write-site collection.
-        escape.scanTranslationUnit(Ctx.getTranslationUnitDecl());
 
         clang::QualType QT = VD->getType();
         bool hasAtomics = false;
@@ -119,6 +117,19 @@ public:
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
     }
+
+private:
+    EscapeAnalysis &getOrCreateEscape(clang::ASTContext &Ctx) {
+        if (!cachedEscape_ || &Ctx != cachedCtx_) {
+            cachedCtx_ = &Ctx;
+            cachedEscape_ = std::make_unique<EscapeAnalysis>(Ctx);
+            cachedEscape_->scanTranslationUnit(Ctx.getTranslationUnitDecl());
+        }
+        return *cachedEscape_;
+    }
+
+    clang::ASTContext *cachedCtx_ = nullptr;
+    std::unique_ptr<EscapeAnalysis> cachedEscape_;
 };
 
 LSHAZ_REGISTER_RULE(FL040_CentralizedGlobalState)
