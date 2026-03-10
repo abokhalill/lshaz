@@ -1,6 +1,6 @@
 # Architecture
 
-lshaz is a Clang-based static analysis tool that maps C++ source-level patterns to microarchitectural latency hazards on Linux x86-64.
+lshaz is a Clang-based static analysis tool that maps C and C++ source-level patterns to microarchitectural latency hazards on Linux x86-64.
 
 ## System Layers
 
@@ -95,8 +95,9 @@ The tool models line-level structural exposure. It does not simulate cache sets,
 AST analysis supports parallel execution via `--jobs N`:
 - Sources are sharded round-robin across worker threads.
 - Each shard gets its own `LshazActionFactory`, `HotPathOracle`, and diagnostic vector.
-- `compDB` is read-only and shared safely.
+- `compDB` is wrapped in `AbsolutePathCompilationDatabase` at load time, which resolves all relative paths (source files, `-I` flags, `-isystem` flags) to absolute. This eliminates the Clang tooling `chdir()` race that otherwise causes non-deterministic path resolution when multiple threads share a `CompilationDatabase`.
 - Results are merged after all shards complete.
+- After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of thread count or scheduling order.
 - Per-shard crash isolation via `CrashRecoveryContext`.
 
 ## Severity Escalation

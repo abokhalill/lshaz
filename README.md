@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20x86--64-blue)]()
 
-Static analysis tool that detects microarchitectural latency hazards in C++ — false sharing, cache-line contention, atomic ordering waste, and allocator serialization — before code ever runs.
+Static analysis tool that detects microarchitectural latency hazards in C and C++. That includes false sharing, cache-line contention, atomic ordering waste, and allocator serialization. All before code ever runs.
 
 ## Why
 

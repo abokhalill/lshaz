@@ -109,6 +109,7 @@ src/
   pipeline/
     ScanPipeline.cpp           # Orchestration: AST + IR + post-processing
     CompileDBResolver.cpp      # compile_commands.json discovery/generation
+    AbsolutePathCompilationDatabase.cpp  # Wrapper resolving relative paths to absolute
     RepoProvider.cpp           # Git clone for remote URLs
     SourceFilter.cpp           # Glob-based source filtering
   ir/
