@@ -170,6 +170,7 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
 - **Single-TU scope** — escape analysis does not cross translation unit boundaries.
 - **Requires `compile_commands.json`** — TUs that fail to parse (missing headers) are skipped, not crashed.
+- **Parallel scans with relative paths** — `compile_commands.json` files using relative file paths (common with `make`/`compiledb`) may cause non-deterministic TU failures in parallel mode due to a Clang tooling `chdir()` race. Use `--jobs 1` for fully deterministic results, or generate `compile_commands.json` with absolute paths (CMake does this by default).
 - **x86-64 default** — assumes 64-byte cache lines and TSO by default. Use `--target-arch arm64` or `--target-arch arm64-apple` (128B lines) for ARM64 analysis.
 
 ## Documentation

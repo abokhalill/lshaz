@@ -99,7 +99,7 @@ NUMAPlacement NUMATopology::classifyGlobalVar(const clang::VarDecl *VD,
     return NUMAPlacement::Unknown;
 }
 
-NUMAPlacement NUMATopology::classifyStruct(const clang::CXXRecordDecl *RD,
+NUMAPlacement NUMATopology::classifyStruct(const clang::RecordDecl *RD,
                                             clang::ASTContext &Ctx) {
     if (!RD)
         return NUMAPlacement::Unknown;

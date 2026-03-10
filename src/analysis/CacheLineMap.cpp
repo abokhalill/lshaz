@@ -9,7 +9,7 @@
 
 namespace lshaz {
 
-CacheLineMap::CacheLineMap(const clang::CXXRecordDecl *RD,
+CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
                            clang::ASTContext &Ctx,
                            uint64_t cacheLineBytes)
     : cacheLineBytes_(cacheLineBytes) {
@@ -72,7 +72,7 @@ bool CacheLineMap::isFieldMutable(const clang::FieldDecl *FD) {
     return false;
 }
 
-void CacheLineMap::collectFields(const clang::CXXRecordDecl *RD,
+void CacheLineMap::collectFields(const clang::RecordDecl *RD,
                                  clang::ASTContext &Ctx,
                                  uint64_t baseOffsetBytes) {
     if (!canComputeRecordLayout(RD, Ctx))
@@ -80,24 +80,26 @@ void CacheLineMap::collectFields(const clang::CXXRecordDecl *RD,
 
     const auto &layout = Ctx.getASTRecordLayout(RD);
 
-    // Base subobjects first.
-    for (const auto &base : RD->bases()) {
-        if (base.isVirtual())
-            continue;
-        const auto *baseRD = base.getType()->getAsCXXRecordDecl();
-        if (!baseRD || !baseRD->isCompleteDefinition())
-            continue;
-        uint64_t baseOffset = layout.getBaseClassOffset(baseRD).getQuantity();
-        collectFields(baseRD, Ctx, baseOffsetBytes + baseOffset);
-    }
+    // Base subobjects (C++ only — C structs have no bases).
+    if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
+        for (const auto &base : CXXRD->bases()) {
+            if (base.isVirtual())
+                continue;
+            const auto *baseRD = base.getType()->getAsCXXRecordDecl();
+            if (!baseRD || !baseRD->isCompleteDefinition())
+                continue;
+            uint64_t baseOffset = layout.getBaseClassOffset(baseRD).getQuantity();
+            collectFields(baseRD, Ctx, baseOffsetBytes + baseOffset);
+        }
 
-    // Virtual bases.
-    for (const auto &vbase : RD->vbases()) {
-        const auto *baseRD = vbase.getType()->getAsCXXRecordDecl();
-        if (!baseRD || !baseRD->isCompleteDefinition())
-            continue;
-        uint64_t baseOffset = layout.getVBaseClassOffset(baseRD).getQuantity();
-        collectFields(baseRD, Ctx, baseOffsetBytes + baseOffset);
+        // Virtual bases.
+        for (const auto &vbase : CXXRD->vbases()) {
+            const auto *baseRD = vbase.getType()->getAsCXXRecordDecl();
+            if (!baseRD || !baseRD->isCompleteDefinition())
+                continue;
+            uint64_t baseOffset = layout.getVBaseClassOffset(baseRD).getQuantity();
+            collectFields(baseRD, Ctx, baseOffsetBytes + baseOffset);
+        }
     }
 
     // Direct fields.
@@ -134,7 +136,7 @@ void CacheLineMap::collectFields(const clang::CXXRecordDecl *RD,
 
         // Recurse into nested record types for sub-field granularity.
         auto qt = field->getType().getCanonicalType();
-        if (const auto *nestedRD = qt->getAsCXXRecordDecl()) {
+        if (const auto *nestedRD = qt->getAsRecordDecl()) {
             if (nestedRD->isCompleteDefinition() && !atomic) {
                 collectFields(nestedRD, Ctx, absOffset);
             }

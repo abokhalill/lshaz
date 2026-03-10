@@ -662,22 +662,39 @@ ScanResult ScanPipeline::run(
         std::vector<std::vector<Diagnostic>> shardDiags(jobs);
         std::vector<std::vector<std::string>> shardFailed(jobs);
         std::vector<int> shardRet(jobs, 0);
-        std::vector<bool> shardCrashed(jobs, false);
         std::vector<std::thread> threads;
         threads.reserve(jobs);
 
         for (unsigned j = 0; j < jobs; ++j) {
             if (shards[j].empty()) continue;
             threads.emplace_back([&, j]() {
-                llvm::CrashRecoveryContext CRC;
-                bool ok = CRC.RunSafely([&]() {
-                    clang::tooling::ClangTool tool(compDB, shards[j]);
+                // Process TUs one at a time within each thread.
+                // Batching multiple TUs into a single ClangTool causes
+                // failures when compile_commands.json uses relative paths
+                // with different working directories per TU.
+                for (const auto &src : shards[j]) {
+                    std::vector<std::string> singleTU = {src};
+                    std::vector<Diagnostic> tuDiags;
                     LshazActionFactory factory(
-                        request.config, shardDiags[j], profileHotFuncs);
-                    shardRet[j] = tool.run(&factory);
-                    shardFailed[j] = factory.failedTUs();
-                });
-                if (!ok) shardCrashed[j] = true;
+                        request.config, tuDiags, profileHotFuncs);
+
+                    llvm::CrashRecoveryContext CRC;
+                    bool ok = CRC.RunSafely([&]() {
+                        clang::tooling::ClangTool tool(compDB, singleTU);
+                        int ret = tool.run(&factory);
+                        if (ret != 0) shardRet[j] = ret;
+                    });
+                    if (!ok) {
+                        shardFailed[j].push_back(src);
+                    } else {
+                        auto &ff = factory.failedTUs();
+                        shardFailed[j].insert(shardFailed[j].end(),
+                            ff.begin(), ff.end());
+                    }
+                    shardDiags[j].insert(shardDiags[j].end(),
+                        std::make_move_iterator(tuDiags.begin()),
+                        std::make_move_iterator(tuDiags.end()));
+                }
             });
         }
 
@@ -692,14 +709,6 @@ ScanResult ScanPipeline::run(
                 std::make_move_iterator(shardDiags[j].end()));
             result.failedTUs.insert(result.failedTUs.end(),
                 shardFailed[j].begin(), shardFailed[j].end());
-            if (shardCrashed[j]) {
-                toolRet = 1;
-                for (const auto &src : shards[j])
-                    result.failedTUs.push_back(src);
-                llvm::errs() << "lshaz: [crash] shard " << j
-                             << " crashed (" << shards[j].size()
-                             << " TU(s), recovered)\n";
-            }
         }
     }
 

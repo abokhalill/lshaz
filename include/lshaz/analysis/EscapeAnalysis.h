@@ -34,23 +34,23 @@ public:
 
     // Does this record type contain evidence of cross-thread usage?
     // Consults both structural members and publication path evidence.
-    bool mayEscapeThread(const clang::CXXRecordDecl *RD) const;
+    bool mayEscapeThread(const clang::RecordDecl *RD) const;
 
     bool isFieldMutable(const clang::FieldDecl *FD) const;
-    bool hasAtomicMembers(const clang::CXXRecordDecl *RD) const;
-    bool hasSyncPrimitives(const clang::CXXRecordDecl *RD) const;
+    bool hasAtomicMembers(const clang::RecordDecl *RD) const;
+    bool hasSyncPrimitives(const clang::RecordDecl *RD) const;
     bool isGlobalSharedMutable(const clang::VarDecl *VD) const;
 
     bool isAtomicType(clang::QualType QT) const;
     bool isSyncType(clang::QualType QT) const;
 
-    bool hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const;
-    bool hasCallbackMembers(const clang::CXXRecordDecl *RD) const;
+    bool hasSharedOwnershipMembers(const clang::RecordDecl *RD) const;
+    bool hasCallbackMembers(const clang::RecordDecl *RD) const;
     bool isSharedOwnershipType(clang::QualType QT) const;
-    bool hasVolatileMembers(const clang::CXXRecordDecl *RD) const;
+    bool hasVolatileMembers(const clang::RecordDecl *RD) const;
 
     // Query publication evidence for a specific type (by canonical qualified name).
-    bool hasPublicationEvidence(const clang::CXXRecordDecl *RD) const;
+    bool hasPublicationEvidence(const clang::RecordDecl *RD) const;
 
     // Mark a type as published to a cross-thread context.
     void markPublished(clang::QualType QT);

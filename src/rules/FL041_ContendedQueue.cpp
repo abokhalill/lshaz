@@ -44,11 +44,14 @@ public:
                  const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
-        const auto *RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(D);
+        const auto *RD = llvm::dyn_cast_or_null<clang::RecordDecl>(D);
         if (!RD || !RD->isCompleteDefinition())
             return;
-        if (RD->isImplicit() || RD->isLambda())
+        if (RD->isImplicit())
             return;
+        if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD))
+            if (CXXRD->isLambda())
+                return;
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
 

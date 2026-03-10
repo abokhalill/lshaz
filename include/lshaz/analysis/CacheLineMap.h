@@ -2,6 +2,7 @@
 #pragma once
 
 #include <clang/AST/ASTContext.h>
+#include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/RecordLayout.h>
 
@@ -35,7 +36,7 @@ struct CacheLineBucket {
 // including nested sub-objects and base classes.
 class CacheLineMap {
 public:
-    CacheLineMap(const clang::CXXRecordDecl *RD,
+    CacheLineMap(const clang::RecordDecl *RD,
                  clang::ASTContext &Ctx,
                  uint64_t cacheLineBytes = 64);
 
@@ -67,7 +68,7 @@ public:
     unsigned totalMutableFields() const { return totalMutables_; }
 
 private:
-    void collectFields(const clang::CXXRecordDecl *RD,
+    void collectFields(const clang::RecordDecl *RD,
                        clang::ASTContext &Ctx,
                        uint64_t baseOffsetBytes);
     void buildBuckets();

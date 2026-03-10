@@ -7,6 +7,7 @@
 
 namespace clang {
 class VarDecl;
+class RecordDecl;
 class CXXRecordDecl;
 class FunctionDecl;
 class ASTContext;
@@ -62,7 +63,7 @@ public:
 
     // Infer NUMA placement for a struct based on how it's typically
     // allocated (heap vs stack vs global).
-    static NUMAPlacement classifyStruct(const clang::CXXRecordDecl *RD,
+    static NUMAPlacement classifyStruct(const clang::RecordDecl *RD,
                                          clang::ASTContext &Ctx);
 
     // Check if a function is a main-thread-only initializer.

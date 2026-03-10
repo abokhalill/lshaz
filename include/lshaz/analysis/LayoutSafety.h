@@ -89,7 +89,7 @@ inline bool canComputeTypeSize(clang::QualType QT, clang::ASTContext &Ctx) {
 }
 
 /// Returns true if Clang can safely call getASTRecordLayout on this record.
-inline bool canComputeRecordLayout(const clang::CXXRecordDecl *RD,
+inline bool canComputeRecordLayout(const clang::RecordDecl *RD,
                                    clang::ASTContext &Ctx) {
     if (!RD || !RD->isCompleteDefinition())
         return false;

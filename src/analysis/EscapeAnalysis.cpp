@@ -87,7 +87,7 @@ bool EscapeAnalysis::isSyncType(clang::QualType QT) const {
     return false;
 }
 
-bool EscapeAnalysis::hasAtomicMembers(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasAtomicMembers(const clang::RecordDecl *RD) const {
     if (!RD || !RD->isCompleteDefinition())
         return false;
 
@@ -96,18 +96,20 @@ bool EscapeAnalysis::hasAtomicMembers(const clang::CXXRecordDecl *RD) const {
             return true;
     }
 
-    // Check bases.
-    for (const auto &base : RD->bases()) {
-        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
-            if (hasAtomicMembers(baseRD))
-                return true;
+    // Check bases (C++ only).
+    if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
+        for (const auto &base : CXXRD->bases()) {
+            if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+                if (hasAtomicMembers(baseRD))
+                    return true;
+            }
         }
     }
 
     return false;
 }
 
-bool EscapeAnalysis::hasSyncPrimitives(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasSyncPrimitives(const clang::RecordDecl *RD) const {
     if (!RD || !RD->isCompleteDefinition())
         return false;
 
@@ -116,17 +118,19 @@ bool EscapeAnalysis::hasSyncPrimitives(const clang::CXXRecordDecl *RD) const {
             return true;
     }
 
-    for (const auto &base : RD->bases()) {
-        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
-            if (hasSyncPrimitives(baseRD))
-                return true;
+    if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
+        for (const auto &base : CXXRD->bases()) {
+            if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+                if (hasSyncPrimitives(baseRD))
+                    return true;
+            }
         }
     }
 
     return false;
 }
 
-bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::mayEscapeThread(const clang::RecordDecl *RD) const {
     if (!RD)
         return false;
 
@@ -149,7 +153,7 @@ bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
     return false;
 }
 
-bool EscapeAnalysis::hasPublicationEvidence(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasPublicationEvidence(const clang::RecordDecl *RD) const {
     if (!RD || publishedTypes_.empty())
         return false;
     const auto *canon = RD->getCanonicalDecl();
@@ -295,7 +299,7 @@ bool EscapeAnalysis::isSharedOwnershipType(clang::QualType QT) const {
     return false;
 }
 
-bool EscapeAnalysis::hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasSharedOwnershipMembers(const clang::RecordDecl *RD) const {
     if (!RD || !RD->isCompleteDefinition())
         return false;
 
@@ -304,17 +308,19 @@ bool EscapeAnalysis::hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) c
             return true;
     }
 
-    for (const auto &base : RD->bases()) {
-        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
-            if (hasSharedOwnershipMembers(baseRD))
-                return true;
+    if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
+        for (const auto &base : CXXRD->bases()) {
+            if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+                if (hasSharedOwnershipMembers(baseRD))
+                    return true;
+            }
         }
     }
 
     return false;
 }
 
-bool EscapeAnalysis::hasCallbackMembers(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasCallbackMembers(const clang::RecordDecl *RD) const {
     if (!RD || !RD->isCompleteDefinition())
         return false;
 
@@ -338,7 +344,7 @@ bool EscapeAnalysis::hasCallbackMembers(const clang::CXXRecordDecl *RD) const {
     return false;
 }
 
-bool EscapeAnalysis::hasVolatileMembers(const clang::CXXRecordDecl *RD) const {
+bool EscapeAnalysis::hasVolatileMembers(const clang::RecordDecl *RD) const {
     if (!RD || !RD->isCompleteDefinition())
         return false;
 
@@ -347,10 +353,12 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::CXXRecordDecl *RD) const {
             return true;
     }
 
-    for (const auto &base : RD->bases()) {
-        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
-            if (hasVolatileMembers(baseRD))
-                return true;
+    if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
+        for (const auto &base : CXXRD->bases()) {
+            if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+                if (hasVolatileMembers(baseRD))
+                    return true;
+            }
         }
     }
 
