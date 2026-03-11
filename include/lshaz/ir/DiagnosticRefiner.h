@@ -33,6 +33,13 @@ private:
     // Find best matching profile for a function name.
     const IRFunctionProfile *findProfile(const std::string &funcName) const;
 
+    // Find profile by source location fallback (file suffix + line).
+    const IRFunctionProfile *findProfileByLocation(
+        const std::string &file, unsigned line) const;
+
+    // Try name match, then source location fallback.
+    const IRFunctionProfile *findProfileForDiag(const Diagnostic &diag) const;
+
     // Path suffix match: returns true if one path ends with the other's filename + dirs.
     static bool filePathSuffixMatch(const std::string &a, const std::string &b);
 

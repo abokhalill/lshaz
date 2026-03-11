@@ -32,6 +32,8 @@ struct IRAtomicInfo {
 struct IRFunctionProfile {
     std::string mangledName;
     std::string demangledName;
+    std::string sourceFile;
+    unsigned sourceLine = 0;
 
     // Stack frame
     uint64_t totalAllocaBytes = 0;

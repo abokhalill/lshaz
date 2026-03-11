@@ -74,6 +74,11 @@ void IRAnalyzer::analyzeFunction(llvm::Function &F) {
     profile.demangledName = llvm::demangle(profile.mangledName);
     profile.basicBlockCount = F.size();
 
+    if (auto *SP = F.getSubprogram()) {
+        profile.sourceFile = SP->getFilename().str();
+        profile.sourceLine = SP->getLine();
+    }
+
     // Build DominatorTree + LoopInfo for precise loop detection.
     llvm::DominatorTree DT(F);
     llvm::LoopInfo LI(DT);

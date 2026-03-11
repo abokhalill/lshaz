@@ -72,7 +72,50 @@ const IRFunctionProfile *DiagnosticRefiner::findProfile(
     if (it != profiles_.end())
         return &it->second;
 
+    // strip "(anonymous namespace)::" from
+    // the AST name and retry suffix match against demangled IR names.
+    static constexpr std::string_view kAnonNS = "(anonymous namespace)::";
+    std::string stripped = funcName;
+    for (;;) {
+        auto pos = stripped.find(kAnonNS);
+        if (pos == std::string::npos) break;
+        stripped.erase(pos, kAnonNS.size());
+    }
+    if (stripped != funcName && !stripped.empty()) {
+        for (const auto &[mangled, profile] : profiles_) {
+            const auto &dn = profile.demangledName;
+            if (dn.size() >= stripped.size()) {
+                auto spos = dn.size() - stripped.size();
+                if (dn.compare(spos, stripped.size(), stripped) == 0 &&
+                    (spos == 0 || (spos >= 2 && dn[spos-1] == ':' && dn[spos-2] == ':')))
+                    return &profile;
+            }
+        }
+    }
+
     return nullptr;
+}
+
+const IRFunctionProfile *DiagnosticRefiner::findProfileByLocation(
+    const std::string &file, unsigned line) const {
+    if (file.empty() || line == 0)
+        return nullptr;
+
+    for (const auto &[mangled, profile] : profiles_) {
+        if (profile.sourceLine == line && !profile.sourceFile.empty() &&
+            filePathSuffixMatch(file, profile.sourceFile))
+            return &profile;
+    }
+    return nullptr;
+}
+
+const IRFunctionProfile *DiagnosticRefiner::findProfileForDiag(
+    const Diagnostic &diag) const {
+    auto funcName = extractFunctionName(diag);
+    const auto *profile = findProfile(funcName);
+    if (profile)
+        return profile;
+    return findProfileByLocation(diag.location.file, diag.location.line);
 }
 
 void DiagnosticRefiner::refine(std::vector<Diagnostic> &diagnostics) const {
@@ -90,8 +133,7 @@ void DiagnosticRefiner::refine(std::vector<Diagnostic> &diagnostics) const {
 }
 
 void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -157,8 +199,7 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -195,8 +236,7 @@ void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -232,8 +272,7 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -290,8 +329,7 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -315,8 +353,7 @@ void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
@@ -339,8 +376,7 @@ void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
-    auto funcName = extractFunctionName(diag);
-    const auto *profile = findProfile(funcName);
+    const auto *profile = findProfileForDiag(diag);
     if (!profile)
         return;
 
