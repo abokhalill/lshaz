@@ -17,6 +17,13 @@ include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${CLANG_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
+# Resolve LLVM component libraries (works for both static and shared builds).
+# When LLVM is built static (no libLLVM.so), the monolithic LLVM target doesn't
+# exist — we must use individual component libs via llvm_map_components_to_libnames.
+llvm_map_components_to_libnames(LSHAZ_LLVM_LIBS
+    Core Support IRReader Analysis Demangle)
+message(STATUS "LLVM libs: ${LSHAZ_LLVM_LIBS}")
+
 # --- Project includes ---
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
@@ -87,6 +94,10 @@ set(LSHAZ_SOURCES
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})
+if(LLVM_LIBRARY_DIR)
+    target_compile_definitions(lshaz PRIVATE
+        LLVM_LIBRARY_DIR="${LLVM_LIBRARY_DIR}")
+endif()
 
 # --- Link Clang/LLVM libraries ---
 target_link_libraries(lshaz
@@ -104,7 +115,7 @@ target_link_libraries(lshaz
     clangEdit
     clangLex
     clangRewrite
-    LLVM
+    ${LSHAZ_LLVM_LIBS}
 )
 
 # --- Output contract tests ---
@@ -116,7 +127,7 @@ add_executable(output_contract_test
     src/core/Diagnostic.cpp
     src/core/Severity.cpp
 )
-target_link_libraries(output_contract_test PRIVATE LLVM)
+target_link_libraries(output_contract_test PRIVATE ${LSHAZ_LLVM_LIBS})
 
 # --- Pipeline unit test ---
 add_executable(pipeline_unit_test
@@ -125,7 +136,7 @@ add_executable(pipeline_unit_test
     src/pipeline/CompileDBResolver.cpp
     src/pipeline/RepoProvider.cpp
 )
-target_link_libraries(pipeline_unit_test PRIVATE LLVM)
+target_link_libraries(pipeline_unit_test PRIVATE ${LSHAZ_LLVM_LIBS})
 
 # --- Analysis ground truth test ---
 add_executable(analysis_ground_truth_test
@@ -146,11 +157,11 @@ target_link_libraries(analysis_ground_truth_test PRIVATE
     clangEdit
     clangLex
     clangRewrite
-    LLVM
+    ${LSHAZ_LLVM_LIBS}
 )
 
 # --- Scan E2E test ---
 add_executable(scan_e2e_test
     test/scan_e2e_test.cpp
 )
-target_link_libraries(scan_e2e_test PRIVATE LLVM)
+target_link_libraries(scan_e2e_test PRIVATE ${LSHAZ_LLVM_LIBS})
