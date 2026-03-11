@@ -64,14 +64,31 @@ public:
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 
-        for (const auto &pair : atomicPairs) {
+        constexpr size_t kMaxDetailedPairs = 5;
+        constexpr size_t kMaxDetailedLines = 5;
+
+        for (size_t i = 0; i < atomicPairs.size(); ++i) {
+            if (i >= kMaxDetailedPairs) {
+                escalations.push_back(
+                    "and " + std::to_string(atomicPairs.size() - kMaxDetailedPairs) +
+                    " more atomic pair(s) sharing cache lines");
+                break;
+            }
+            const auto &pair = atomicPairs[i];
             escalations.push_back(
                 "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
                 "' share line " + std::to_string(pair.lineIndex) +
                 ": guaranteed cross-core invalidation on write");
         }
 
-        for (auto lineIdx : fsCandidateLines) {
+        for (size_t i = 0; i < fsCandidateLines.size(); ++i) {
+            if (i >= kMaxDetailedLines) {
+                escalations.push_back(
+                    "and " + std::to_string(fsCandidateLines.size() - kMaxDetailedLines) +
+                    " more cache line(s) with mixed write surface");
+                break;
+            }
+            auto lineIdx = fsCandidateLines[i];
             const auto &bucket = map.buckets()[lineIdx];
             escalations.push_back(
                 "line " + std::to_string(lineIdx) + ": " +
