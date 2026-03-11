@@ -36,11 +36,14 @@
 #include <chrono>
 #include <future>
 #include <memory>
-#include <mutex>
 #include <semaphore>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace lshaz {
 
@@ -109,6 +112,279 @@ std::string resolveCompiler(const std::string &dbCompiler) {
             return *fb;
     }
     return {};
+}
+
+// --- Fork-based parallel IPC ---
+
+// Minimal JSON serializer for child→parent IPC.
+// Format: {"exitCode":N,"failedTUs":[...],"diagnostics":[...]}
+std::string serializeShardResult(int exitCode,
+                                  const std::vector<std::string> &failedTUs,
+                                  const std::vector<Diagnostic> &diagnostics) {
+    auto esc = [](const std::string &s) -> std::string {
+        std::string out;
+        out.reserve(s.size() + 4);
+        for (char c : s) {
+            switch (c) {
+                case '"':  out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default: out += c;
+            }
+        }
+        return out;
+    };
+
+    std::string buf;
+    buf.reserve(4096);
+    buf += "{\"exitCode\":";
+    buf += std::to_string(exitCode);
+    buf += ",\"failedTUs\":[";
+    for (size_t i = 0; i < failedTUs.size(); ++i) {
+        if (i) buf += ',';
+        buf += '"'; buf += esc(failedTUs[i]); buf += '"';
+    }
+    buf += "],\"diagnostics\":[";
+    for (size_t i = 0; i < diagnostics.size(); ++i) {
+        const auto &d = diagnostics[i];
+        if (i) buf += ',';
+        buf += "{\"ruleID\":\"" + esc(d.ruleID) + "\"";
+        buf += ",\"title\":\"" + esc(d.title) + "\"";
+        buf += ",\"severity\":\"" + std::string(severityToString(d.severity)) + "\"";
+        buf += ",\"confidence\":" + std::to_string(d.confidence);
+        buf += ",\"evidenceTier\":\"" + std::string(evidenceTierName(d.evidenceTier)) + "\"";
+        buf += ",\"suppressed\":" + std::string(d.suppressed ? "true" : "false");
+        buf += ",\"location\":{\"file\":\"" + esc(d.location.file) + "\"";
+        buf += ",\"line\":" + std::to_string(d.location.line);
+        buf += ",\"column\":" + std::to_string(d.location.column) + "}";
+        buf += ",\"functionName\":\"" + esc(d.functionName) + "\"";
+        buf += ",\"hardwareReasoning\":\"" + esc(d.hardwareReasoning) + "\"";
+        buf += ",\"structuralEvidence\":{";
+        bool first = true;
+        for (const auto &[k, v] : d.structuralEvidence) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(k); buf += "\":\"";
+            buf += esc(v); buf += '"';
+            first = false;
+        }
+        buf += "}";
+        buf += ",\"mitigation\":\"" + esc(d.mitigation) + "\"";
+        buf += ",\"escalations\":[";
+        for (size_t j = 0; j < d.escalations.size(); ++j) {
+            if (j) buf += ',';
+            buf += '"'; buf += esc(d.escalations[j]); buf += '"';
+        }
+        buf += "]}";
+    }
+    buf += "]}";
+    return buf;
+}
+
+// Minimal JSON deserializer for child→parent IPC.
+struct ShardIPC {
+    int exitCode = -1;
+    std::vector<std::string> failedTUs;
+    std::vector<Diagnostic> diagnostics;
+};
+
+namespace ipc {
+
+static void skipWS(const std::string &s, size_t &i) {
+    while (i < s.size() && (s[i]==' '||s[i]=='\n'||s[i]=='\r'||s[i]=='\t'))
+        ++i;
+}
+
+static bool expect(const std::string &s, size_t &i, char c) {
+    skipWS(s, i);
+    if (i < s.size() && s[i] == c) { ++i; return true; }
+    return false;
+}
+
+static std::string parseStr(const std::string &s, size_t &i) {
+    skipWS(s, i);
+    if (i >= s.size() || s[i] != '"') return {};
+    ++i;
+    std::string out;
+    while (i < s.size() && s[i] != '"') {
+        if (s[i] == '\\' && i + 1 < s.size()) {
+            ++i;
+            switch (s[i]) {
+                case '"':  out += '"'; break;
+                case '\\': out += '\\'; break;
+                case 'n':  out += '\n'; break;
+                case 'r':  out += '\r'; break;
+                case 't':  out += '\t'; break;
+                default:   out += s[i]; break;
+            }
+        } else {
+            out += s[i];
+        }
+        ++i;
+    }
+    if (i < s.size()) ++i;
+    return out;
+}
+
+static double parseNum(const std::string &s, size_t &i) {
+    skipWS(s, i);
+    size_t start = i;
+    if (i < s.size() && s[i] == '-') ++i;
+    while (i < s.size() && s[i] >= '0' && s[i] <= '9') ++i;
+    if (i < s.size() && s[i] == '.') {
+        ++i;
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') ++i;
+    }
+    if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+        ++i;
+        if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
+        while (i < s.size() && s[i] >= '0' && s[i] <= '9') ++i;
+    }
+    if (start == i) return 0.0;
+    return std::stod(s.substr(start, i - start));
+}
+
+static bool parseBool(const std::string &s, size_t &i) {
+    skipWS(s, i);
+    if (s.compare(i, 4, "true") == 0) { i += 4; return true; }
+    if (s.compare(i, 5, "false") == 0) { i += 5; return false; }
+    return false;
+}
+
+static void skipValue(const std::string &s, size_t &i) {
+    skipWS(s, i);
+    if (i >= s.size()) return;
+    if (s[i] == '"') { parseStr(s, i); return; }
+    if (s[i] == '{') {
+        ++i; int d = 1;
+        while (i < s.size() && d > 0) {
+            if (s[i] == '{') ++d;
+            else if (s[i] == '}') --d;
+            else if (s[i] == '"') { --i; parseStr(s, i); continue; }
+            ++i;
+        }
+        return;
+    }
+    if (s[i] == '[') {
+        ++i; int d = 1;
+        while (i < s.size() && d > 0) {
+            if (s[i] == '[') ++d;
+            else if (s[i] == ']') --d;
+            else if (s[i] == '"') { --i; parseStr(s, i); continue; }
+            ++i;
+        }
+        return;
+    }
+    if (s.compare(i, 4, "true") == 0) { i += 4; return; }
+    if (s.compare(i, 5, "false") == 0) { i += 5; return; }
+    if (s.compare(i, 4, "null") == 0) { i += 4; return; }
+    parseNum(s, i);
+}
+
+static Severity toSeverity(const std::string &s) {
+    if (s == "Critical") return Severity::Critical;
+    if (s == "High") return Severity::High;
+    if (s == "Medium") return Severity::Medium;
+    return Severity::Informational;
+}
+
+static EvidenceTier toTier(const std::string &s) {
+    if (s == "proven") return EvidenceTier::Proven;
+    if (s == "likely") return EvidenceTier::Likely;
+    return EvidenceTier::Speculative;
+}
+
+static Diagnostic parseDiag(const std::string &s, size_t &i) {
+    Diagnostic d;
+    while (true) {
+        skipWS(s, i);
+        if (i >= s.size() || s[i] == '}') { if (i < s.size()) ++i; break; }
+        std::string key = parseStr(s, i);
+        expect(s, i, ':');
+        if (key == "ruleID")            d.ruleID = parseStr(s, i);
+        else if (key == "title")        d.title = parseStr(s, i);
+        else if (key == "severity")     d.severity = toSeverity(parseStr(s, i));
+        else if (key == "confidence")   d.confidence = parseNum(s, i);
+        else if (key == "evidenceTier") d.evidenceTier = toTier(parseStr(s, i));
+        else if (key == "suppressed")   d.suppressed = parseBool(s, i);
+        else if (key == "functionName") d.functionName = parseStr(s, i);
+        else if (key == "hardwareReasoning") d.hardwareReasoning = parseStr(s, i);
+        else if (key == "mitigation")   d.mitigation = parseStr(s, i);
+        else if (key == "location") {
+            expect(s, i, '{');
+            while (true) {
+                skipWS(s, i);
+                if (i >= s.size() || s[i] == '}') { if (i < s.size()) ++i; break; }
+                std::string lk = parseStr(s, i);
+                expect(s, i, ':');
+                if (lk == "file")        d.location.file = parseStr(s, i);
+                else if (lk == "line")   d.location.line = static_cast<unsigned>(parseNum(s, i));
+                else if (lk == "column") d.location.column = static_cast<unsigned>(parseNum(s, i));
+                else skipValue(s, i);
+                expect(s, i, ',');
+            }
+        } else if (key == "structuralEvidence") {
+            expect(s, i, '{');
+            while (true) {
+                skipWS(s, i);
+                if (i >= s.size() || s[i] == '}') { if (i < s.size()) ++i; break; }
+                std::string ek = parseStr(s, i);
+                expect(s, i, ':');
+                d.structuralEvidence[ek] = parseStr(s, i);
+                expect(s, i, ',');
+            }
+        } else if (key == "escalations") {
+            expect(s, i, '[');
+            while (true) {
+                skipWS(s, i);
+                if (i >= s.size() || s[i] == ']') { if (i < s.size()) ++i; break; }
+                d.escalations.push_back(parseStr(s, i));
+                expect(s, i, ',');
+            }
+        } else {
+            skipValue(s, i);
+        }
+        expect(s, i, ',');
+    }
+    return d;
+}
+
+} // namespace ipc
+
+bool deserializeShardResult(const std::string &json, ShardIPC &out) {
+    size_t i = 0;
+    if (!ipc::expect(json, i, '{')) return false;
+    while (true) {
+        ipc::skipWS(json, i);
+        if (i >= json.size() || json[i] == '}') break;
+        std::string key = ipc::parseStr(json, i);
+        ipc::expect(json, i, ':');
+        if (key == "exitCode") {
+            out.exitCode = static_cast<int>(ipc::parseNum(json, i));
+        } else if (key == "failedTUs") {
+            ipc::expect(json, i, '[');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == ']') { if (i < json.size()) ++i; break; }
+                out.failedTUs.push_back(ipc::parseStr(json, i));
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "diagnostics") {
+            ipc::expect(json, i, '[');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == ']') { if (i < json.size()) ++i; break; }
+                if (!ipc::expect(json, i, '{')) break;
+                out.diagnostics.push_back(ipc::parseDiag(json, i));
+                ipc::expect(json, i, ',');
+            }
+        } else {
+            ipc::skipValue(json, i);
+        }
+        ipc::expect(json, i, ',');
+    }
+    return true;
 }
 
 } // anonymous namespace
@@ -698,30 +974,50 @@ ScanResult ScanPipeline::run(
                 std::make_move_iterator(tuDiags.end()));
         }
     } else {
-        // Parallel path: per-shard crash isolation.
-        // Thread-safety:
-        //   - compDB: read-only, shared safely.
-        //   - request.config: const ref, read-only.
-        //   - profileHotFuncs: copied by value into each factory.
-        //   - shardDiags[j]: exclusive per-thread, no contention.
-        //   - HotPathOracle: constructed per-TU inside LshazASTConsumer.
+        // Parallel path: fork-based process isolation.
+        //
+        // ClangTool uses global mutable state (llvm::cl option tables,
+        // CrashRecoveryContext signal handlers, FileManager stat caches)
+        // that is not thread-safe. We fork() per shard so each child
+        // gets its own address space via COW. Children serialize results
+        // to temp files; parent reads them back after waitpid().
         std::vector<std::vector<std::string>> shards(jobs);
         for (size_t i = 0; i < sources.size(); ++i)
             shards[i % jobs].push_back(sources[i]);
 
-        std::vector<std::vector<Diagnostic>> shardDiags(jobs);
-        std::vector<std::vector<std::string>> shardFailed(jobs);
-        std::vector<int> shardRet(jobs, 0);
-        std::vector<std::thread> threads;
-        threads.reserve(jobs);
+        struct ChildSlot {
+            pid_t pid = -1;
+            std::string ipcPath;
+            unsigned shardIdx = 0;
+        };
+        std::vector<ChildSlot> children;
+        children.reserve(jobs);
 
         for (unsigned j = 0; j < jobs; ++j) {
             if (shards[j].empty()) continue;
-            threads.emplace_back([&, j]() {
-                // Process TUs one at a time within each thread.
-                // Batching multiple TUs into a single ClangTool causes
-                // failures when compile_commands.json uses relative paths
-                // with different working directories per TU.
+
+            // Unique temp file for this shard.
+            llvm::SmallString<128> tmpDir;
+            llvm::sys::path::system_temp_directory(true, tmpDir);
+            llvm::SmallString<128> ipcPath(tmpDir);
+            llvm::sys::path::append(ipcPath,
+                "lshaz-shard-" + std::to_string(j) + "-" +
+                std::to_string(getpid()) + ".json");
+
+            pid_t pid = fork();
+            if (pid < 0) {
+                llvm::errs() << "lshaz: fork() failed for shard " << j
+                             << ": " << strerror(errno) << "\n";
+                continue;
+            }
+
+            if (pid == 0) {
+                // --- Child process ---
+                llvm::CrashRecoveryContext::Enable();
+                std::vector<Diagnostic> childDiags;
+                std::vector<std::string> childFailed;
+                int childRet = 0;
+
                 for (const auto &src : shards[j]) {
                     std::vector<std::string> singleTU = {src};
                     std::vector<Diagnostic> tuDiags;
@@ -733,33 +1029,61 @@ ScanResult ScanPipeline::run(
                         clang::tooling::ClangTool tool(compDB, singleTU);
                         addResourceDirAdjuster(tool, compDB, src);
                         int ret = tool.run(&factory);
-                        if (ret != 0) shardRet[j] = ret;
+                        if (ret != 0) childRet = ret;
                     });
                     if (!ok) {
-                        shardFailed[j].push_back(src);
+                        childFailed.push_back(src);
                     } else {
                         auto &ff = factory.failedTUs();
-                        shardFailed[j].insert(shardFailed[j].end(),
+                        childFailed.insert(childFailed.end(),
                             ff.begin(), ff.end());
                     }
-                    shardDiags[j].insert(shardDiags[j].end(),
+                    childDiags.insert(childDiags.end(),
                         std::make_move_iterator(tuDiags.begin()),
                         std::make_move_iterator(tuDiags.end()));
                 }
-            });
+
+                std::string json = serializeShardResult(
+                    childRet, childFailed, childDiags);
+                std::error_code ec;
+                llvm::raw_fd_ostream out(std::string(ipcPath), ec);
+                if (!ec)
+                    out << json;
+                out.close();
+                _exit(childRet != 0 ? 1 : 0);
+            }
+
+            // --- Parent ---
+            children.push_back({pid, std::string(ipcPath), j});
         }
 
-        for (auto &t : threads)
-            t.join();
+        // Reap all children.
+        for (auto &child : children) {
+            int status = 0;
+            waitpid(child.pid, &status, 0);
 
-        // Merge results.
-        for (unsigned j = 0; j < jobs; ++j) {
-            if (shardRet[j] != 0) toolRet = shardRet[j];
-            result.diagnostics.insert(result.diagnostics.end(),
-                std::make_move_iterator(shardDiags[j].begin()),
-                std::make_move_iterator(shardDiags[j].end()));
-            result.failedTUs.insert(result.failedTUs.end(),
-                shardFailed[j].begin(), shardFailed[j].end());
+            auto buf = llvm::MemoryBuffer::getFile(child.ipcPath);
+            if (buf) {
+                ShardIPC shard;
+                if (deserializeShardResult((*buf)->getBuffer().str(), shard)) {
+                    if (shard.exitCode != 0) toolRet = shard.exitCode;
+                    result.diagnostics.insert(result.diagnostics.end(),
+                        std::make_move_iterator(shard.diagnostics.begin()),
+                        std::make_move_iterator(shard.diagnostics.end()));
+                    result.failedTUs.insert(result.failedTUs.end(),
+                        shard.failedTUs.begin(), shard.failedTUs.end());
+                } else {
+                    llvm::errs() << "lshaz: failed to parse IPC from shard "
+                                 << child.shardIdx << "\n";
+                }
+            } else if (WIFSIGNALED(status)) {
+                llvm::errs() << "lshaz: shard " << child.shardIdx
+                             << " killed by signal "
+                             << WTERMSIG(status) << "\n";
+                for (const auto &src : shards[child.shardIdx])
+                    result.failedTUs.push_back(src);
+            }
+            llvm::sys::fs::remove(child.ipcPath);
         }
     }
 
