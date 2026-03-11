@@ -17,11 +17,15 @@ include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${CLANG_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
-# Resolve LLVM component libraries (works for both static and shared builds).
-# When LLVM is built static (no libLLVM.so), the monolithic LLVM target doesn't
-# exist — we must use individual component libs via llvm_map_components_to_libnames.
-llvm_map_components_to_libnames(LSHAZ_LLVM_LIBS
-    Core Support IRReader Analysis Demangle)
+# Prefer the monolithic LLVM target (shared builds with LLVM_BUILD_LLVM_DYLIB=ON).
+# Fall back to individual component libs for static LLVM builds where the
+# monolithic target doesn't exist.
+if(TARGET LLVM)
+    set(LSHAZ_LLVM_LIBS LLVM)
+else()
+    llvm_map_components_to_libnames(LSHAZ_LLVM_LIBS
+        Core Support IRReader Analysis Demangle)
+endif()
 message(STATUS "LLVM libs: ${LSHAZ_LLVM_LIBS}")
 
 # --- Project includes ---
