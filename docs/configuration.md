@@ -213,6 +213,58 @@ lshaz fix src/engine.cpp -- -std=c++20
 
 ---
 
+## Hyp CLI Options
+
+```
+lshaz hyp <scan-result.json> [options]
+```
+
+Constructs formal latency hypotheses from scan diagnostics. Input must be a scan result JSON file (the output of `lshaz scan --format json`). Hypothesis JSON (the output of this command) is **not** accepted as input.
+
+| Flag | Description |
+|---|---|
+| `-o, --output <file>` | Write hypothesis JSON to file (default: stdout) |
+| `--rule <id>` | Only hypothesize for a specific rule ID |
+| `--min-conf <f>` | Minimum confidence threshold (default: 0.0) |
+| `--help` | Show help |
+
+**Example:**
+
+```bash
+lshaz hyp scan.json --output hypotheses.json
+lshaz hyp scan.json --rule FL002 --min-conf 0.7 -o out.json
+```
+
+---
+
+## Exp CLI Options
+
+```
+lshaz exp <scan-result.json> [options]
+```
+
+Synthesizes runnable experiment bundles from scan diagnostics. Input must be a scan result JSON file — **not** hypothesis JSON. If hypothesis JSON is passed, the command fails with an actionable error message.
+
+| Flag | Description |
+|---|---|
+| `-o, --output <dir>` | Output directory (default: `./experiments`) |
+| `--rule <id>` | Only generate for a specific rule ID |
+| `--min-conf <f>` | Minimum confidence threshold (default: 0.5) |
+| `--sku <name>` | CPU SKU family (default: `generic`) |
+| `--dry-run` | Show what would be generated without writing |
+| `--help` | Show help |
+
+Generated experiment scripts require `perf` access. `run_all.sh` includes a preflight check for `perf_event_paranoid` and fails fast with instructions if access is restricted. See [hypothesis-engine.md](hypothesis-engine.md#perf-access-requirements) for details.
+
+**Example:**
+
+```bash
+lshaz exp scan.json --output ./experiments
+lshaz exp scan.json --dry-run --rule FL002
+```
+
+---
+
 ## Single-File Mode
 
 Analyze individual source files with explicit compiler flags:

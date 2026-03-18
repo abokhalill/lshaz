@@ -42,6 +42,7 @@ After AST analysis, the tool optionally emits and analyzes LLVM IR to confirm or
 
 **IR emission:**
 - Compiler resolved from `compile_commands.json` argv[0], with PATH fallback to `clang++`, `clang++-18`, `clang++-17`, `clang++-16`.
+- **GCC-shim:** When the compile_commands.json compiler is GCC, IR emission forces clang/clang++ and strips GCC-only flags (`-Wshadow=compatible-local`, `-Wimplicit-fallthrough=N`, `-Wcast-function-type`, etc.) that clang rejects. This enables IR analysis on GCC-compiled codebases (e.g., PostgreSQL).
 - IR emitted via `llvm::sys::ExecuteAndWait`. No shell interpolation.
 - Parallelism bounded by `std::counting_semaphore` at `--ir-jobs` (default: `hardware_concurrency()`).
 - Jobs grouped into shards of `--ir-batch-size` TUs. Each shard owns its own `LLVMContext`.
@@ -99,6 +100,7 @@ AST analysis supports parallel execution via `--jobs N`:
 - Children serialize diagnostics + failed TU lists to temp files via a minimal JSON IPC protocol. The parent reads them back after `waitpid()`.
 - After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of process count or scheduling order.
 - Per-TU crash isolation via `CrashRecoveryContext` within each child. If a child is killed by a signal, all its TUs are recorded as failed.
+- **Known caveat — FL040 determinism:** FL040 (Centralized Global State) dedup is order-sensitive. When the same global variable is visible in multiple TUs, the dedup pass selects a "canonical" location based on which shard finishes first. Different shard scheduling → different canonical locations → different dedup decisions. All other rules are fully deterministic. Fix tracked: sort FL040 candidates by a stable key (qualified name + file path) before dedup.
 
 ## Severity Escalation
 

@@ -157,7 +157,9 @@ See `tools/github-actions-example.yml` for a ready-to-use GitHub Actions workflo
 
 ## Determinism
 
-Diagnostic output is **fully deterministic** across identical runs on the same input. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
+Diagnostic output is **fully deterministic** across identical runs on the same input for all rules except FL040. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
+
+> **Note:** FL040 (Centralized Global State) dedup is order-sensitive under parallel execution. When the same global is visible in multiple TUs, different shard scheduling can produce different dedup decisions. All other rules are bit-identical across runs. See [architecture.md](architecture.md#parallel-execution) for details.
 
 The only field that varies between runs is `metadata.timestamp` (epoch seconds at scan start). For byte-identical JSON comparison in CI, normalize or strip this field:
 

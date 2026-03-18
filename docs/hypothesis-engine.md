@@ -67,31 +67,83 @@ Priors persist across runs via `--pmu-priors`.
 
 ### `lshaz hyp` — Generate Hypotheses
 
-Reads a JSON scan result and emits formal hypotheses for each diagnostic:
+Reads a **scan result** JSON (the output of `lshaz scan --format json`) and emits formal hypotheses for each diagnostic.
 
 ```bash
-# From a scan result file
+# Write hypotheses to a file
+lshaz hyp scan-results.json --output hypotheses.json
+
+# Write to stdout (default if --output is omitted)
 lshaz hyp scan-results.json
 
-# Pipe from scan
-lshaz scan . --format json | lshaz hyp -
+# Filter by rule and minimum confidence
+lshaz hyp scan-results.json --rule FL002 --min-conf 0.7 -o out.json
 ```
+
+| Flag | Description |
+|---|---|
+| `-o, --output <file>` | Write hypothesis JSON to file (default: stdout) |
+| `--rule <id>` | Only hypothesize for a specific rule ID |
+| `--min-conf <f>` | Minimum confidence threshold (default: 0.0) |
 
 Output includes H0/H1, required PMU counters, minimum detectable effect, and confound controls for each finding.
 
+> **Important:** The input must be scan JSON (containing a `"diagnostics"` array). Passing hypothesis JSON (the output of `lshaz hyp`) will produce an error. The hypothesis file is an output artifact, not an input to further pipeline stages.
+
 ### `lshaz exp` — Synthesize Experiments
 
-Generates runnable experiment bundles (treatment/control harnesses, build scripts, perf stat collection):
+Generates runnable experiment bundles (treatment/control harnesses, build scripts, perf stat collection).
+
+**Input:** `lshaz exp` requires the **original scan result JSON** — the same file you pass to `lshaz hyp`. It does **not** accept hypothesis JSON. If you pass hypothesis output by mistake, it will fail with:
+
+```
+lshaz exp: file contains hypothesis output, not scan results.
+Pass the original scan JSON (from 'lshaz scan'), not the output of 'lshaz hyp'.
+```
 
 ```bash
 # Generate experiments into ./experiments/
 lshaz exp scan-results.json --output ./experiments
 
-# From pipe
-lshaz scan . --format json | lshaz exp - --output ./experiments
+# Preview without writing files
+lshaz exp scan-results.json --dry-run
+
+# Filter by rule and confidence
+lshaz exp scan-results.json --rule FL002 --min-conf 0.7 -o ./experiments
 ```
 
+| Flag | Description |
+|---|---|
+| `-o, --output <dir>` | Output directory (default: `./experiments`) |
+| `--rule <id>` | Only generate for a specific rule ID |
+| `--min-conf <f>` | Minimum confidence threshold (default: 0.5) |
+| `--sku <name>` | CPU SKU family (default: `generic`) |
+| `--dry-run` | Show what would be generated without writing |
+
 Each experiment directory contains a README, Makefile, harness sources, and hypothesis metadata.
+
+### Perf Access Requirements
+
+Generated `scripts/run_all.sh` includes a **preflight check** for `perf_event_paranoid`. If the system restricts perf access (paranoid > 1) and the script is not run as root, it will fail immediately with actionable instructions:
+
+```
+[lshaz] ERROR: perf_event_paranoid=4 (needs <=1 or root)
+  Fix: sudo sysctl kernel.perf_event_paranoid=1
+  Or run this script with sudo.
+```
+
+To configure perf access system-wide:
+
+```bash
+# Temporary (until reboot)
+sudo sysctl kernel.perf_event_paranoid=1
+
+# Permanent
+echo 'kernel.perf_event_paranoid=1' | sudo tee /etc/sysctl.d/99-perf.conf
+sudo sysctl --system
+```
+
+On systems without passwordless sudo, either run the experiment script as root or configure `perf_event_paranoid` beforehand. The `setup_env.sh` and `teardown_env.sh` scripts also require root (they pin CPUs and disable frequency scaling).
 
 ### Calibration Feedback
 

@@ -137,7 +137,7 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 | [docs/rules.md](docs/rules.md) | All rules: hardware mechanisms, detection logic, examples, mitigations |
 | [docs/configuration.md](docs/configuration.md) | Config file reference, all CLI flags, hot path annotation, inline suppression |
 | [docs/output-formats.md](docs/output-formats.md) | JSON schema, SARIF conformance, diagnostic model, parse failure reporting |
-| [docs/hypothesis-engine.md](docs/hypothesis-engine.md) | Experiment synthesis, calibration loop, PMU feedback |
+| [docs/hypothesis-engine.md](docs/hypothesis-engine.md) | Hypothesis generation, experiment synthesis, perf access, calibration loop |
 | [docs/developer-guide.md](docs/developer-guide.md) | Building, testing, validation harness, adding rules, codebase layout |
 
 ## License
