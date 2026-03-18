@@ -57,7 +57,7 @@ lshaz scan <path> [options]
 | `--include <pattern>` | Only analyze files matching pattern (repeatable) |
 | `--exclude <pattern>` | Skip files matching pattern (repeatable) |
 | `--max-files <N>` | Maximum translation units to analyze |
-| `--jobs <N>` | Parallel AST analysis threads (default: hardware_concurrency) |
+| `--jobs <N>` | Parallel AST analysis worker processes (default: hardware_concurrency). Uses fork-based isolation, not threads. |
 | `--no-ir` | Disable LLVM IR analysis pass |
 | `--ir-opt <O0\|O1\|O2>` | IR optimization level (default: O0) |
 | `--ir-jobs <N>` | Max parallel IR emission jobs (default: hardware_concurrency) |
@@ -121,6 +121,8 @@ hot_file_patterns:
 ```
 
 **3. Perf profile:** Functions exceeding `--hotness-threshold` percent of total samples are classified as hot.
+
+**4. Transitive propagation:** If a hot function calls `f`, then `f` is also marked hot via the per-TU CallGraph. This propagates transitively.
 
 ---
 

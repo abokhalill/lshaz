@@ -1,6 +1,6 @@
 # Hypothesis Engine
 
-The hypothesis engine generates formal experiment designs for runtime validation of flagged hazards. Activated by `--calibration-store`.
+The hypothesis engine generates formal experiment designs for runtime validation of flagged hazards. The `lshaz hyp` and `lshaz exp` subcommands operate standalone on scan JSON. The `--calibration-store` flag enables closed-loop feedback integration during scans.
 
 ## Overview
 

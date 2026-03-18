@@ -46,8 +46,8 @@ Machine-readable. Use `--format json`.
 
 ```json
 {
-  "version": "0.9.0",
-  "schemaVersion": "2",
+  "version": "0.4.0",
+  "schemaVersion": "1.0.0",
   "metadata": {
     "timestamp": 1709827200,
     "configPath": "lshaz.config.yaml",

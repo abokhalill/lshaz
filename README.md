@@ -108,6 +108,7 @@ lshaz: 157/157 TU(s) parsed, 246 diagnostic(s)
 | FL060 | NUMA-unfriendly shared structure | High |
 | FL061 | Centralized dispatcher bottleneck | High |
 | FL090 | Hazard amplification (compound) | Critical |
+| FL091 | Synthesized interaction | Varies |
 
 See [docs/rules.md](docs/rules.md) for hardware mechanisms, detection logic, and mitigations. Run `lshaz explain <ID>` for any rule.
 

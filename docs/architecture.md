@@ -69,7 +69,7 @@ Per function, collects: stack allocations (`AllocaInst`, name, size, array flag)
 
 ### Stage 3: Post-Processing
 
-- **Deduplication** — When multiple TUs include the same header, struct-level rules emit duplicates. Dedup key: `(ruleID, file, line)` for struct rules; `(ruleID, functionName)` for function rules. Keeps highest-confidence instance. Merges escalation traces.
+- **Deduplication** — When multiple TUs include the same header, struct-level rules emit duplicates. Dedup key: `(ruleID, file, line)` for most struct rules; `(ruleID, var, type)` for FL040 (global state); `(ruleID, functionName, line)` for function rules. Keeps highest-confidence instance with a deterministic tiebreaker (shortest file path → lexicographic → lowest line). Merges escalation traces from all duplicates.
 - **Interaction synthesis** — Correlates diagnostics from different rules at the same code site using the `InteractionEligibilityMatrix`. Eligible pairs or triples produce compound hazard findings (FL091).
 - **Precision budget** — Per-rule governance: configurable max emissions per TU, minimum confidence floor, severity cap. Rules exceeding FP rate threshold are auto-demoted.
 - **Calibration suppression** — If `--calibration-store` is provided, suppresses diagnostics matching known false-positive feature neighborhoods (Euclidean distance, radius 0.25). Safety rail: Critical/High + Proven evidence never suppressed.

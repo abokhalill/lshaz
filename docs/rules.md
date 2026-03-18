@@ -1,6 +1,6 @@
 # Rules Reference
 
-lshaz ships 15 rules, each targeting a specific microarchitectural hazard class in C and C++ codebases. Every rule must map to a concrete hardware mechanism — cache, coherence, store buffer, TLB, branch predictor, NUMA, or allocator.
+lshaz ships 16 rules, each targeting a specific microarchitectural hazard class in C and C++ codebases. Every rule must map to a concrete hardware mechanism — cache, coherence, store buffer, TLB, branch predictor, NUMA, or allocator.
 
 ## Rule Index
 

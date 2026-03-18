@@ -43,14 +43,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 ## Testing
 
-268 tests across five suites:
+258 tests across four suites:
 
 ```bash
 ./build/analysis_ground_truth_test  # 88 tests — layout, cache line, escape analysis ground truth
 ./build/output_contract_test        # 55 tests — JSON, SARIF, CLI output contracts
 ./build/pipeline_unit_test          # 44 tests — pipeline correctness
 ./build/scan_e2e_test               # 71 tests — end-to-end scan behavior
-./build/scan_integration_test       # 10 tests — integration tests
 ```
 
 All tests must pass before committing.
@@ -165,6 +164,6 @@ Rules must map to a concrete hardware mechanism. If it cannot be tied to cache, 
 ## Commit Discipline
 
 - Each commit must be logically atomic and traceable to a specific change
-- All 268 tests must pass before pushing
+- All 258 tests must pass before pushing
 - No batching of unrelated changes
 - Prefer minimal upstream fixes over downstream workarounds
