@@ -1084,6 +1084,9 @@ ScanResult ScanPipeline::run(
 
     llvm::CrashRecoveryContext::Enable();
 
+    unsigned completedTUs = 0;
+    const unsigned totalTUs = static_cast<unsigned>(sources.size());
+
     if (jobs <= 1 || sources.size() <= 1) {
         // Sequential path: per-TU crash isolation.
         for (const auto &src : sources) {
@@ -1112,6 +1115,9 @@ ScanResult ScanPipeline::run(
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(tuDiags.begin()),
                 std::make_move_iterator(tuDiags.end()));
+            ++completedTUs;
+            report("progress", std::to_string(completedTUs) + "/" +
+                   std::to_string(totalTUs));
         }
     } else {
         // Parallel path: fork-based process isolation.
@@ -1224,6 +1230,9 @@ ScanResult ScanPipeline::run(
                     result.failedTUs.push_back(src);
             }
             llvm::sys::fs::remove(child.ipcPath);
+            completedTUs += static_cast<unsigned>(shards[child.shardIdx].size());
+            report("progress", std::to_string(completedTUs) + "/" +
+                   std::to_string(totalTUs));
         }
     }
 

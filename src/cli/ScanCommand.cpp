@@ -287,14 +287,20 @@ int runScanCommand(int argc, const char **argv) {
         else if (args.format == "tidy")
             request.outputFormat = OutputFormat::CLI;
 
-        ScanPipeline pipeline([](const std::string &stage,
-                                 const std::string &detail) {
-            llvm::errs() << "lshaz: [" << stage << "] " << detail << "\n";
+        bool isTTY = llvm::errs().is_displayed();
+        ScanPipeline pipeline([isTTY](const std::string &stage,
+                                      const std::string &detail) {
+            if (stage == "progress" && isTTY)
+                llvm::errs() << "\rlshaz: [" << stage << "] " << detail
+                             << "        ";
+            else
+                llvm::errs() << "lshaz: [" << stage << "] " << detail << "\n";
         });
 
         auto result = pipeline.executeWithDB(
             request, fixedDB, {srcPath});
 
+        if (isTTY) llvm::errs() << "\r";
         llvm::errs() << "lshaz: 1/1 TU(s) parsed, "
                      << result.diagnostics.size() << " diagnostic(s)\n";
         return emitOutput(result, request, args.format, args.outputFile);
@@ -427,15 +433,21 @@ int runScanCommand(int argc, const char **argv) {
         request.outputFormat = OutputFormat::CLI;
 
     // Execute pipeline.
-    ScanPipeline pipeline([](const std::string &stage,
-                             const std::string &detail) {
-        llvm::errs() << "lshaz: [" << stage << "] " << detail << "\n";
+    bool isTTY = llvm::errs().is_displayed();
+    ScanPipeline pipeline([isTTY](const std::string &stage,
+                                  const std::string &detail) {
+        if (stage == "progress" && isTTY)
+            llvm::errs() << "\rlshaz: [" << stage << "] " << detail
+                         << "        ";
+        else
+            llvm::errs() << "lshaz: [" << stage << "] " << detail << "\n";
     });
 
     auto result = pipeline.execute(request);
 
     // Summary on stderr.
     {
+        if (isTTY) llvm::errs() << "\r";
         unsigned ok = result.totalTUsAnalyzed - result.totalTUsFailed;
         llvm::errs() << "lshaz: " << ok << "/" << result.totalTUsAnalyzed
                      << " TU(s) parsed, " << result.diagnostics.size()
