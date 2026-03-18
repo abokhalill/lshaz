@@ -191,7 +191,13 @@ bool parseScanResultFile(const std::string &path,
     // Find the "diagnostics" array.
     auto pos = json.find("\"diagnostics\"");
     if (pos == std::string::npos) {
-        error = "no 'diagnostics' key found in " + path;
+        // Detect common misuse: hypothesis output fed to exp/hyp.
+        if (json.find("\"hypotheses\"") != std::string::npos)
+            error = "file contains hypothesis output, not scan results. "
+                    "Pass the original scan JSON (from 'lshaz scan'), not "
+                    "the output of 'lshaz hyp': " + path;
+        else
+            error = "no 'diagnostics' key found in " + path;
         return false;
     }
     i = pos + 13; // skip key
