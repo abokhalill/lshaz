@@ -42,7 +42,8 @@ public:
                 return;
 
         EscapeAnalysis escape(Ctx);
-        if (!escape.mayEscapeThread(RD))
+        EscapeVerdict ev = escape.escapeVerdict(RD);
+        if (!ev)
             return;
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
@@ -55,9 +56,6 @@ public:
         bool hasAtomicPairs = !atomicPairs.empty();
         auto fsCandidateLines = map.falseSharingCandidateLines();
 
-        // Without atomic pairs on the same line, we cannot statically prove
-        // that different threads write different fields. Require at least
-        // atomic fields in the struct for non-atomic-pair cases.
         if (!hasAtomicPairs && map.totalAtomicFields() == 0)
             return;
 

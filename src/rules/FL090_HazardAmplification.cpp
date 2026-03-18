@@ -44,15 +44,15 @@ public:
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
         EscapeAnalysis escape(Ctx);
+        EscapeVerdict ev = escape.escapeVerdict(RD);
 
         bool multiLine    = map.maxLinesSpanned() >= 3;
         bool hasAtomics   = map.totalAtomicFields() > 0;
-        bool threadEscape = escape.mayEscapeThread(RD);
 
         unsigned signalCount = 0;
-        if (multiLine)    ++signalCount;
-        if (hasAtomics)   ++signalCount;
-        if (threadEscape) ++signalCount;
+        if (multiLine)   ++signalCount;
+        if (hasAtomics)  ++signalCount;
+        if (ev.escapes)  ++signalCount;
 
         if (signalCount < 3)
             return;
@@ -107,7 +107,7 @@ public:
         diag.ruleID    = "FL090";
         diag.title     = "Hazard Amplification";
         diag.severity  = sev;
-        diag.confidence = 0.88;
+        diag.confidence = 0.70 + 0.18 * ev.contention; // [0.70, 0.88]
         diag.evidenceTier = EvidenceTier::Likely;
 
         diag.location = resolveSourceLocation(loc, SM);

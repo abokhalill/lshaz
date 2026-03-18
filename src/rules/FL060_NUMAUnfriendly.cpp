@@ -57,12 +57,12 @@ public:
             return;
 
         EscapeAnalysis escape(Ctx);
-
-        if (!escape.mayEscapeThread(RD))
+        EscapeVerdict ev = escape.escapeVerdict(RD);
+        if (!ev)
             return;
 
         unsigned mutableCount = 0;
-        bool hasAtomics = escape.hasAtomicMembers(RD);
+        bool hasAtomics = ev.hasAtomics;
 
         for (const auto *field : RD->fields()) {
             if (escape.isFieldMutable(field))
@@ -128,7 +128,10 @@ public:
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 
+        // Scale confidence by contention. Low-contention types (shared_ptr only)
+        // are unlikely NUMA hotspots.
         double baseConfidence = hasAtomics ? 0.55 : 0.35;
+        baseConfidence *= (0.5 + 0.5 * ev.contention); // floor at 50% of base
 
         Diagnostic diag;
         diag.ruleID    = "FL060";
