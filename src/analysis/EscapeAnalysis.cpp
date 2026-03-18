@@ -147,6 +147,14 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
 
     v.escapes = v.hasAtomics || v.hasSyncPrims || v.hasSharedOwner ||
                 v.hasVolatile || v.hasPublication;
+
+    // Accessor count: how many functions in this TU touch the type?
+    if (const auto *canon = llvm::dyn_cast<clang::RecordDecl>(RD->getCanonicalDecl())) {
+        auto it = typeAccessorCounts_.find(canon);
+        if (it != typeAccessorCounts_.end())
+            v.accessorCount = it->second;
+    }
+
     if (!v.escapes)
         return v;
 
@@ -160,6 +168,14 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
     if (v.hasPublication) score += 0.10;
     if (v.hasAtomics && v.hasSyncPrims)
         score += 0.15; // compound: lock + atomic = contended
+
+    // Accessor count modulation: single-accessor = init-only pattern.
+    // Many accessors = wider contention surface.
+    if (v.accessorCount <= 1)
+        score *= 0.5;
+    else if (v.accessorCount >= 6)
+        score = std::min(score * 1.2, 1.0);
+
     v.contention = score > 1.0 ? 1.0 : score;
 
     // Access pattern: atomics → RMW, volatile alone → read-heavy (MMIO/signal).
@@ -271,6 +287,9 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
 
     // Pass 3: count write sites per global for write-once analysis.
     collectGlobalWriteSites(TU);
+
+    // Pass 4: count distinct functions accessing each record type.
+    collectTypeAccessors(TU);
 }
 
 bool EscapeAnalysis::isFieldMutable(const clang::FieldDecl *FD) const {
@@ -448,6 +467,39 @@ private:
 };
 
 } // anonymous namespace
+
+namespace {
+
+class TypeAccessVisitor
+    : public clang::RecursiveASTVisitor<TypeAccessVisitor> {
+public:
+    std::unordered_set<const clang::RecordDecl *> accessed;
+
+    bool VisitMemberExpr(clang::MemberExpr *ME) {
+        auto baseType = ME->getBase()->getType();
+        if (baseType->isPointerType())
+            baseType = baseType->getPointeeType();
+        if (const auto *RD = baseType.getCanonicalType()->getAsRecordDecl())
+            accessed.insert(static_cast<const clang::RecordDecl *>(
+                RD->getCanonicalDecl()));
+        return true;
+    }
+};
+
+} // anonymous namespace
+
+void EscapeAnalysis::collectTypeAccessors(
+    const clang::TranslationUnitDecl *TU) {
+    for (auto *D : TU->decls()) {
+        auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D);
+        if (!FD || !FD->doesThisDeclarationHaveABody())
+            continue;
+        TypeAccessVisitor visitor;
+        visitor.TraverseStmt(FD->getBody());
+        for (const auto *RD : visitor.accessed)
+            ++typeAccessorCounts_[RD];
+    }
+}
 
 void EscapeAnalysis::collectGlobalWriteSites(
     const clang::TranslationUnitDecl *TU) {

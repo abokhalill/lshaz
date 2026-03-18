@@ -98,7 +98,12 @@ private:
     // (excluding the initializer expression on the VarDecl itself).
     std::unordered_map<const clang::VarDecl *, unsigned> globalWriteCounts_;
 
+    // Per-type: how many distinct functions access fields of this type.
+    // Key: canonical RecordDecl*. Populated by scanTranslationUnit Pass 4.
+    std::unordered_map<const clang::RecordDecl *, unsigned> typeAccessorCounts_;
+
     void collectGlobalWriteSites(const clang::TranslationUnitDecl *TU);
+    void collectTypeAccessors(const clang::TranslationUnitDecl *TU);
 };
 
 } // namespace lshaz
