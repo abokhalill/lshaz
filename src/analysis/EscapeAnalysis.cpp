@@ -130,27 +130,53 @@ bool EscapeAnalysis::hasSyncPrimitives(const clang::RecordDecl *RD) const {
     return false;
 }
 
-bool EscapeAnalysis::mayEscapeThread(const clang::RecordDecl *RD) const {
+EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
+    EscapeVerdict v;
     if (!RD)
-        return false;
+        return v;
 
-    // Structural evidence.
-    if (hasAtomicMembers(RD))
-        return true;
-    if (hasSyncPrimitives(RD))
-        return true;
-    if (hasSharedOwnershipMembers(RD))
-        return true;
-    if (hasVolatileMembers(RD))
-        return true;
+    v.hasAtomics     = hasAtomicMembers(RD);
+    v.hasSyncPrims   = hasSyncPrimitives(RD);
+    v.hasSharedOwner = hasSharedOwnershipMembers(RD);
+    v.hasVolatile    = hasVolatileMembers(RD);
 
-    // Lazy TU-wide publication path scan on first query.
+    // Lazy, idempotent after first call.
     const_cast<EscapeAnalysis *>(this)->scanTranslationUnit(
         ctx_.getTranslationUnitDecl());
-    if (hasPublicationEvidence(RD))
-        return true;
+    v.hasPublication = hasPublicationEvidence(RD);
 
-    return false;
+    v.escapes = v.hasAtomics || v.hasSyncPrims || v.hasSharedOwner ||
+                v.hasVolatile || v.hasPublication;
+    if (!v.escapes)
+        return v;
+
+    // Contention scoring: weights reflect coherence invalidation cost.
+    // atomics > volatile > sync > shared_ptr > publication
+    double score = 0.0;
+    if (v.hasAtomics)     score += 0.40;
+    if (v.hasVolatile)    score += 0.25;
+    if (v.hasSyncPrims)   score += 0.15;
+    if (v.hasSharedOwner) score += 0.10;
+    if (v.hasPublication) score += 0.10;
+    if (v.hasAtomics && v.hasSyncPrims)
+        score += 0.15; // compound: lock + atomic = contended
+    v.contention = score > 1.0 ? 1.0 : score;
+
+    // Access pattern: atomics → RMW, volatile alone → read-heavy (MMIO/signal).
+    if (v.hasAtomics)
+        v.pattern = AccessPattern::ReadWrite;
+    else if (v.hasVolatile && !v.hasSyncPrims)
+        v.pattern = AccessPattern::ReadOnly;
+    else if (v.hasSyncPrims)
+        v.pattern = AccessPattern::ReadWrite;
+    else if (v.hasSharedOwner || v.hasPublication)
+        v.pattern = AccessPattern::ReadOnly;
+
+    return v;
+}
+
+bool EscapeAnalysis::mayEscapeThread(const clang::RecordDecl *RD) const {
+    return escapeVerdict(RD).escapes;
 }
 
 bool EscapeAnalysis::hasPublicationEvidence(const clang::RecordDecl *RD) const {

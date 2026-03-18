@@ -6,11 +6,37 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Type.h>
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace lshaz {
+
+enum class AccessPattern : uint8_t {
+    None       = 0,
+    ReadOnly   = 1,
+    WriteOnce  = 2,
+    ReadWrite  = 3,
+    WriteHeavy = 4, // worst coherence cost
+};
+
+// contention ∈ [0.0, 1.0]. 0 = no cross-thread sharing expected.
+struct EscapeVerdict {
+    bool escapes          = false;
+    double contention     = 0.0;
+    AccessPattern pattern = AccessPattern::None;
+
+    bool hasAtomics       = false;
+    bool hasSyncPrims     = false;
+    bool hasSharedOwner   = false;
+    bool hasVolatile      = false;
+    bool hasPublication   = false;
+
+    unsigned accessorCount = 0; // distinct functions touching this type in TU
+
+    operator bool() const { return escapes; }
+};
 
 // Thread-escape analysis with both structural and interprocedural evidence.
 // Conservative: if uncertain, assumes escape.
@@ -32,9 +58,8 @@ public:
     // Run once per TU to collect interprocedural publication paths.
     void scanTranslationUnit(const clang::TranslationUnitDecl *TU);
 
-    // Does this record type contain evidence of cross-thread usage?
-    // Consults both structural members and publication path evidence.
-    bool mayEscapeThread(const clang::RecordDecl *RD) const;
+    EscapeVerdict escapeVerdict(const clang::RecordDecl *RD) const;
+    bool mayEscapeThread(const clang::RecordDecl *RD) const; // delegates to above
 
     bool isFieldMutable(const clang::FieldDecl *FD) const;
     bool hasAtomicMembers(const clang::RecordDecl *RD) const;
