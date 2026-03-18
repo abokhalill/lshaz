@@ -16,7 +16,24 @@ bool isStructLevelRule(const std::string &ruleID) {
            ruleID == "FL090" || ruleID == "FL091";
 }
 
+// FL040 diagnostics carry the variable name in structuralEvidence["var"].
+// The same global can be declared in different headers across TUs, so
+// file+line is not a stable key. Use the variable identity instead.
+bool isGlobalVarRule(const std::string &ruleID) {
+    return ruleID == "FL040";
+}
+
 std::string makeKey(const Diagnostic &d) {
+    if (isGlobalVarRule(d.ruleID)) {
+        auto varIt = d.structuralEvidence.find("var");
+        auto typeIt = d.structuralEvidence.find("type");
+        if (varIt != d.structuralEvidence.end()) {
+            std::string key = d.ruleID + "|" + varIt->second;
+            if (typeIt != d.structuralEvidence.end())
+                key += "|" + typeIt->second;
+            return key;
+        }
+    }
     if (isStructLevelRule(d.ruleID)) {
         return d.ruleID + "|" + d.location.file + "|" +
                std::to_string(d.location.line);
@@ -50,12 +67,32 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
         } else {
             groups[it->second].push_back(i);
             size_t prev = bestIdx[key];
-            if (diagnostics[i].confidence > diagnostics[prev].confidence ||
-                (diagnostics[i].confidence == diagnostics[prev].confidence &&
-                 static_cast<uint8_t>(diagnostics[i].evidenceTier) <
-                     static_cast<uint8_t>(diagnostics[prev].evidenceTier))) {
-                bestIdx[key] = i;
+            const auto &cur = diagnostics[i];
+            const auto &prv = diagnostics[prev];
+            bool better = false;
+            if (cur.confidence > prv.confidence)
+                better = true;
+            else if (cur.confidence == prv.confidence) {
+                if (static_cast<uint8_t>(cur.evidenceTier) <
+                    static_cast<uint8_t>(prv.evidenceTier))
+                    better = true;
+                else if (cur.evidenceTier == prv.evidenceTier) {
+                    // Stable tiebreaker: shortest file path, then
+                    // lowest line. Guarantees deterministic canonical
+                    // location regardless of shard arrival order.
+                    if (cur.location.file.size() < prv.location.file.size())
+                        better = true;
+                    else if (cur.location.file.size() == prv.location.file.size()) {
+                        if (cur.location.file < prv.location.file)
+                            better = true;
+                        else if (cur.location.file == prv.location.file &&
+                                 cur.location.line < prv.location.line)
+                            better = true;
+                    }
+                }
             }
+            if (better)
+                bestIdx[key] = i;
         }
     }
 
@@ -83,6 +120,36 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
                 }
                 if (!exists)
                     merged.escalations.push_back(esc);
+            }
+        }
+
+        // FL040 cross-TU write-once promotion: isWriteOnceGlobal is
+        // per-TU (each TU only sees its own write sites). If ANY
+        // instance across TUs classified the global as not write-once,
+        // that evidence must propagate to the merged result. Without
+        // this, the same global can appear as Informational or High
+        // depending on which TU's version survived dedup.
+        if (isGlobalVarRule(merged.ruleID) && group.size() > 1) {
+            auto woIt = merged.structuralEvidence.find("write_once");
+            bool mergedIsWriteOnce = (woIt != merged.structuralEvidence.end()
+                                      && woIt->second == "yes");
+            if (mergedIsWriteOnce) {
+                for (size_t idx : group) {
+                    if (idx == best) continue;
+                    auto oit = diagnostics[idx].structuralEvidence.find("write_once");
+                    if (oit != diagnostics[idx].structuralEvidence.end()
+                        && oit->second == "no") {
+                        // Promote: adopt the non-write-once severity/confidence.
+                        merged.severity = diagnostics[idx].severity;
+                        merged.confidence = diagnostics[idx].confidence;
+                        merged.evidenceTier = diagnostics[idx].evidenceTier;
+                        merged.structuralEvidence["write_once"] = "no";
+                        merged.escalations.push_back(
+                            "cross-TU write promotion: another TU observes "
+                            "write sites for this global");
+                        break;
+                    }
+                }
             }
         }
 

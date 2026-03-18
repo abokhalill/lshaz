@@ -100,7 +100,7 @@ AST analysis supports parallel execution via `--jobs N`:
 - Children serialize diagnostics + failed TU lists to temp files via a minimal JSON IPC protocol. The parent reads them back after `waitpid()`.
 - After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of process count or scheduling order.
 - Per-TU crash isolation via `CrashRecoveryContext` within each child. If a child is killed by a signal, all its TUs are recorded as failed.
-- **Known caveat — FL040 determinism:** FL040 (Centralized Global State) dedup is order-sensitive. When the same global variable is visible in multiple TUs, the dedup pass selects a "canonical" location based on which shard finishes first. Different shard scheduling → different canonical locations → different dedup decisions. All other rules are fully deterministic. Fix tracked: sort FL040 candidates by a stable key (qualified name + file path) before dedup.
+- **Known caveat — FL040 determinism:** FL040 dedup now uses a stable key (`var` name + type) instead of file+line, with a deterministic tiebreaker (shortest file path, then lexicographic, then lowest line) for canonical location selection. Cross-TU write-once promotion ensures that if any TU classifies a global as not write-once, that evidence propagates through dedup. Residual variance of ±1–5 FL040 findings may occur on macro-heavy codebases (e.g., jemalloc's `JEMALLOC_N()` macro) due to Clang preprocessor non-determinism in `<scratch space>` line numbering and per-TU `isWriteOnceGlobal` classification. All other rules are fully deterministic.
 
 ## Severity Escalation
 
