@@ -50,7 +50,7 @@ public:
         uint64_t lines = map.maxLinesSpanned();
 
         EscapeAnalysis escape(Ctx);
-        bool escapes = escape.mayEscapeThread(RD);
+        EscapeVerdict ev = escape.escapeVerdict(RD);
 
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
@@ -84,11 +84,20 @@ public:
                 " line(s): RFO traffic on each distinct line");
         }
 
-        // Demote structs with no thread-escape evidence and no atomics.
-        // The struct genuinely spans multiple lines, but without concurrency
-        // signals the coherence hazard is speculative.
-        if (!escapes && map.totalAtomicFields() == 0) {
+        // No escape evidence and no atomics → speculative.
+        if (!ev.escapes && map.totalAtomicFields() == 0) {
             sev = Severity::Medium;
+        }
+        // Escapes but low contention (shared_ptr/publication only,
+        // no atomics/volatile/sync) → demote. Coherence pressure is
+        // theoretically possible but unlikely to be a hot path.
+        else if (ev.escapes && ev.contention < 0.30 &&
+                 map.totalAtomicFields() == 0) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "low contention (" +
+                std::to_string(static_cast<int>(ev.contention * 100)) +
+                "%): escape via shared_ptr/publication only");
         }
 
         const auto &SM = Ctx.getSourceManager();
@@ -98,8 +107,12 @@ public:
         diag.ruleID    = "FL001";
         diag.title     = "Cache Line Spanning Struct";
         diag.severity  = sev;
-        if (!escapes && map.totalAtomicFields() == 0) {
+        if (!ev.escapes && map.totalAtomicFields() == 0) {
             diag.confidence = !straddlers.empty() ? 0.52 : 0.42;
+            diag.evidenceTier = EvidenceTier::Likely;
+        } else if (ev.contention < 0.30 && map.totalAtomicFields() == 0) {
+            // Low-contention escape: slightly above non-escape.
+            diag.confidence = !straddlers.empty() ? 0.55 : 0.45;
             diag.evidenceTier = EvidenceTier::Likely;
         } else {
             diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
@@ -126,7 +139,8 @@ public:
             {"straddling_fields", std::to_string(straddlers.size())},
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"mutable_fields", std::to_string(map.totalMutableFields())},
-            {"thread_escape", escapes ? "true" : "false"},
+            {"thread_escape", ev.escapes ? "true" : "false"},
+            {"contention", std::to_string(static_cast<int>(ev.contention * 100)) + "%"},
         };
 
         diag.mitigation =
