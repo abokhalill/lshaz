@@ -42,12 +42,15 @@ CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
 }
 
 bool CacheLineMap::isAtomicType(clang::QualType QT) {
-    // Check the original (non-canonical) type first for typedef names
-    // containing "atomic".  C codebases (Nginx, Linux kernel, Redis) use
-    // volatile typedefs like ngx_atomic_t / atomic_t / redisAtomic that
-    // are manipulated via compiler builtins (__sync_*, __atomic_*).
-    // These are real atomics that the C11 _Atomic qualifier doesn't cover.
-    {
+    // C-style volatile typedefs whose name contains "atomic" — covers
+    // ngx_atomic_t (Nginx), atomic_t (Linux kernel), etc.  These are
+    // volatile integers manipulated via compiler builtins (__sync_*,
+    // __atomic_*) and represent real cross-process/cross-thread atomics.
+    //
+    // Gate: the canonical type must be volatile-qualified.  This avoids
+    // false positives on non-volatile helper typedefs like
+    // ngx_atomic_uint_t (plain uint64_t used as the underlying type).
+    if (QT.getCanonicalType().isVolatileQualified()) {
         clang::QualType walk = QT;
         while (const auto *TDT = walk->getAs<clang::TypedefType>()) {
             std::string tdName = TDT->getDecl()->getNameAsString();
