@@ -512,6 +512,13 @@ void EscapeAnalysis::collectGlobalWriteSites(
     }
 }
 
+unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {
+    if (!VD || !VD->hasGlobalStorage())
+        return 0;
+    auto it = globalWriteCounts_.find(VD->getCanonicalDecl());
+    return (it != globalWriteCounts_.end()) ? it->second : 0;
+}
+
 bool EscapeAnalysis::isWriteOnceGlobal(const clang::VarDecl *VD) const {
     if (!VD || !VD->hasGlobalStorage())
         return false;
