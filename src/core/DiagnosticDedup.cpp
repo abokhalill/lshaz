@@ -123,36 +123,6 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
             }
         }
 
-        // FL040 cross-TU write-once promotion: isWriteOnceGlobal is
-        // per-TU (each TU only sees its own write sites). If ANY
-        // instance across TUs classified the global as not write-once,
-        // that evidence must propagate to the merged result. Without
-        // this, the same global can appear as Informational or High
-        // depending on which TU's version survived dedup.
-        if (isGlobalVarRule(merged.ruleID) && group.size() > 1) {
-            auto woIt = merged.structuralEvidence.find("write_once");
-            bool mergedIsWriteOnce = (woIt != merged.structuralEvidence.end()
-                                      && woIt->second == "yes");
-            if (mergedIsWriteOnce) {
-                for (size_t idx : group) {
-                    if (idx == best) continue;
-                    auto oit = diagnostics[idx].structuralEvidence.find("write_once");
-                    if (oit != diagnostics[idx].structuralEvidence.end()
-                        && oit->second == "no") {
-                        // Promote: adopt the non-write-once severity/confidence.
-                        merged.severity = diagnostics[idx].severity;
-                        merged.confidence = diagnostics[idx].confidence;
-                        merged.evidenceTier = diagnostics[idx].evidenceTier;
-                        merged.structuralEvidence["write_once"] = "no";
-                        merged.escalations.push_back(
-                            "cross-TU write promotion: another TU observes "
-                            "write sites for this global");
-                        break;
-                    }
-                }
-            }
-        }
-
         if (group.size() > 1) {
             merged.escalations.push_back(
                 "cross-TU: deduplicated from " +
