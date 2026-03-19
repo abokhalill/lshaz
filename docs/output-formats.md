@@ -157,9 +157,9 @@ See `tools/github-actions-example.yml` for a ready-to-use GitHub Actions workflo
 
 ## Determinism
 
-Diagnostic output is **fully deterministic** across identical runs on the same input for all rules except FL040. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
+Diagnostic output is **fully deterministic** across identical runs on the same input. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
 
-> **Note:** FL040 (Centralized Global State) dedup uses a stable key (`var` + `type`) with a deterministic tiebreaker for canonical location. Residual variance of ±1–5 findings may occur on macro-heavy codebases due to Clang preprocessor non-determinism in `<scratch space>` line numbering and per-TU write-once classification. All other rules are bit-identical across runs. See [architecture.md](architecture.md#parallel-execution) for details.
+> **Note:** FL040 (Centralized Global State) uses a two-pass MapReduce architecture to guarantee determinism. Per-TU shards emit raw write counts; the pipeline aggregates them globally before applying the write-once threshold. Dedup uses a stable key (`var` + `type`) with a deterministic tiebreaker for canonical location. All diagnostic locations are resolved via `getSpellingLoc()` to strip Clang `<scratch space>` artifacts from macro expansions. See [architecture.md](architecture.md#parallel-execution) for details.
 
 The only field that varies between runs is `metadata.timestamp` (epoch seconds at scan start). For byte-identical JSON comparison in CI, normalize or strip this field:
 
