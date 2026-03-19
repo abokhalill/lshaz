@@ -1255,6 +1255,83 @@ ScanResult ScanPipeline::run(
                   return a.functionName < b.functionName;
               });
 
+    // FL040 reduce phase: aggregate per-TU write counts into a global verdict.
+    // Shards emitted raw facts (tu_write_count, has_init). We sum writes across
+    // all TUs for each (var, type) and apply the write-once threshold globally.
+    // This must run before dedup so all duplicate instances get reclassified
+    // consistently — dedup then collapses them to a single canonical instance.
+    {
+        // Accumulate: key = "var|type", value = {total_writes, any_has_init}
+        struct FL040Agg {
+            unsigned totalWrites = 0;
+            bool anyHasInit = false;
+        };
+        std::unordered_map<std::string, FL040Agg> fl040Agg;
+
+        for (const auto &d : result.diagnostics) {
+            if (d.ruleID != "FL040") continue;
+            auto varIt = d.structuralEvidence.find("var");
+            auto typeIt = d.structuralEvidence.find("type");
+            if (varIt == d.structuralEvidence.end()) continue;
+            std::string key = varIt->second;
+            if (typeIt != d.structuralEvidence.end())
+                key += "|" + typeIt->second;
+
+            auto wcIt = d.structuralEvidence.find("tu_write_count");
+            auto hiIt = d.structuralEvidence.find("has_init");
+            unsigned wc = 0;
+            if (wcIt != d.structuralEvidence.end())
+                wc = static_cast<unsigned>(std::stoul(wcIt->second));
+            bool hi = (hiIt != d.structuralEvidence.end()
+                       && hiIt->second == "yes");
+
+            auto &agg = fl040Agg[key];
+            agg.totalWrites += wc;
+            if (hi) agg.anyHasInit = true;
+        }
+
+        // Reclassify each FL040 diagnostic based on global verdict.
+        for (auto &d : result.diagnostics) {
+            if (d.ruleID != "FL040") continue;
+            auto varIt = d.structuralEvidence.find("var");
+            auto typeIt = d.structuralEvidence.find("type");
+            if (varIt == d.structuralEvidence.end()) continue;
+            std::string key = varIt->second;
+            if (typeIt != d.structuralEvidence.end())
+                key += "|" + typeIt->second;
+
+            auto it = fl040Agg.find(key);
+            if (it == fl040Agg.end()) continue;
+
+            const auto &agg = it->second;
+            // Same logic as EscapeAnalysis::isWriteOnceGlobal, but on
+            // the global sum across all TUs instead of a single TU.
+            bool writeOnce = false;
+            if (agg.anyHasInit && agg.totalWrites == 0)
+                writeOnce = true;
+            else if (!agg.anyHasInit && agg.totalWrites <= 1)
+                writeOnce = true;
+            else if (agg.anyHasInit && agg.totalWrites <= 1)
+                writeOnce = true;
+
+            // Replace per-TU metadata with global verdict.
+            d.structuralEvidence.erase("tu_write_count");
+            d.structuralEvidence.erase("has_init");
+            d.structuralEvidence["write_once"] = writeOnce ? "yes" : "no";
+            d.structuralEvidence["global_write_count"] =
+                std::to_string(agg.totalWrites);
+
+            if (writeOnce) {
+                d.severity = Severity::Informational;
+                d.confidence = 0.30;
+                d.evidenceTier = EvidenceTier::Speculative;
+                d.escalations.push_back(
+                    "write-once (global): across all TUs, at most one write "
+                    "site — negligible runtime contention");
+            }
+        }
+    }
+
     // IR analysis pass.
     if (request.ir.enabled && toolRet == 0) {
         report("ir", "IR emission and analysis");
