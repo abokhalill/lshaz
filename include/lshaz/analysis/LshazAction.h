@@ -3,6 +3,7 @@
 
 #include "lshaz/core/Config.h"
 #include "lshaz/core/Diagnostic.h"
+#include "lshaz/analysis/EscapeSummary.h"
 
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Tooling/Tooling.h>
@@ -18,6 +19,7 @@ class LshazAction : public clang::ASTFrontendAction {
 public:
     LshazAction(const Config &cfg,
                     std::vector<Diagnostic> &diagnostics,
+                    EscapeSummary &escapeSummary,
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<std::string> &failedTUs);
 
@@ -30,6 +32,7 @@ public:
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
+    EscapeSummary &escapeSummary_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<std::string> &failedTUs_;
     std::string currentFile_;
@@ -44,10 +47,12 @@ public:
     std::unique_ptr<clang::FrontendAction> create() override;
 
     const std::vector<std::string> &failedTUs() const { return failedTUs_; }
+    const EscapeSummary &escapeSummary() const { return escapeSummary_; }
 
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
+    EscapeSummary escapeSummary_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<std::string> failedTUs_;
 };

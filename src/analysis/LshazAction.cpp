@@ -9,9 +9,10 @@ namespace lshaz {
 LshazAction::LshazAction(
     const Config &cfg,
     std::vector<Diagnostic> &diagnostics,
+    EscapeSummary &escapeSummary,
     const std::unordered_set<std::string> &profileHotFuncs,
     std::vector<std::string> &failedTUs)
-    : config_(cfg), diagnostics_(diagnostics),
+    : config_(cfg), diagnostics_(diagnostics), escapeSummary_(escapeSummary),
       profileHotFuncs_(profileHotFuncs), failedTUs_(failedTUs) {}
 
 std::unique_ptr<clang::ASTConsumer>
@@ -19,7 +20,7 @@ LshazAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
                                    llvm::StringRef file) {
     currentFile_ = file.str();
     return std::make_unique<LshazASTConsumer>(
-        config_, diagnostics_, profileHotFuncs_);
+        config_, diagnostics_, escapeSummary_, profileHotFuncs_);
 }
 
 void LshazAction::EndSourceFileAction() {
@@ -38,7 +39,7 @@ LshazActionFactory::LshazActionFactory(
 
 std::unique_ptr<clang::FrontendAction> LshazActionFactory::create() {
     return std::make_unique<LshazAction>(
-        config_, diagnostics_, profileHotFuncs_, failedTUs_);
+        config_, diagnostics_, escapeSummary_, profileHotFuncs_, failedTUs_);
 }
 
 } // namespace lshaz

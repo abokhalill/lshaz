@@ -29,8 +29,10 @@ bool isInSystemHeader(const clang::Decl *D, const clang::SourceManager &SM) {
 LshazASTConsumer::LshazASTConsumer(
     const Config &cfg,
     std::vector<Diagnostic> &diagnostics,
+    EscapeSummary &escapeSummary,
     const std::unordered_set<std::string> &profileHotFuncs)
-    : config_(cfg), oracle_(cfg), diagnostics_(diagnostics) {
+    : config_(cfg), oracle_(cfg), diagnostics_(diagnostics),
+      escapeSummary_(escapeSummary) {
     if (!profileHotFuncs.empty())
         oracle_.loadProfileHotFunctions(profileHotFuncs);
 }
@@ -172,6 +174,15 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         diagnostics_.begin() + static_cast<long>(diagsBefore),
         diagnostics_.end(), isSuppressed);
     diagnostics_.erase(it, diagnostics_.end());
+
+    // Build per-TU escape summary for cross-TU aggregation.
+    std::vector<const clang::RecordDecl *> records;
+    for (auto *D : decls) {
+        if (auto *RD = llvm::dyn_cast<clang::RecordDecl>(D))
+            if (RD->isCompleteDefinition())
+                records.push_back(RD);
+    }
+    escapeSummary_ = escape.buildEscapeSummary(records);
 }
 
 } // namespace lshaz
