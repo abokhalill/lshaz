@@ -43,7 +43,7 @@ public:
             if (CXXRD->isLambda())
                 return;
 
-        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
+        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes, Cfg.atomicTypeNames);
         EscapeVerdict ev = escape.escapeVerdict(RD);
 
         bool multiLine    = map.maxLinesSpanned() >= 3;

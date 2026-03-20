@@ -58,6 +58,9 @@ struct Config {
     // "tcmalloc", "jemalloc", "mimalloc", or "" (default glibc).
     std::string linkedAllocator;
 
+    // Opaque atomic wrapper type names (e.g. atomic_t, spinlock_t).
+    std::vector<std::string> atomicTypeNames;
+
     static Config loadFromFile(const std::string &path);
     static Config defaults();
 };

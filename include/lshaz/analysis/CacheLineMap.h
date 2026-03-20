@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace lshaz {
@@ -40,7 +41,8 @@ class CacheLineMap {
 public:
     CacheLineMap(const clang::RecordDecl *RD,
                  clang::ASTContext &Ctx,
-                 uint64_t cacheLineBytes = 64);
+                 uint64_t cacheLineBytes = 64,
+                 const std::vector<std::string> &atomicTypeNames = {});
 
     uint64_t recordSizeBytes() const { return sizeBytes_; }
     uint64_t linesSpanned() const { return linesSpanned_; }
@@ -85,7 +87,7 @@ private:
                        uint64_t baseOffsetBytes);
     void buildBuckets();
 
-    static bool isAtomicType(clang::QualType QT);
+    bool isAtomicType(clang::QualType QT) const;
     static bool isFieldMutable(const clang::FieldDecl *FD);
 
     uint64_t cacheLineBytes_;
@@ -96,6 +98,7 @@ private:
     unsigned totalAtomics_  = 0;
     unsigned totalMutables_ = 0;
 
+    std::unordered_set<std::string> atomicTypeNames_;
     std::vector<FieldLineEntry> fields_;
     std::vector<CacheLineBucket> buckets_;
 };

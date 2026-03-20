@@ -54,7 +54,7 @@ public:
             if (CXXRD->isLambda())
                 return;
 
-        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
+        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes, Cfg.atomicTypeNames);
 
         auto atomicPairs = map.atomicPairsOnSameLine();
         if (atomicPairs.empty())

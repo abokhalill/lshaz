@@ -44,6 +44,7 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("hotness_threshold_pct",  cfg.hotnessThresholdPct);
         io.mapOptional("linked_allocator",       cfg.linkedAllocator);
         io.mapOptional("target_arch",             cfg.targetArch);
+        io.mapOptional("atomic_type_names",      cfg.atomicTypeNames);
     }
 };
 

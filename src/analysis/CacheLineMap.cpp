@@ -11,8 +11,10 @@ namespace lshaz {
 
 CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
                            clang::ASTContext &Ctx,
-                           uint64_t cacheLineBytes)
-    : cacheLineBytes_(cacheLineBytes) {
+                           uint64_t cacheLineBytes,
+                           const std::vector<std::string> &atomicTypeNames)
+    : cacheLineBytes_(cacheLineBytes),
+      atomicTypeNames_(atomicTypeNames.begin(), atomicTypeNames.end()) {
 
     if (!canComputeRecordLayout(RD, Ctx))
         return;
@@ -41,7 +43,7 @@ CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
     buildBuckets();
 }
 
-bool CacheLineMap::isAtomicType(clang::QualType QT) {
+bool CacheLineMap::isAtomicType(clang::QualType QT) const {
     // C-style volatile typedefs whose name contains "atomic" — covers
     // ngx_atomic_t (Nginx), atomic_t (Linux kernel), etc.  These are
     // volatile integers manipulated via compiler builtins (__sync_*,
@@ -65,11 +67,36 @@ bool CacheLineMap::isAtomicType(clang::QualType QT) {
         }
     }
 
+    // User-configured opaque atomic wrappers (atomic_t, spinlock_t, etc.).
+    // Must run before canonicalization — typedef names are lost after desugar.
+    if (!atomicTypeNames_.empty()) {
+        if (const auto *RT = QT->getAs<clang::RecordType>()) {
+            std::string rn = RT->getDecl()->getNameAsString();
+            if (!rn.empty() && atomicTypeNames_.count(rn))
+                return true;
+        }
+        clang::QualType walk = QT;
+        while (const auto *TDT = walk->getAs<clang::TypedefType>()) {
+            if (atomicTypeNames_.count(TDT->getDecl()->getNameAsString()))
+                return true;
+            walk = TDT->desugar();
+        }
+    }
+
     QT = QT.getCanonicalType();
     if (QT->isAtomicType())
         return true;
 
-    // Resolve through typedefs/aliases to CXXRecordDecl.
+    // Canonical record name check (catches typedef'd anonymous structs).
+    if (!atomicTypeNames_.empty()) {
+        if (const auto *RT = QT->getAs<clang::RecordType>()) {
+            std::string rn = RT->getDecl()->getNameAsString();
+            if (!rn.empty() && atomicTypeNames_.count(rn))
+                return true;
+        }
+    }
+
+    // C++ std::atomic / std::atomic_ref.
     QT = QT.getNonReferenceType();
     const clang::CXXRecordDecl *RD = nullptr;
     if (const auto *TST = QT->getAs<clang::TemplateSpecializationType>()) {
@@ -83,12 +110,10 @@ bool CacheLineMap::isAtomicType(clang::QualType QT) {
     if (!RD)
         return false;
 
-    // Direct qualified name match.
     std::string qn = RD->getQualifiedNameAsString();
     if (qn == "std::atomic" || qn == "std::atomic_ref")
         return true;
 
-    // ClassTemplateSpecializationDecl path for instantiated types.
     if (const auto *CTSD =
             llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
         if (auto *TD = CTSD->getSpecializedTemplate()) {

@@ -42,7 +42,7 @@ public:
             if (CXXRD->isLambda())
                 return;
 
-        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
+        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes, Cfg.atomicTypeNames);
 
         if (map.maxLinesSpanned() <= 1)
             return;
@@ -84,7 +84,7 @@ public:
                 " line(s): RFO traffic on each distinct line");
 
             // Refcount-only structs: single atomic refcount with immutable
-            // co-located data.  Demote — cache line spanning is real but
+            // co-located data. demote; cache line spanning is real but
             // the coherence traffic is limited to refcount ops only.
             if (map.isRefcountOnly())
                 sev = Severity::Medium;

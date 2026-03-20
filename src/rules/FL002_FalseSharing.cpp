@@ -46,7 +46,7 @@ public:
         if (!ev)
             return;
 
-        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
+        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes, Cfg.atomicTypeNames);
 
         auto atomicPairs = map.atomicPairsOnSameLine();
         auto mutablePairs = map.mutablePairsOnSameLine();
@@ -60,7 +60,7 @@ public:
             return;
 
         // Refcount-only structs: single atomic refcount field sharing a line
-        // with immutable data.  No real false sharing — downgrade to Info.
+        // with immutable data.  No real false sharing.
         if (map.isRefcountOnly() && !hasAtomicPairs)
             return;
 
