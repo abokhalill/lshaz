@@ -133,6 +133,7 @@ public:
             {"straddling", std::to_string(straddlers.size())},
             {"thread_escape", "yes"},
             {"signal_count", std::to_string(signalCount)},
+            {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
         diag.mitigation =

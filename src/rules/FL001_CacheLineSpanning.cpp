@@ -147,6 +147,7 @@ public:
             {"mutable_fields", std::to_string(map.totalMutableFields())},
             {"thread_escape", ev.escapes ? "true" : "false"},
             {"contention", std::to_string(static_cast<int>(ev.contention * 100)) + "%"},
+            {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
         diag.mitigation =

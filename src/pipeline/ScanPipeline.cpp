@@ -881,43 +881,16 @@ static void applyPMUFeedback(
         feedbackLoop.savePriors(fb.pmuPriorsPath);
 }
 
-// Cross-TU escape suppression: diagnostics that rely on thread_escape=true
-// but have atomics=no are likely false positives when the type only appears
-// in a single TU. Must be called BEFORE dedup so that duplicate diagnostics
-// from multiple TUs are still present (multiplicity > 1 = multi-TU evidence).
+// Cross-TU escape suppression using aggregated EscapeSummary.
+// For each diagnostic with thread_escape evidence, look up the type in the
+// global summary. If no TU provided structural or publication escape evidence,
+// suppress. Replaces the old multiplicity-based heuristic.
 static unsigned applyCrossTUEscapeSuppression(
         std::vector<Diagnostic> &diagnostics,
+        const EscapeSummary &globalEscape,
         unsigned totalTUs) {
     if (totalTUs <= 1)
         return 0;
-
-    // Count how many times each (ruleID, file, line) appears in the raw
-    // (pre-dedup) diagnostic list. A header included by N TUs produces
-    // N duplicate diagnostics for the same struct.
-    struct DiagKey {
-        std::string ruleID;
-        std::string file;
-        unsigned line;
-        bool operator==(const DiagKey &o) const {
-            return ruleID == o.ruleID && file == o.file && line == o.line;
-        }
-    };
-    struct DiagKeyHash {
-        size_t operator()(const DiagKey &k) const {
-            size_t h = std::hash<std::string>{}(k.ruleID);
-            h ^= std::hash<std::string>{}(k.file) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            h ^= std::hash<unsigned>{}(k.line) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            return h;
-        }
-    };
-
-    std::unordered_map<DiagKey, unsigned, DiagKeyHash> keyCounts;
-    for (const auto &d : diagnostics) {
-        auto eit = d.structuralEvidence.find("thread_escape");
-        if (eit == d.structuralEvidence.end()) continue;
-        if (eit->second != "true" && eit->second != "yes") continue;
-        keyCounts[{d.ruleID, d.location.file, d.location.line}]++;
-    }
 
     unsigned suppressed = 0;
     for (auto &d : diagnostics) {
@@ -927,25 +900,22 @@ static unsigned applyCrossTUEscapeSuppression(
         if (eit == d.structuralEvidence.end()) continue;
         if (eit->second != "true" && eit->second != "yes") continue;
 
-        // Atomics present = structurally confirmed escape. Skip.
-        auto ait = d.structuralEvidence.find("atomics");
-        if (ait != d.structuralEvidence.end() &&
-            (ait->second == "yes" || ait->second == "true"))
-            continue;
-
         // Proven-tier findings are never suppressed.
         if (d.evidenceTier == EvidenceTier::Proven)
             continue;
 
-        DiagKey key{d.ruleID, d.location.file, d.location.line};
-        auto it = keyCounts.find(key);
-        if (it != keyCounts.end() && it->second > 1)
-            continue; // Multi-TU: diagnosed from multiple compilation contexts.
+        auto tit = d.structuralEvidence.find("type_name");
+        if (tit == d.structuralEvidence.end())
+            continue;
 
-        // Single-TU, no atomics, not proven: suppress.
+        auto git = globalEscape.find(tit->second);
+        if (git != globalEscape.end() && git->second.hasAnyEscape())
+            continue; // Global evidence confirms escape.
+
         d.suppressed = true;
         d.escalations.push_back(
-            "cross-TU suppression: no multi-TU evidence of thread escape");
+            "cross-TU suppression: no escape evidence across " +
+            std::to_string(totalTUs) + " TUs");
         ++suppressed;
     }
     return suppressed;
@@ -1392,10 +1362,10 @@ ScanResult ScanPipeline::run(
                   result.diagnostics, result.metadata);
     }
 
-    // Cross-TU escape suppression (before dedup: needs multiplicity signal).
+    // Cross-TU escape suppression using aggregated per-type escape summaries.
     if (sources.size() > 1) {
         unsigned crossTUSuppressed = applyCrossTUEscapeSuppression(
-            result.diagnostics, result.totalTUsAnalyzed);
+            result.diagnostics, result.escapeSummary, result.totalTUsAnalyzed);
         if (crossTUSuppressed > 0)
             report("cross_tu", std::to_string(crossTUSuppressed) +
                    " finding(s) suppressed (no cross-TU escape evidence)");

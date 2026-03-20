@@ -134,6 +134,7 @@ public:
             {"atomic_pairs_same_line", std::to_string(map.atomicPairsOnSameLine().size())},
             {"thread_escape", "true"},
             {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
+            {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
         diag.mitigation =
