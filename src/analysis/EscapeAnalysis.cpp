@@ -548,4 +548,32 @@ bool EscapeAnalysis::isWriteOnceGlobal(const clang::VarDecl *VD) const {
     return false;
 }
 
+EscapeSummary EscapeAnalysis::buildEscapeSummary(
+    const std::vector<const clang::RecordDecl *> &records) const {
+    EscapeSummary summary;
+    for (const auto *RD : records) {
+        if (!RD || !RD->isCompleteDefinition())
+            continue;
+        const auto *canon = RD->getCanonicalDecl();
+        if (!canon)
+            continue;
+        std::string name = canon->getQualifiedNameAsString();
+        if (name.empty())
+            continue;
+
+        TypeEscapeSignals &sig = summary[name];
+        sig.hasAtomics     |= hasAtomicMembers(RD);
+        sig.hasSyncPrims   |= hasSyncPrimitives(RD);
+        sig.hasSharedOwner |= hasSharedOwnershipMembers(RD);
+        sig.hasVolatile    |= hasVolatileMembers(RD);
+        sig.hasPublication |= hasPublicationEvidence(RD);
+
+        auto it = typeAccessorCounts_.find(
+            static_cast<const clang::RecordDecl *>(canon));
+        if (it != typeAccessorCounts_.end())
+            sig.accessorCount = it->second;
+    }
+    return summary;
+}
+
 } // namespace lshaz

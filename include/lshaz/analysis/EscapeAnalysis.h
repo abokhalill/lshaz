@@ -6,6 +6,8 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Type.h>
 
+#include "lshaz/analysis/EscapeSummary.h"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -79,6 +81,12 @@ public:
 
     // Mark a type as published to a cross-thread context.
     void markPublished(clang::QualType QT);
+
+    // Build per-type escape summary for cross-TU aggregation.
+    // Requires prior scanTranslationUnit() call. Iterates all RecordDecls
+    // in the TU and snapshots their escape signals.
+    EscapeSummary buildEscapeSummary(
+        const std::vector<const clang::RecordDecl *> &records) const;
 
     // Write-once analysis: a global assigned at most once (at declaration or
     // in an init function) is unlikely to cause runtime contention.
