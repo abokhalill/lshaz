@@ -884,7 +884,7 @@ static void applyPMUFeedback(
 // Cross-TU escape suppression using aggregated EscapeSummary.
 // For each diagnostic with thread_escape evidence, look up the type in the
 // global summary. If no TU provided structural or publication escape evidence,
-// suppress. Replaces the old multiplicity-based heuristic.
+// suppress.
 static unsigned applyCrossTUEscapeSuppression(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &globalEscape,
@@ -1364,6 +1364,9 @@ ScanResult ScanPipeline::run(
 
     // Cross-TU escape suppression using aggregated per-type escape summaries.
     if (sources.size() > 1) {
+        report("cross_tu",
+               std::to_string(result.diagnostics.size()) + " raw finding(s), " +
+               std::to_string(result.escapeSummary.size()) + " type(s) in escape summary");
         unsigned crossTUSuppressed = applyCrossTUEscapeSuppression(
             result.diagnostics, result.escapeSummary, result.totalTUsAnalyzed);
         if (crossTUSuppressed > 0)

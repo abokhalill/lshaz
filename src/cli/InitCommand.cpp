@@ -182,6 +182,18 @@ bool generateCMake(const std::string &dir) {
         return false;
     }
 
+    // CMake's configure phase generates compile_commands.json but does not
+    // execute configure_file() or add_custom_command() build steps. Without
+    // the build phase, generated headers don't exist on disk.
+    llvm::errs() << "lshaz init: running full build to generate required "
+                    "headers... this may take a while\n";
+    int buildRc = runExternal("cmake", {
+        "--build", std::string(buildDir), "--parallel"
+    }, dir, "building (cmake --build)", 600);
+    if (buildRc != 0)
+        llvm::errs() << "lshaz init: cmake build failed (exit " << buildRc
+                     << "); generated headers may be missing\n";
+
     llvm::SmallString<256> db(buildDir);
     llvm::sys::path::append(db, "compile_commands.json");
     if (llvm::sys::fs::exists(db)) {
@@ -204,6 +216,18 @@ bool generateMeson(const std::string &dir) {
             return false;
         }
     }
+
+    // Meson's configure phase (setup) generates compile_commands.json but does
+    // not execute custom_target or configure_file steps. Without the build
+    // phase, generated headers don't exist and TUs that #include them will
+    // fail to parse.
+    llvm::errs() << "lshaz init: running full build to generate required "
+                    "headers... this may take a while\n";
+    int buildRc = runExternal("meson", {"compile", "-C", std::string(buildDir)},
+                              dir, "building (meson compile)", 600);
+    if (buildRc != 0)
+        llvm::errs() << "lshaz init: meson compile failed (exit " << buildRc
+                     << "); generated headers may be missing\n";
 
     // Meson always generates compile_commands.json in the build dir.
     llvm::SmallString<256> db(buildDir);
