@@ -36,6 +36,20 @@ hot_file_patterns:
 
 # Rule control
 disabled_rules: []
+
+# Opaque atomic wrapper type names.
+# Struct/typedef names treated as atomic even without _Atomic or volatile.
+# Required for codebases that wrap atomics in plain structs (Linux kernel,
+# FreeBSD, PostgreSQL).
+atomic_type_names:
+  - atomic_t
+  - atomic64_t
+  - atomic_long_t
+  - refcount_t
+  - raw_spinlock_t
+  - spinlock_t
+  - seqcount_t
+  - seqcount_spinlock_t
 ```
 
 ---

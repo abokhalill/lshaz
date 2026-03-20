@@ -128,6 +128,7 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
 - **Single-TU scope** — escape analysis does not cross translation unit boundaries.
 - **Hot-path rules need a signal** — FL010–FL061 only fire on functions marked hot (via attribute, config pattern, or `--perf-profile`). Structural rules (FL001, FL002, FL021, FL040, FL041, FL060, FL090) work without any hot-path signal.
+- **Opaque atomic wrappers need config** — codebases that wrap atomics in plain structs (Linux kernel `atomic_t`, `spinlock_t`) require `atomic_type_names` in the config. Without it, those fields are invisible to atomic detection. See [docs/configuration.md](docs/configuration.md).
 - **x86-64 default** — assumes 64-byte cache lines and TSO. Use `--target-arch arm64` or `--target-arch arm64-apple` for ARM64.
 
 ## Documentation
