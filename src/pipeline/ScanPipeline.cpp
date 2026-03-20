@@ -267,7 +267,8 @@ std::string resolveCompiler(const std::string &dbCompiler) {
 // Format: {"exitCode":N,"failedTUs":[...],"diagnostics":[...]}
 std::string serializeShardResult(int exitCode,
                                   const std::vector<std::string> &failedTUs,
-                                  const std::vector<Diagnostic> &diagnostics) {
+                                  const std::vector<Diagnostic> &diagnostics,
+                                  const EscapeSummary &escapeSummary) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
         out.reserve(s.size() + 4);
@@ -325,15 +326,36 @@ std::string serializeShardResult(int exitCode,
         }
         buf += "]}";
     }
-    buf += "]}";
+    buf += "]";
+
+    // Escape summary: {"typeName":{a:0/1,s:0/1,o:0/1,v:0/1,p:0/1,n:N},...}
+    buf += ",\"escapeSummary\":{";
+    {
+        bool first = true;
+        for (const auto &[name, sig] : escapeSummary) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(name); buf += "\":{";
+            buf += "\"a\":" + std::to_string(sig.hasAtomics ? 1 : 0);
+            buf += ",\"s\":" + std::to_string(sig.hasSyncPrims ? 1 : 0);
+            buf += ",\"o\":" + std::to_string(sig.hasSharedOwner ? 1 : 0);
+            buf += ",\"v\":" + std::to_string(sig.hasVolatile ? 1 : 0);
+            buf += ",\"p\":" + std::to_string(sig.hasPublication ? 1 : 0);
+            buf += ",\"n\":" + std::to_string(sig.accessorCount);
+            buf += '}';
+            first = false;
+        }
+    }
+    buf += "}";
+
+    buf += "}";
     return buf;
 }
 
-// Minimal JSON deserializer for child→parent IPC.
 struct ShardIPC {
     int exitCode = -1;
     std::vector<std::string> failedTUs;
     std::vector<Diagnostic> diagnostics;
+    EscapeSummary escapeSummary;
 };
 
 namespace ipc {
@@ -524,6 +546,32 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                 if (i >= json.size() || json[i] == ']') { if (i < json.size()) ++i; break; }
                 if (!ipc::expect(json, i, '{')) break;
                 out.diagnostics.push_back(ipc::parseDiag(json, i));
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "escapeSummary") {
+            ipc::expect(json, i, '{');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == '}') { if (i < json.size()) ++i; break; }
+                std::string typeName = ipc::parseStr(json, i);
+                ipc::expect(json, i, ':');
+                ipc::expect(json, i, '{');
+                TypeEscapeSignals sig;
+                while (true) {
+                    ipc::skipWS(json, i);
+                    if (i >= json.size() || json[i] == '}') { if (i < json.size()) ++i; break; }
+                    std::string sk = ipc::parseStr(json, i);
+                    ipc::expect(json, i, ':');
+                    auto val = static_cast<int>(ipc::parseNum(json, i));
+                    if (sk == "a") sig.hasAtomics = val != 0;
+                    else if (sk == "s") sig.hasSyncPrims = val != 0;
+                    else if (sk == "o") sig.hasSharedOwner = val != 0;
+                    else if (sk == "v") sig.hasVolatile = val != 0;
+                    else if (sk == "p") sig.hasPublication = val != 0;
+                    else if (sk == "n") sig.accessorCount = static_cast<unsigned>(val);
+                    ipc::expect(json, i, ',');
+                }
+                out.escapeSummary[typeName].merge(sig);
                 ipc::expect(json, i, ',');
             }
         } else {
@@ -1115,6 +1163,7 @@ ScanResult ScanPipeline::run(
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(tuDiags.begin()),
                 std::make_move_iterator(tuDiags.end()));
+            mergeEscapeSummaries(result.escapeSummary, factory.escapeSummary());
             ++completedTUs;
             report("progress", std::to_string(completedTUs) + "/" +
                    std::to_string(totalTUs));
@@ -1162,6 +1211,7 @@ ScanResult ScanPipeline::run(
                 llvm::CrashRecoveryContext::Enable();
                 std::vector<Diagnostic> childDiags;
                 std::vector<std::string> childFailed;
+                EscapeSummary childEscape;
                 int childRet = 0;
 
                 for (const auto &src : shards[j]) {
@@ -1187,10 +1237,11 @@ ScanResult ScanPipeline::run(
                     childDiags.insert(childDiags.end(),
                         std::make_move_iterator(tuDiags.begin()),
                         std::make_move_iterator(tuDiags.end()));
+                    mergeEscapeSummaries(childEscape, factory.escapeSummary());
                 }
 
                 std::string json = serializeShardResult(
-                    childRet, childFailed, childDiags);
+                    childRet, childFailed, childDiags, childEscape);
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (!ec)
@@ -1218,6 +1269,8 @@ ScanResult ScanPipeline::run(
                         std::make_move_iterator(shard.diagnostics.end()));
                     result.failedTUs.insert(result.failedTUs.end(),
                         shard.failedTUs.begin(), shard.failedTUs.end());
+                    mergeEscapeSummaries(result.escapeSummary,
+                        shard.escapeSummary);
                 } else {
                     llvm::errs() << "lshaz: failed to parse IPC from shard "
                                  << child.shardIdx << "\n";

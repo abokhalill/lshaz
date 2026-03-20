@@ -3,6 +3,7 @@
 
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/core/ExecutionMetadata.h"
+#include "lshaz/analysis/EscapeSummary.h"
 
 #include <cstdint>
 #include <string>
@@ -24,6 +25,9 @@ struct ScanResult {
 
     // Per-TU parse failure tracking.
     std::vector<std::string> failedTUs;
+
+    // Cross-TU aggregated escape summary. Merged from all per-TU summaries.
+    EscapeSummary escapeSummary;
 
     // Counts for summary reporting.
     unsigned suppressedByCalibration = 0;
