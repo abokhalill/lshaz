@@ -60,36 +60,36 @@ atomic_type_names:
 lshaz scan <path> [options]
 ```
 
-| Flag | Description |
-|---|---|
-| `--compile-db <path>` | Explicit path to `compile_commands.json` |
-| `--config <path>` | Path to `lshaz.config.yaml` |
-| `--format <cli\|json\|sarif\|tidy>` | Output format (default: `cli`). `tidy` emits clang-tidy-compatible diagnostics. |
-| `--output <path>` | Write output to file instead of stdout |
-| `--min-severity <level>` | Minimum severity: `Informational`, `Medium`, `High`, `Critical` |
-| `--min-evidence <tier>` | Minimum evidence tier: `speculative`, `likely`, `proven` |
-| `--include <pattern>` | Only analyze files matching pattern (repeatable) |
-| `--exclude <pattern>` | Skip files matching pattern (repeatable) |
-| `--max-files <N>` | Maximum translation units to analyze |
-| `--jobs <N>` | Parallel AST analysis worker processes (default: hardware_concurrency). Uses fork-based isolation, not threads. |
-| `--no-ir` | Disable LLVM IR analysis pass |
-| `--ir-opt <O0\|O1\|O2>` | IR optimization level (default: O0) |
-| `--ir-jobs <N>` | Max parallel IR emission jobs (default: hardware_concurrency) |
-| `--ir-batch-size <N>` | TUs per IR shard (default: 1) |
-| `--no-ir-cache` | Disable incremental IR cache. Recommended for CI. |
-| `--perf-profile <path>` | Perf profile data for hot-path selection |
-| `--hotness-threshold <pct>` | Sample percentage threshold for profile hotness (default: 1.0) |
-| `--allocator <name>` | Linked allocator: `tcmalloc`, `jemalloc`, `mimalloc` (affects FL020) |
-| `--calibration-store <path>` | Path to calibration feedback store |
-| `--pmu-trace <file>` | Production PMU trace data for closed-loop learning |
-| `--pmu-priors <file>` | Persist/load Bayesian hazard priors across runs |
-| `--watch` | Watch mode: re-scan on file changes |
-| `--watch-interval <N>` | Seconds between watch polls (default: 2) |
-| `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
-| `--changed-files <path>` | Incremental mode: only scan TUs affected by files listed in `<path>` (one per line). Header changes trigger full scan conservatively. |
-| `--rule <ID>` | Run only the specified rule (repeatable). Disables all other rules. Use for per-rule CI gating. |
-| `--target-arch <arch>` | Target architecture: `x86-64` (default, 64B lines, TSO), `arm64` (64B lines, weak ordering), `arm64-apple` (128B lines, weak ordering). Affects cache model, FL010 severity/reasoning, and mitigation text. |
-| `--help` | Show help with exit code reference |
+| Short | Long | Description |
+|---|---|---|
+| `-C` | `--compile-db <path>` | Explicit path to `compile_commands.json` |
+| `-c` | `--config <path>` | Path to `lshaz.config.yaml` |
+| `-f` | `--format <cli\|json\|sarif\|tidy>` | Output format (default: `cli`). `tidy` emits clang-tidy-compatible diagnostics. |
+| `-o` | `--output <path>` | Write output to file instead of stdout |
+| `-s` | `--min-severity <level>` | Minimum severity: `Informational`, `Medium`, `High`, `Critical` |
+| `-e` | `--min-evidence <tier>` | Minimum evidence tier: `speculative`, `likely`, `proven` |
+| `-I` | `--include <pattern>` | Only analyze files matching pattern (repeatable) |
+| `-X` | `--exclude <pattern>` | Skip files matching pattern (repeatable) |
+| `-n` | `--max-files <N>` | Maximum translation units to analyze |
+| `-j` | `--jobs <N>` | Parallel AST analysis worker processes (default: nproc). Uses fork-based isolation, not threads. |
+| `-r` | `--rule <ID>` | Run only the specified rule (repeatable). Disables all other rules. |
+| `-a` | `--target-arch <arch>` | Target architecture: `x86-64` (default), `arm64`, `arm64-apple` |
+| `-w` | `--watch` | Watch mode: re-scan on file changes |
+| | `--no-ir` | Disable LLVM IR analysis pass |
+| | `--ir-opt <O0\|O1\|O2>` | IR optimization level (default: O0) |
+| | `--ir-jobs <N>` | Max parallel IR emission jobs (default: nproc) |
+| | `--ir-batch-size <N>` | TUs per IR shard (default: 1) |
+| | `--no-ir-cache` | Disable incremental IR cache. Recommended for CI. |
+| | `--perf-profile <path>` | Perf profile data for hot-path selection |
+| | `--hotness-threshold <pct>` | Sample percentage threshold for profile hotness (default: 1.0) |
+| | `--allocator <name>` | Linked allocator: `tcmalloc`, `jemalloc`, `mimalloc` (affects FL020) |
+| | `--calibration-store <path>` | Path to calibration feedback store |
+| | `--pmu-trace <file>` | Production PMU trace data for closed-loop learning |
+| | `--pmu-priors <file>` | Persist/load Bayesian hazard priors across runs |
+| | `--watch-interval <N>` | Seconds between watch polls (default: 2) |
+| | `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
+| | `--changed-files <path>` | Incremental mode: only scan TUs affected by files listed in `<path>` (one per line). Header changes trigger full scan conservatively. |
+| `-h` | `--help` | Show help with exit code reference |
 
 ---
 
@@ -189,9 +189,9 @@ Diff key: `(ruleID, file, line)`.
 **CI usage:**
 
 ```bash
-lshaz scan . --format json --output before.json
+lshaz scan . -f json -o before.json
 # ... apply changes ...
-lshaz scan . --format json --output after.json
+lshaz scan . -f json -o after.json
 lshaz diff before.json after.json
 ```
 
@@ -287,7 +287,7 @@ Analyze individual source files with explicit compiler flags:
 
 ```bash
 lshaz scan src/engine.cpp -- -std=c++20
-lshaz scan src/engine.cpp --format json -- -std=c++20 -I include
+lshaz scan src/engine.cpp -f json -- -std=c++20 -I include
 lshaz scan src/engine.cpp --no-ir -- -std=c++20
 ```
 

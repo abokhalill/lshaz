@@ -516,10 +516,10 @@ void printInitUsage() {
         << "  [path]           Project root (default: current directory)\n"
         << "\n"
         << "Options:\n"
-        << "  --build          Run a full build after configure (for generated headers)\n"
-        << "  --no-config      Skip lshaz.config.yaml generation\n"
-        << "  --force          Regenerate compile_commands.json even if it exists\n"
-        << "  --help           Show this help\n";
+        << "  -b, --build      Run a full build after configure (for generated headers)\n"
+        << "  -f, --force      Regenerate compile_commands.json even if it exists\n"
+        << "      --no-config  Skip lshaz.config.yaml generation\n"
+        << "  -h, --help       Show this help\n";
 }
 
 } // anonymous namespace
@@ -537,8 +537,8 @@ int runInitCommand(int argc, const char **argv) {
             return 0;
         }
         if (std::strcmp(argv[i], "--no-config") == 0) { noConfig = true; continue; }
-        if (std::strcmp(argv[i], "--force") == 0) { force = true; continue; }
-        if (std::strcmp(argv[i], "--build") == 0) { fullBuild = true; continue; }
+        if (std::strcmp(argv[i], "--force") == 0 || std::strcmp(argv[i], "-f") == 0) { force = true; continue; }
+        if (std::strcmp(argv[i], "--build") == 0 || std::strcmp(argv[i], "-b") == 0) { fullBuild = true; continue; }
         if (argv[i][0] == '-') {
             llvm::errs() << "lshaz init: unknown option '" << argv[i] << "'\n";
             printInitUsage();

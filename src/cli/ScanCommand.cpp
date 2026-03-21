@@ -82,28 +82,28 @@ void printScanUsage() {
         << "  <path>                   Project root directory (or compile_commands.json path)\n"
         << "\n"
         << "Options:\n"
-        << "  --compile-db <path>      Explicit path to compile_commands.json\n"
-        << "  --config <path>          Path to lshaz.config.yaml\n"
-        << "  --format <fmt>           Output format: cli, json, sarif, tidy (default: cli)\n"
-        << "  --output <path>          Write output to file instead of stdout\n"
-        << "  --min-severity <level>   Minimum severity (Informational|Medium|High|Critical)\n"
-        << "  --min-evidence <tier>    Minimum evidence tier (proven|likely|speculative)\n"
-        << "  --no-ir                  Disable LLVM IR analysis pass\n"
-        << "  --ir-opt <O0|O1|O2>     IR optimization level (default: O0)\n"
-        << "  --ir-jobs <N>            Max parallel IR jobs (default: hardware_concurrency)\n"
-        << "  --jobs <N>               Parallel AST analysis threads (default: hardware_concurrency)\n"
-        << "  --max-files <N>          Maximum translation units to analyze\n"
-        << "  --include <pattern>      Only analyze files matching pattern (repeatable)\n"
-        << "  --exclude <pattern>      Skip files matching pattern (repeatable)\n"
-        << "  --perf-profile <path>    Path to perf profile for hotness guidance\n"
-        << "  --allocator <name>       Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
-        << "  --watch                  Watch mode: re-scan on file changes\n"
-        << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
-        << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
-        << "  --changed-files <path>   Only scan TUs affected by files listed in <path>\n"
-        << "  --target-arch <arch>     Target architecture: x86-64, arm64, arm64-apple\n"
-        << "  --rule <id>              Only run specific rule (repeatable, e.g. FL001)\n"
-        << "  --help                   Show this help\n"
+        << "  -C, --compile-db <path>  Explicit path to compile_commands.json\n"
+        << "  -c, --config <path>      Path to lshaz.config.yaml\n"
+        << "  -f, --format <fmt>       Output format: cli, json, sarif, tidy (default: cli)\n"
+        << "  -o, --output <path>      Write output to file instead of stdout\n"
+        << "  -s, --min-severity <lv>  Minimum severity (Informational|Medium|High|Critical)\n"
+        << "  -e, --min-evidence <t>   Minimum evidence tier (proven|likely|speculative)\n"
+        << "  -j, --jobs <N>           Parallel AST analysis jobs (default: nproc)\n"
+        << "  -n, --max-files <N>      Maximum translation units to analyze\n"
+        << "  -I, --include <pattern>  Only analyze files matching pattern (repeatable)\n"
+        << "  -X, --exclude <pattern>  Skip files matching pattern (repeatable)\n"
+        << "  -r, --rule <id>          Only run specific rule (repeatable, e.g. FL001)\n"
+        << "  -a, --target-arch <arch> Target architecture: x86-64, arm64, arm64-apple\n"
+        << "  -w, --watch              Watch mode: re-scan on file changes\n"
+        << "      --no-ir              Disable LLVM IR analysis pass\n"
+        << "      --ir-opt <O0|O1|O2>  IR optimization level (default: O0)\n"
+        << "      --ir-jobs <N>        Max parallel IR jobs (default: nproc)\n"
+        << "      --perf-profile <path> Path to perf profile for hotness guidance\n"
+        << "      --allocator <name>   Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
+        << "      --watch-interval <N> Seconds between polls (default: 2)\n"
+        << "      --trust-build-system Allow cmake/meson/bear on cloned repos\n"
+        << "      --changed-files <p>  Only scan TUs affected by files listed in <path>\n"
+        << "  -h, --help               Show this help\n"
         << "\n"
         << "Single-file mode:\n"
         << "  lshaz scan <file.cpp> -- <compiler-flags>\n"
@@ -117,8 +117,10 @@ void printScanUsage() {
 }
 
 bool consumeArg(int &i, int argc, const char **argv, const char *flag,
-                std::string &out) {
-    if (std::strcmp(argv[i], flag) == 0 && i + 1 < argc) {
+                std::string &out, const char *shortFlag = nullptr) {
+    if ((std::strcmp(argv[i], flag) == 0 ||
+         (shortFlag && std::strcmp(argv[i], shortFlag) == 0)) &&
+        i + 1 < argc) {
         out = argv[++i];
         return true;
     }
@@ -126,9 +128,9 @@ bool consumeArg(int &i, int argc, const char **argv, const char *flag,
 }
 
 bool consumeArgUnsigned(int &i, int argc, const char **argv, const char *flag,
-                        unsigned &out) {
+                        unsigned &out, const char *shortFlag = nullptr) {
     std::string s;
-    if (consumeArg(i, argc, argv, flag, s)) {
+    if (consumeArg(i, argc, argv, flag, s, shortFlag)) {
         out = static_cast<unsigned>(std::stoul(s));
         return true;
     }
@@ -148,19 +150,19 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
             args.help = true;
             return true;
         }
-        if (consumeArg(i, argc, argv, "--compile-db", args.compileDBPath)) continue;
-        if (consumeArg(i, argc, argv, "--config", args.configPath)) continue;
-        if (consumeArg(i, argc, argv, "--format", args.format)) continue;
-        if (consumeArg(i, argc, argv, "--output", args.outputFile)) continue;
-        if (consumeArg(i, argc, argv, "--min-severity", args.minSeverity)) continue;
-        if (consumeArg(i, argc, argv, "--min-evidence", args.minEvidence)) continue;
+        if (consumeArg(i, argc, argv, "--compile-db", args.compileDBPath, "-C")) continue;
+        if (consumeArg(i, argc, argv, "--config", args.configPath, "-c")) continue;
+        if (consumeArg(i, argc, argv, "--format", args.format, "-f")) continue;
+        if (consumeArg(i, argc, argv, "--output", args.outputFile, "-o")) continue;
+        if (consumeArg(i, argc, argv, "--min-severity", args.minSeverity, "-s")) continue;
+        if (consumeArg(i, argc, argv, "--min-evidence", args.minEvidence, "-e")) continue;
         if (consumeArg(i, argc, argv, "--ir-opt", args.irOpt)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-jobs", args.irJobs)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-batch-size", args.irBatchSize)) continue;
-        if (consumeArgUnsigned(i, argc, argv, "--jobs", args.jobs)) continue;
-        if (consumeArgUnsigned(i, argc, argv, "--max-files", args.maxFiles)) continue;
-        { std::string v; if (consumeArg(i, argc, argv, "--include", v)) { args.includeFiles.push_back(v); continue; } }
-        { std::string v; if (consumeArg(i, argc, argv, "--exclude", v)) { args.excludeFiles.push_back(v); continue; } }
+        if (consumeArgUnsigned(i, argc, argv, "--jobs", args.jobs, "-j")) continue;
+        if (consumeArgUnsigned(i, argc, argv, "--max-files", args.maxFiles, "-n")) continue;
+        { std::string v; if (consumeArg(i, argc, argv, "--include", v, "-I")) { args.includeFiles.push_back(v); continue; } }
+        { std::string v; if (consumeArg(i, argc, argv, "--exclude", v, "-X")) { args.excludeFiles.push_back(v); continue; } }
         if (consumeArg(i, argc, argv, "--perf-profile", args.perfProfile)) continue;
         if (consumeArg(i, argc, argv, "--allocator", args.allocator)) continue;
         if (consumeArg(i, argc, argv, "--calibration-store", args.calibrationStore)) continue;
@@ -168,11 +170,11 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArg(i, argc, argv, "--pmu-priors", args.pmuPriors)) continue;
         if (std::strcmp(argv[i], "--no-ir") == 0) { args.noIR = true; continue; }
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
-        if (std::strcmp(argv[i], "--watch") == 0) { args.watch = true; continue; }
+        if (std::strcmp(argv[i], "--watch") == 0 || std::strcmp(argv[i], "-w") == 0) { args.watch = true; continue; }
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
-        if (consumeArg(i, argc, argv, "--target-arch", args.targetArch)) continue;
-        { std::string v; if (consumeArg(i, argc, argv, "--rule", v)) { args.enabledRules.push_back(v); continue; } }
+        if (consumeArg(i, argc, argv, "--target-arch", args.targetArch, "-a")) continue;
+        { std::string v; if (consumeArg(i, argc, argv, "--rule", v, "-r")) { args.enabledRules.push_back(v); continue; } }
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {

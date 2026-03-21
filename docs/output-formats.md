@@ -101,7 +101,7 @@ Includes:
 
 ```yaml
 - name: Run lshaz
-  run: lshaz scan . --format sarif --output results.sarif --no-ir
+  run: lshaz scan . -f sarif -o results.sarif --no-ir
 
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
@@ -136,13 +136,13 @@ Use `--rule` (repeatable) to run only specific rules. This enables per-check CI 
 
 ```bash
 # Gate on cache layout issues only
-lshaz scan . --format tidy --rule FL001
+lshaz scan . -f tidy -r FL001
 
 # Gate on false sharing only
-lshaz scan . --format tidy --rule FL002
+lshaz scan . -f tidy -r FL002
 
 # Gate on multiple rules
-lshaz scan . --format tidy --rule FL001 --rule FL002
+lshaz scan . -f tidy -r FL001 -r FL002
 ```
 
 A convenience wrapper script is provided at `tools/lshaz-tidy`:

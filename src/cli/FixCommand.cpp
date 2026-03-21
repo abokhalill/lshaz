@@ -31,11 +31,11 @@ void printFixUsage() {
         << "Apply mechanical auto-remediation for fixable diagnostics.\n"
         << "\n"
         << "Options:\n"
-        << "  --compile-db <path>   Path to compile_commands.json\n"
-        << "  --config <path>       Path to lshaz.config.yaml\n"
-        << "  --dry-run             Show patches without modifying files\n"
-        << "  --rules <list>        Comma-separated rules to fix (default: FL001)\n"
-        << "  --help                Show this help\n"
+        << "  -C, --compile-db <path>  Path to compile_commands.json\n"
+        << "  -c, --config <path>      Path to lshaz.config.yaml\n"
+        << "  -n, --dry-run            Show patches without modifying files\n"
+        << "  -r, --rules <list>       Comma-separated rules to fix (default: FL001)\n"
+        << "  -h, --help               Show this help\n"
         << "\n"
         << "Supported rules:\n"
         << "  FL001  Cache Line Spanning Struct — adds alignas(64)\n"
@@ -58,8 +58,11 @@ struct FixArgs {
 
 bool parseFixArgs(int argc, const char **argv, FixArgs &args) {
     auto consumeArg = [](int &i, int argc, const char **argv,
-                         const char *flag, std::string &out) -> bool {
-        if (std::strcmp(argv[i], flag) != 0) return false;
+                         const char *flag, std::string &out,
+                         const char *shortFlag = nullptr) -> bool {
+        if (std::strcmp(argv[i], flag) != 0 &&
+            !(shortFlag && std::strcmp(argv[i], shortFlag) == 0))
+            return false;
         if (i + 1 >= argc) {
             llvm::errs() << "lshaz fix: " << flag << " requires a value\n";
             return false;
@@ -79,12 +82,12 @@ bool parseFixArgs(int argc, const char **argv, FixArgs &args) {
             args.help = true;
             return true;
         }
-        if (consumeArg(i, argc, argv, "--compile-db", args.compileDBPath)) continue;
-        if (consumeArg(i, argc, argv, "--config", args.configPath)) continue;
-        if (std::strcmp(argv[i], "--dry-run") == 0) { args.dryRun = true; continue; }
+        if (consumeArg(i, argc, argv, "--compile-db", args.compileDBPath, "-C")) continue;
+        if (consumeArg(i, argc, argv, "--config", args.configPath, "-c")) continue;
+        if (std::strcmp(argv[i], "--dry-run") == 0 || std::strcmp(argv[i], "-n") == 0) { args.dryRun = true; continue; }
         {
             std::string rulesStr;
-            if (consumeArg(i, argc, argv, "--rules", rulesStr)) {
+            if (consumeArg(i, argc, argv, "--rules", rulesStr, "-r")) {
                 args.rules.clear();
                 std::istringstream ss(rulesStr);
                 std::string r;
