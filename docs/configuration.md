@@ -167,12 +167,19 @@ lshaz init [path] [options]
 
 Detects the build system (CMake, Meson, Make/Bear), generates `compile_commands.json`, and writes a starter `lshaz.config.yaml`.
 
-| Flag | Description |
-|---|---|
-| `[path]` | Project root (default: current directory) |
-| `--no-config` | Skip `lshaz.config.yaml` generation |
-| `--force` | Regenerate `compile_commands.json` even if it exists |
-| `--help` | Show help |
+For CMake and Meson projects, only the **configure step** runs by default — no project dependencies need to be installed. CMake often writes `compile_commands.json` even when `find_package` fails late, and lshaz will use it regardless of configure exit code. Use `--build` when the project uses `configure_file()` or `custom_target()` to generate headers that TUs depend on.
+
+For Make projects, `bear` intercepts a real build, so dependencies must be installed.
+
+After generating or discovering `compile_commands.json`, init probes a random sample of TUs with `clang -fsyntax-only` to detect missing headers early. Failures are reported with the specific error message.
+
+| Short | Long | Description |
+|---|---|---|
+| | `[path]` | Project root (default: current directory) |
+| `-b` | `--build` | Run a full build after configure (for generated headers) |
+| `-f` | `--force` | Regenerate `compile_commands.json` even if it exists |
+| | `--no-config` | Skip `lshaz.config.yaml` generation |
+| `-h` | `--help` | Show help |
 
 ---
 
@@ -182,7 +189,16 @@ Detects the build system (CMake, Meson, Make/Bear), generates `compile_commands.
 lshaz diff <before.json> <after.json>
 ```
 
-Compares two JSON scan results and reports new and resolved findings. Exit code 0 if no new findings, 1 if regressions introduced.
+Compares two JSON scan results and reports:
+
+- **Metadata delta** — TU counts, failed TU counts, regression warnings
+- **Rule distribution shifts** — per-rule count changes
+- **Severity distribution shifts** — per-severity count changes
+- **New findings** — present in after but not before
+- **Resolved findings** — present in before but not after
+- **Unchanged findings** — present in both
+
+Exit code 0 if no new findings, 1 if regressions introduced.
 
 Diff key: `(ruleID, file, line)`.
 
@@ -210,18 +226,19 @@ Applies mechanical auto-remediation for fixable diagnostics. Currently supports:
 |---|---|
 | FL001 | Adds `alignas(64)` to cache-line-spanning structs |
 
-| Flag | Description |
-|---|---|
-| `--dry-run` | Show patches without modifying files |
-| `--rules <list>` | Comma-separated rules to fix (default: `FL001`) |
-| `--compile-db <path>` | Path to `compile_commands.json` |
-| `--config <path>` | Path to `lshaz.config.yaml` |
+| Short | Long | Description |
+|---|---|---|
+| `-C` | `--compile-db <path>` | Path to `compile_commands.json` |
+| `-c` | `--config <path>` | Path to `lshaz.config.yaml` |
+| `-n` | `--dry-run` | Show patches without modifying files |
+| `-r` | `--rules <list>` | Comma-separated rules to fix (default: `FL001`) |
+| `-h` | `--help` | Show help |
 
 **Example:**
 
 ```bash
 # Preview fixes
-lshaz fix . --dry-run
+lshaz fix . -n
 
 # Apply fixes to a single file
 lshaz fix src/engine.cpp -- -std=c++20

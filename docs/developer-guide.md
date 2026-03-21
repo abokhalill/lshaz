@@ -43,13 +43,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 ## Testing
 
-258 tests across four suites:
+216+ tests across four suites:
 
 ```bash
 ./build/analysis_ground_truth_test  # 88 tests — layout, cache line, escape analysis ground truth
 ./build/output_contract_test        # 55 tests — JSON, SARIF, CLI output contracts
-./build/pipeline_unit_test          # 44 tests — pipeline correctness
-./build/scan_e2e_test               # 71 tests — end-to-end scan behavior
+./build/pipeline_unit_test          # 73 tests — pipeline, IPC, escape summary, cross-TU suppression
+./build/scan_e2e_test               # end-to-end scan behavior
 ```
 
 All tests must pass before committing.
@@ -88,6 +88,9 @@ src/
   main.cpp                     # Entry point, subcommand dispatch
   cli/
     ScanCommand.cpp            # lshaz scan implementation
+    InitCommand.cpp            # lshaz init — project setup, compile_commands.json generation
+    DiffCommand.cpp            # lshaz diff — scan result comparison
+    FixCommand.cpp             # lshaz fix — auto-remediation
     ExplainCommand.cpp         # lshaz explain implementation
     HypCommand.cpp             # lshaz hyp — hypothesis generation
     ExpCommand.cpp             # lshaz exp — experiment synthesis
@@ -162,9 +165,23 @@ test/fixtures/hft_core/        # Test fixture files
 
 Rules must map to a concrete hardware mechanism. If it cannot be tied to cache, coherence, store buffer, TLB, branch predictor, NUMA, or allocator — it does not belong.
 
+## OSS Validation Targets
+
+The tool is regularly stress-tested against open-source codebases:
+
+| Project | Build System | TUs | Notes |
+|---|---|---|---|
+| Redis | Make/bear | 276 | C, moderate concurrency |
+| DPDK | Meson | 2059 | C, large scale, generated headers |
+| memcached | autotools/bear | 65 | C, heavy threading + atomics |
+| libuv | CMake | 238 | C, I/O concurrency, clean CMake |
+| folly | CMake | 356 | C++, atomics-heavy, deep templates, 2540 escape types |
+
+These targets exercise different axes: build system integration, scale, template depth, escape analysis density, and crash recovery.
+
 ## Commit Discipline
 
 - Each commit must be logically atomic and traceable to a specific change
-- All 258 tests must pass before pushing
+- All tests must pass before pushing
 - No batching of unrelated changes
 - Prefer minimal upstream fixes over downstream workarounds

@@ -19,8 +19,8 @@ Entry point: `LshazASTConsumer::HandleTranslationUnit`.
 For each translation unit, walks all top-level declarations (recursing into namespaces, linkage specs, and nested record types) and runs all registered rules. System headers are skipped. Dependent and invalid declarations are filtered before rule execution.
 
 **TU-level safety:**
-- TUs with fatal parse errors are skipped entirely — no diagnostics emitted for partial ASTs.
-- Per-TU crash isolation via `llvm::CrashRecoveryContext`. If a TU triggers SIGSEGV/SIGABRT, it is recorded as failed and scanning continues.
+- TUs with fatal parse errors are skipped entirely — no diagnostics emitted for partial ASTs. Each failed TU is recorded as a `FailedTU` with both the file path and the verbatim first error message, captured via an `ErrorCapture` forwarding `DiagnosticConsumer` installed in `BeginSourceFileAction`. This enables downstream header fingerprint detection (see Post-Processing).
+- Per-TU crash isolation via `llvm::CrashRecoveryContext`. If a TU triggers SIGSEGV/SIGABRT, it is recorded as failed with a crash-specific error message and scanning continues.
 
 **Supporting analyses available to rules:**
 
@@ -73,6 +73,7 @@ Per function, collects: stack allocations (`AllocaInst`, name, size, array flag)
 - **Interaction synthesis** — Correlates diagnostics from different rules at the same code site using the `InteractionEligibilityMatrix`. Eligible pairs or triples produce compound hazard findings (FL091).
 - **Precision budget** — Per-rule governance: configurable max emissions per TU, minimum confidence floor, severity cap. Rules exceeding FP rate threshold are auto-demoted.
 - **Calibration suppression** — If `--calibration-store` is provided, suppresses diagnostics matching known false-positive feature neighborhoods (Euclidean distance, radius 0.25). Safety rail: Critical/High + Proven evidence never suppressed.
+- **Header fingerprint detection (B001)** — After filtering, the pipeline aggregates error messages from all `FailedTU` objects, extracts missing header names via pattern matching (`fatal error: '...' file not found`), and emits a `B001` diagnostic for any header missing in ≥3 TUs. This surfaces systematic build configuration issues (e.g., missing `configure_file()` output) as actionable diagnostics rather than silent TU failures.
 - **Filtering and sorting** — Suppressed diagnostics removed. Remaining sorted: Critical first, then by file path, then by line number.
 
 ## Latency Model
@@ -97,7 +98,7 @@ AST analysis supports parallel execution via `--jobs N`:
 - Sources are sharded round-robin across N worker processes.
 - Each shard runs in a **forked child process** with its own address space. This provides hardware-level isolation from Clang's thread-unsafe global state (`llvm::cl` option tables, `CrashRecoveryContext` signal handlers, `FileManager` stat caches).
 - `compDB` is wrapped in `AbsolutePathCompilationDatabase` at load time, which resolves all relative paths (source files, `-I` flags, `-isystem` flags) to absolute.
-- Children serialize diagnostics, failed TU lists, and per-shard `EscapeSummary` to temp files via a minimal JSON IPC protocol. The parent reads them back after `waitpid()` and merges escape summaries across all shards into `ScanResult.escapeSummary`.
+- Children serialize diagnostics, `FailedTU` objects (file path + error message), and per-shard `EscapeSummary` to temp files via a minimal JSON IPC protocol. The parent reads them back after `waitpid()`, merges escape summaries across all shards into `ScanResult.escapeSummary`, and aggregates `FailedTU` objects for header fingerprint detection.
 - After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of process count or scheduling order.
 - Per-TU crash isolation via `CrashRecoveryContext` within each child. If a child is killed by a signal, all its TUs are recorded as failed.
 - **FL040 two-pass architecture:** FL040 uses a MapReduce design to avoid per-TU partial-information verdicts. In the map phase, each shard emits every global-state candidate unconditionally with its per-TU write count (`tu_write_count`) and initializer status (`has_init`). In the reduce phase (post-merge, pre-dedup), the pipeline aggregates write counts per `(var, type)` across all TUs and applies the write-once threshold on the global sum. This guarantees identical classification regardless of shard count or scheduling order. FL040 dedup uses a stable key (`var` + `type`) with a deterministic tiebreaker (shortest file path → lexicographic → lowest line) for canonical location selection. All diagnostic locations are resolved via `getFileLoc()` to map Clang `<scratch space>` token-paste artifacts back to their physical file locations.
