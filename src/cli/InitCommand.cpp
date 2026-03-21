@@ -167,7 +167,7 @@ int runExternal(const std::string &program,
     return rc;
 }
 
-bool generateCMake(const std::string &dir) {
+bool generateCMake(const std::string &dir, bool fullBuild) {
     llvm::errs() << "lshaz init: detected CMake project\n";
     llvm::SmallString<256> buildDir(dir);
     llvm::sys::path::append(buildDir, "build");
@@ -179,34 +179,40 @@ bool generateCMake(const std::string &dir) {
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     }, dir, "configuring CMake");
 
-    if (rc != 0) {
-        llvm::errs() << "lshaz init: cmake configure failed\n";
-        return false;
-    }
-
-    // CMake's configure phase generates compile_commands.json but does not
-    // execute configure_file() or add_custom_command() build steps. Without
-    // the build phase, generated headers don't exist on disk.
-    llvm::errs() << "lshaz init: running full build to generate required "
-                    "headers... this may take a while\n";
-    int buildRc = runExternal("cmake", {
-        "--build", std::string(buildDir), "--parallel"
-    }, dir, "building (cmake --build)", 600);
-    if (buildRc != 0)
-        llvm::errs() << "lshaz init: cmake build failed (exit " << buildRc
-                     << "); generated headers may be missing\n";
-
+    // CMake often writes compile_commands.json before a late find_package
+    // failure. Check regardless of exit code.
     llvm::SmallString<256> db(buildDir);
     llvm::sys::path::append(db, "compile_commands.json");
-    if (llvm::sys::fs::exists(db)) {
+    bool haveDB = llvm::sys::fs::exists(db);
+
+    if (rc != 0 && !haveDB) {
+        llvm::errs() << "lshaz init: cmake configure failed and no "
+                        "compile_commands.json was generated\n";
+        return false;
+    }
+    if (rc != 0)
+        llvm::errs() << "lshaz init: cmake configure had errors, but "
+                        "compile_commands.json was generated\n";
+
+    if (fullBuild) {
+        llvm::errs() << "lshaz init: running full build to generate required "
+                        "headers (--build)\n";
+        int buildRc = runExternal("cmake", {
+            "--build", std::string(buildDir), "--parallel"
+        }, dir, "building (cmake --build)", 600);
+        if (buildRc != 0)
+            llvm::errs() << "lshaz init: build failed (exit " << buildRc
+                         << "); some generated headers may be missing\n";
+    }
+
+    if (haveDB) {
         llvm::errs() << "lshaz init: generated " << db << "\n";
         return true;
     }
-    llvm::errs() << "lshaz init: cmake succeeded but compile_commands.json not found\n";
     return false;
 }
 
-bool generateMeson(const std::string &dir) {
+bool generateMeson(const std::string &dir, bool fullBuild) {
     llvm::errs() << "lshaz init: detected Meson project\n";
     llvm::SmallString<256> buildDir(dir);
     llvm::sys::path::append(buildDir, "build");
@@ -219,19 +225,16 @@ bool generateMeson(const std::string &dir) {
         }
     }
 
-    // Meson's configure phase (setup) generates compile_commands.json but does
-    // not execute custom_target or configure_file steps. Without the build
-    // phase, generated headers don't exist and TUs that #include them will
-    // fail to parse.
-    llvm::errs() << "lshaz init: running full build to generate required "
-                    "headers... this may take a while\n";
-    int buildRc = runExternal("meson", {"compile", "-C", std::string(buildDir)},
-                              dir, "building (meson compile)", 600);
-    if (buildRc != 0)
-        llvm::errs() << "lshaz init: meson compile failed (exit " << buildRc
-                     << "); generated headers may be missing\n";
+    if (fullBuild) {
+        llvm::errs() << "lshaz init: running full build to generate required "
+                        "headers (--build)\n";
+        int buildRc = runExternal("meson", {"compile", "-C", std::string(buildDir)},
+                                  dir, "building (meson compile)", 600);
+        if (buildRc != 0)
+            llvm::errs() << "lshaz init: build failed (exit " << buildRc
+                         << "); some generated headers may be missing\n";
+    }
 
-    // Meson always generates compile_commands.json in the build dir.
     llvm::SmallString<256> db(buildDir);
     llvm::sys::path::append(db, "compile_commands.json");
     if (llvm::sys::fs::exists(db)) {
@@ -243,7 +246,9 @@ bool generateMeson(const std::string &dir) {
 }
 
 bool generateBear(const std::string &dir) {
-    llvm::errs() << "lshaz init: detected Makefile project\n";
+    llvm::errs() << "lshaz init: detected Makefile project\n"
+                    "  Note: bear requires a full build; project dependencies "
+                    "must be installed.\n";
     auto bear = llvm::sys::findProgramByName("bear");
     if (!bear) {
         llvm::errs() << "lshaz init: 'bear' not found. Install bear to "
@@ -502,10 +507,16 @@ void printInitUsage() {
         << "Detects the build system, generates compile_commands.json,\n"
         << "and creates a starter lshaz.config.yaml.\n"
         << "\n"
+        << "For CMake/Meson projects, only the configure step is run by\n"
+        << "default. Use --build to also run a full build (needed when\n"
+        << "the project uses configure_file() or custom_target() to\n"
+        << "generate headers).\n"
+        << "\n"
         << "Arguments:\n"
         << "  [path]           Project root (default: current directory)\n"
         << "\n"
         << "Options:\n"
+        << "  --build          Run a full build after configure (for generated headers)\n"
         << "  --no-config      Skip lshaz.config.yaml generation\n"
         << "  --force          Regenerate compile_commands.json even if it exists\n"
         << "  --help           Show this help\n";
@@ -517,6 +528,7 @@ int runInitCommand(int argc, const char **argv) {
     std::string target = ".";
     bool noConfig = false;
     bool force = false;
+    bool fullBuild = false;
 
     for (int i = 0; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 ||
@@ -526,6 +538,7 @@ int runInitCommand(int argc, const char **argv) {
         }
         if (std::strcmp(argv[i], "--no-config") == 0) { noConfig = true; continue; }
         if (std::strcmp(argv[i], "--force") == 0) { force = true; continue; }
+        if (std::strcmp(argv[i], "--build") == 0) { fullBuild = true; continue; }
         if (argv[i][0] == '-') {
             llvm::errs() << "lshaz init: unknown option '" << argv[i] << "'\n";
             printInitUsage();
@@ -552,8 +565,8 @@ int runInitCommand(int argc, const char **argv) {
         BuildSystem bs = detectBuildSystem(dir);
         bool ok = false;
         switch (bs) {
-        case BuildSystem::CMake:  ok = generateCMake(dir);  break;
-        case BuildSystem::Meson:  ok = generateMeson(dir);  break;
+        case BuildSystem::CMake:  ok = generateCMake(dir, fullBuild);  break;
+        case BuildSystem::Meson:  ok = generateMeson(dir, fullBuild);  break;
         case BuildSystem::Make:   ok = generateBear(dir);   break;
         case BuildSystem::Unknown:
             llvm::errs() << "lshaz init: no recognized build system found "
