@@ -54,31 +54,6 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 All tests must pass before committing.
 
-## Validation Harness
-
-The `validation/` directory contains a ground-truth validation harness:
-
-### Tier 1: Corpus Regression
-
-```bash
-./validation/run.sh --tier1
-```
-
-Runs lshaz against internal test samples and external open-source C++ codebases. Asserts:
-- No crashes
-- Deterministic output across runs
-- Valid source locations
-- Diagnostic distribution sanity
-- Evidence parseability
-
-### Tier 2: Ground Truth Microbenchmarks
-
-```bash
-./validation/run.sh --tier2
-```
-
-Paired hazardous/fixed microbenchmarks per rule with hardware timing and optional `perf stat` counters. Statistical analysis via paired t-test when scipy is available.
-
 ## Architecture
 
 The codebase is organized as:

@@ -1,7 +1,0 @@
-# Cloned external corpora
-tier1/corpora/
-
-# Generated results (re-run to regenerate)
-tier1/results/
-tier2/results/
-tier2/build/
