@@ -8,8 +8,6 @@
 
 namespace lshaz {
 
-// --- InteractionEligibilityMatrix ---
-
 const InteractionEligibilityMatrix &InteractionEligibilityMatrix::instance() {
     static InteractionEligibilityMatrix mat;
     return mat;
@@ -115,15 +113,10 @@ const InteractionTemplate *InteractionEligibilityMatrix::findTemplate(
     return nullptr;
 }
 
-// --- InteractionDetector ---
-
 std::vector<InteractionCandidate> InteractionDetector::detect(
     const std::vector<LatencyHypothesis> &hypotheses) {
 
-    // Group hypotheses by declaration scope (extracted from findingId).
-    // findingId format: "FL0XX-/path/to/file.cpp:line"
-    // We group by file:line prefix to find co-located findings.
-    // A more precise implementation would use the AST declaration scope.
+    /* Group by file prefix from findingId ("FL0XX-/path:line"). */
     std::unordered_map<std::string, std::vector<size_t>> scopeGroups;
 
     for (size_t i = 0; i < hypotheses.size(); ++i) {
@@ -132,7 +125,6 @@ std::vector<InteractionCandidate> InteractionDetector::detect(
         std::string scope = (dashPos != std::string::npos)
                                 ? id.substr(dashPos + 1)
                                 : id;
-        // Truncate to file level for grouping.
         auto colonPos = scope.rfind(':');
         if (colonPos != std::string::npos)
             scope = scope.substr(0, colonPos);
@@ -145,7 +137,6 @@ std::vector<InteractionCandidate> InteractionDetector::detect(
     for (const auto &[scope, indices] : scopeGroups) {
         if (indices.size() < 2) continue;
 
-        // Check all pairs within the scope.
         for (size_t i = 0; i < indices.size(); ++i) {
             for (size_t j = i + 1; j < indices.size(); ++j) {
                 HazardClass a = hypotheses[indices[i]].hazardClass;
@@ -221,14 +212,11 @@ std::optional<LatencyHypothesis> InteractionDetector::constructInteractionHypoth
     return hyp;
 }
 
-// --- InteractionCatalog ---
-
 void InteractionCatalog::addResult(const std::string &templateId,
                                    const InteractionResult &result) {
     for (auto &entry : entries_) {
         if (entry.tmpl.id == templateId) {
             entry.results.push_back(result);
-            // Recompute mean interaction effect.
             double sum = 0.0;
             uint32_t count = 0;
             bool anySuperAdditive = false;
@@ -243,7 +231,6 @@ void InteractionCatalog::addResult(const std::string &templateId,
         }
     }
 
-    // New template entry.
     const auto &matrix = InteractionEligibilityMatrix::instance();
     for (const auto &t : matrix.templates()) {
         if (t.id == templateId) {

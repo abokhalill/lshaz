@@ -10,7 +10,6 @@ namespace lshaz {
 
 PMUTraceFeedbackLoop::PMUTraceFeedbackLoop(CalibrationFeedbackStore &calStore)
     : calStore_(calStore) {
-    // Initialize default priors for all hazard classes.
     auto initPrior = [&](HazardClass hc) {
         HazardPrior p;
         p.hazardClass = hc;
@@ -42,10 +41,7 @@ LabelValue PMUTraceFeedbackLoop::ingestTrace(
 
     LabelValue verdict = evaluateCounters(trace.samples, hazardClass);
 
-    // Update Bayesian prior.
     updatePrior(hazardClass, verdict);
-
-    // Feed into CalibrationFeedbackStore as a labeled record.
     ExperimentResult expResult;
     expResult.findingId = trace.findingId.empty()
         ? (trace.functionName + ":" + std::to_string(trace.sourceLine))
@@ -56,11 +52,8 @@ LabelValue PMUTraceFeedbackLoop::ingestTrace(
     expResult.envState.cpuModel = trace.cpuModel.empty()
         ? "unknown" : trace.cpuModel;
     expResult.envState.skuFamily = trace.skuFamily;
-    // validateSchema requires non-zero iteration counts.
-    expResult.warmupIterations = 1;
+    expResult.warmupIterations = 1;  /* validateSchema invariant */
     expResult.measurementIterations = 1;
-
-    // Map PMU samples to counter deltas (treatment = measured, control = 0).
     for (const auto &sample : trace.samples) {
         CounterDelta cd;
         cd.counterName = sample.counterName;
@@ -69,11 +62,10 @@ LabelValue PMUTraceFeedbackLoop::ingestTrace(
         expResult.counterDeltas.push_back(cd);
     }
 
-    // Set verdict based on PMU evaluation.
     switch (verdict) {
         case LabelValue::Positive:
             expResult.verdict = ExperimentVerdict::Confirmed;
-            expResult.effectSizeD = 0.8; // Strong evidence
+            expResult.effectSizeD = 0.8;
             expResult.pValue = 0.01;
             break;
         case LabelValue::Negative:
@@ -90,7 +82,6 @@ LabelValue PMUTraceFeedbackLoop::ingestTrace(
 
     calStore_.ingest(expResult, featureVector, hazardClass);
 
-    // If refuted, register as known false positive.
     if (verdict == LabelValue::Negative) {
         calStore_.registerFalsePositive(
             featureVector, hazardClass,
@@ -111,8 +102,7 @@ double PMUTraceFeedbackLoop::adjustConfidence(double baseConfidence,
     if (!prior || prior->totalObservations == 0)
         return baseConfidence;
 
-    // Bayesian update: weight base confidence by observed true positive rate.
-    // More observations → more weight on production data.
+    /* Bayesian blend: production data weight saturates at 50 observations. */
     double obsWeight = std::min(1.0,
         static_cast<double>(prior->totalObservations) / 50.0);
     double adjusted = baseConfidence * (1.0 - obsWeight) +
@@ -126,8 +116,7 @@ bool PMUTraceFeedbackLoop::savePriors(const std::string &path) const {
     if (!out.is_open())
         return false;
 
-    // Sort keys for deterministic serialization.
-    std::vector<std::string> keys;
+    std::vector<std::string> keys; /* sorted for deterministic output */
     keys.reserve(priors_.size());
     for (const auto &[name, _] : priors_)
         keys.push_back(name);
@@ -179,8 +168,7 @@ bool PMUTraceFeedbackLoop::loadPriors(const std::string &path) {
 std::vector<CounterThreshold> PMUTraceFeedbackLoop::defaultThresholds(
     HazardClass hc) {
 
-    // Counter thresholds calibrated for x86-64 server workloads.
-    // These are per-second rates normalized to measurement window.
+    /* Per-second thresholds, x86-64 server workloads. */
     switch (hc) {
         case HazardClass::CacheGeometry:
         case HazardClass::FalseSharing:
@@ -247,7 +235,6 @@ LabelValue PMUTraceFeedbackLoop::evaluateCounters(
 
             matched++;
 
-            // Normalize to per-second rate if duration is available.
             double rate = static_cast<double>(sample.value);
             if (sample.duration_ns > 0)
                 rate = rate * 1e9 / static_cast<double>(sample.duration_ns);
@@ -262,7 +249,6 @@ LabelValue PMUTraceFeedbackLoop::evaluateCounters(
     if (matched == 0)
         return LabelValue::Unlabeled;
 
-    // Majority vote across matched counters.
     if (confirmed > refuted && confirmed > 0)
         return LabelValue::Positive;
     if (refuted > confirmed && refuted > 0)
@@ -282,7 +268,6 @@ void PMUTraceFeedbackLoop::updatePrior(HazardClass hc, LabelValue verdict) {
     else if (verdict == LabelValue::Negative)
         prior.refutedHazards++;
 
-    // Update rates.
     if (prior.totalObservations > 0) {
         prior.truePositiveRate =
             static_cast<double>(prior.confirmedHazards) /
@@ -291,9 +276,7 @@ void PMUTraceFeedbackLoop::updatePrior(HazardClass hc, LabelValue verdict) {
             static_cast<double>(prior.refutedHazards) /
             prior.totalObservations;
 
-        // Bayesian posterior: P(hazard | data) ∝ P(data | hazard) * P(hazard)
-        // Simplified: use observed TP rate as posterior, smoothed with prior.
-        double alpha = 1.0; // Laplace smoothing
+        double alpha = 1.0; /* Laplace smoothing */
         prior.priorConfidence =
             (prior.confirmedHazards + alpha) /
             (prior.totalObservations + 2.0 * alpha);

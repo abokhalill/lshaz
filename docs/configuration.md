@@ -309,6 +309,44 @@ make && ./experiment --variant treatment && ./experiment --variant control
 
 ---
 
+## Feedback CLI Options
+
+```
+lshaz feedback <experiment-dir> [options]
+```
+
+Ingests experiment results into the calibration feedback store. Reads `hypothesis.json` and `results/{treatment,control}_samples.bin` from the experiment directory, runs Welch's t-test, assigns a verdict, and updates the calibration store's false-positive registry.
+
+The quality gate rejects labels from experiments missing confound controls (turbo not disabled, governor not `performance`, no core pinning). Underpowered refutations (power < 0.80) are demoted to `unlabeled`.
+
+| Flag | Description |
+|---|---|
+| `--store <path>` | Calibration store path (required) |
+| `--alpha <f>` | Significance level (default: 0.01) |
+| `--json` | Output verdict as JSON |
+| `--help` | Show this help |
+
+**Example:**
+
+```bash
+# Ingest a single experiment
+lshaz feedback experiments/H-FL002-*/ --store calibration.json
+
+# JSON output for CI pipelines
+lshaz feedback experiments/H-FL002-*/ --store calibration.json --json
+
+# Full loop: scan → exp → run → feedback
+lshaz scan . -f json -o scan.json
+lshaz exp scan.json -o experiments
+cd experiments/H-FL002-*/
+make && ./experiment --variant treatment && ./experiment --variant control
+cd ../..
+lshaz feedback experiments/H-FL002-*/ --store calibration.json
+lshaz scan . -f json --calibration-store calibration.json
+```
+
+---
+
 ## Single-File Mode
 
 Analyze individual source files with explicit compiler flags:

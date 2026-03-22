@@ -29,9 +29,7 @@ std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID) {
 }
 
 std::string diagnosticSiteKey(const Diagnostic &d) {
-    // Struct-level rules (FL001, FL002, FL060, FL090): group by file:line.
-    // Function-level rules: group by functionName.
-    // Hybrid: use file:line if available, fall back to functionName.
+    /* file:line preferred; fall back to functionName. */
     if (!d.location.file.empty() && d.location.line > 0) {
         return d.location.file + ":" + std::to_string(d.location.line);
     }
@@ -43,10 +41,9 @@ std::string diagnosticSiteKey(const Diagnostic &d) {
 void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
     const auto &matrix = InteractionEligibilityMatrix::instance();
 
-    // Group diagnostics by site key.
     std::unordered_map<std::string, std::vector<size_t>> siteGroups;
     for (size_t i = 0; i < diagnostics.size(); ++i) {
-        // Skip native compound (FL090) and synthesized interaction (FL091) diagnostics.
+        /* Skip FL090/FL091 to avoid recursive synthesis. */
         if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
             continue;
         auto hc = ruleToHazardClass(diagnostics[i].ruleID);
@@ -55,7 +52,7 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         siteGroups[diagnosticSiteKey(diagnostics[i])].push_back(i);
     }
 
-    // Also group struct-level diagnostics by struct name from evidence map.
+    /* Secondary grouping: same struct at different lines. */
     std::unordered_map<std::string, std::vector<size_t>> structGroups;
     for (size_t i = 0; i < diagnostics.size(); ++i) {
         if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
@@ -65,8 +62,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
             structGroups["struct:" + it->second].push_back(i);
     }
 
-    // Merge struct groups into site groups (struct-level correlation
-    // catches diagnostics at different lines but same struct).
     for (auto &[key, indices] : structGroups) {
         auto &merged = siteGroups[key];
         for (auto idx : indices) {
@@ -80,9 +75,7 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
 
     std::vector<Diagnostic> synthesized;
 
-    // Deterministic iteration: sort site keys to avoid unordered_map
-    // iteration order nondeterminism.
-    std::vector<std::string> sortedKeys;
+    std::vector<std::string> sortedKeys; /* deterministic iteration */
     sortedKeys.reserve(siteGroups.size());
     for (const auto &[key, _] : siteGroups)
         sortedKeys.push_back(key);
@@ -93,7 +86,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         if (indices.size() < 2)
             continue;
 
-        // Collect unique hazard classes at this site.
         struct HazardEntry {
             HazardClass hc;
             size_t diagIdx;
@@ -102,7 +94,7 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         for (auto idx : indices) {
             auto hc = ruleToHazardClass(diagnostics[idx].ruleID);
             if (!hc) continue;
-            // Deduplicate by hazard class (keep highest confidence).
+            /* Dedup by class; keep highest confidence. */
             bool merged = false;
             for (auto &e : entries) {
                 if (e.hc == *hc) {
@@ -120,7 +112,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         if (entries.size() < 2)
             continue;
 
-        // Check all pairs for eligible interactions.
         for (size_t i = 0; i < entries.size(); ++i) {
             for (size_t j = i + 1; j < entries.size(); ++j) {
                 const auto *tmpl = matrix.findTemplate(
@@ -131,7 +122,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 const auto &dA = diagnostics[entries[i].diagIdx];
                 const auto &dB = diagnostics[entries[j].diagIdx];
 
-                // Synthesize compound hazard diagnostic.
                 Diagnostic compound;
                 compound.ruleID = "FL091";
                 compound.title = "Synthesized Interaction: " +
@@ -145,12 +135,10 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 compound.evidenceTier = std::min(dA.evidenceTier,
                                                   dB.evidenceTier);
 
-                // Location: use the first diagnostic's location.
                 compound.location = dA.location;
                 compound.functionName = dA.functionName.empty()
                     ? dB.functionName : dA.functionName;
 
-                // Hardware reasoning: interaction mechanism.
                 std::ostringstream hw;
                 hw << "Compound hazard at site '" << siteKey << "': "
                    << tmpl->amplificationMechanism
@@ -161,7 +149,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                    << "under concurrent access.";
                 compound.hardwareReasoning = hw.str();
 
-                // Structural evidence: merge from both diagnostics.
                 compound.structuralEvidence = {
                     {"interaction", tmpl->id},
                     {"components", dA.ruleID + "+" + dB.ruleID},
@@ -177,7 +164,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                     "compound impact disproportionately. Prioritize the "
                     "higher-severity contributor first.";
 
-                // Escalations: cite both contributing diagnostics.
                 compound.escalations.push_back(
                     "Contributing: " + dA.ruleID + " — " + dA.title);
                 compound.escalations.push_back(
@@ -190,13 +176,12 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
             }
         }
 
-        // Check triples for 3-way interaction templates.
+        /* 3-way interaction templates. */
         if (entries.size() >= 3) {
             for (const auto &tmpl : matrix.templates()) {
                 if (tmpl.components.size() != 3)
                     continue;
 
-                // Check if all 3 components are present at this site.
                 bool allPresent = true;
                 std::vector<size_t> matchedIndices;
                 for (auto comp : tmpl.components) {
@@ -268,7 +253,6 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         }
     }
 
-    // Append synthesized interactions to diagnostics.
     for (auto &d : synthesized)
         diagnostics.push_back(std::move(d));
 }

@@ -94,6 +94,7 @@ src/
     ExplainCommand.cpp         # lshaz explain implementation
     HypCommand.cpp             # lshaz hyp — hypothesis generation
     ExpCommand.cpp             # lshaz exp — experiment synthesis
+    FeedbackCommand.cpp        # lshaz feedback — experiment result ingestion
     ScanResultParser.cpp       # JSON scan result parser for hyp/exp
   analysis/
     LshazASTConsumer.cpp       # AST traversal, rule dispatch, suppression

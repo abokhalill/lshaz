@@ -95,25 +95,18 @@ class CalibrationFeedbackStore {
 public:
     explicit CalibrationFeedbackStore(const std::string &storePath);
 
-    // Ingest a raw experiment result. Returns the labeled record if accepted.
     std::optional<LabeledRecord> ingest(const ExperimentResult &result,
                                         const std::vector<double> &featureVector,
                                         HazardClass hazardClass);
 
-    // Query labeled records for a hazard class.
     std::vector<LabeledRecord> queryByHazardClass(HazardClass hc) const;
-
-    // Query labeled records for a SKU family.
     std::vector<LabeledRecord> queryBySKU(const std::string &skuFamily) const;
-
-    // Total record count.
     size_t recordCount() const { return records_.size(); }
 
-    // Check if a feature combination is in the known false positive registry.
+    /* Requires ≥3 refutations within kNeighborhoodRadius. */
     bool isKnownFalsePositive(const std::vector<double> &features,
                               HazardClass hc) const;
 
-    // Register a known false positive combination.
     void registerFalsePositive(const std::vector<double> &features,
                                HazardClass hc,
                                const std::string &reason);
@@ -123,12 +116,9 @@ private:
     static double computeLabelQuality(const ExperimentResult &result);
     bool validateSchema(const ExperimentResult &result) const;
 
-    // Euclidean distance between feature vectors (0.0 if mismatched dimensions).
     static double featureDistance(const std::vector<double> &a,
                                   const std::vector<double> &b);
 
-    // Neighborhood radius for feature matching. Entries within this distance
-    // are considered structurally similar.
     static constexpr double kNeighborhoodRadius = 0.25;
 
     std::string storePath_;

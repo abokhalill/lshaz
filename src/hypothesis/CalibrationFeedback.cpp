@@ -60,7 +60,7 @@ double CalibrationFeedbackStore::computeLabelQuality(
 
     double powerFactor = std::min(result.power, 1.0);
 
-    // Environment quality: degrade if key controls are missing.
+    /* Degrade for missing confound controls. */
     double envQuality = 1.0;
     if (!result.envState.turboDisabled)
         envQuality -= 0.15;
@@ -71,9 +71,7 @@ double CalibrationFeedbackStore::computeLabelQuality(
 
     envQuality = std::max(envQuality, 0.0);
 
-    // Confound risk: placeholder. In production, this would check
-    // disassembly diff size between treatment and control.
-    double confoundRisk = 0.05;
+    double confoundRisk = 0.05; /* TODO: check disasm diff size */
 
     return powerFactor * envQuality * (1.0 - confoundRisk);
 }
@@ -89,13 +87,11 @@ std::optional<LabeledRecord> CalibrationFeedbackStore::ingest(
     LabelValue label = assignLabel(result);
     double quality = computeLabelQuality(result);
 
-    // Reject low-quality labels from training.
     if (quality < 0.60 && label != LabelValue::Excluded)
-        label = LabelValue::Unlabeled;
+        label = LabelValue::Unlabeled; /* reject noisy labels */
 
-    // Power gate: insufficient power → inconclusive.
     if (result.power < 0.80 && label == LabelValue::Negative)
-        label = LabelValue::Unlabeled;
+        label = LabelValue::Unlabeled; /* underpowered refutation → inconclusive */
 
     auto now = std::chrono::system_clock::now();
     uint64_t timestamp = static_cast<uint64_t>(
@@ -118,8 +114,7 @@ std::optional<LabeledRecord> CalibrationFeedbackStore::ingest(
 
     records_.push_back(record);
 
-    // Update false positive registry if refuted.
-    // Match on hazard class AND feature neighborhood.
+    /* FP registry: match on hazard class + feature neighborhood. */
     if (label == LabelValue::Negative) {
         bool found = false;
         for (auto &entry : falsePositiveRegistry_) {

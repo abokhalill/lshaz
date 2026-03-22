@@ -2,6 +2,7 @@
 #include "cli/DiffCommand.h"
 #include "cli/ExpCommand.h"
 #include "cli/ExplainCommand.h"
+#include "cli/FeedbackCommand.h"
 #include "cli/FixCommand.h"
 #include "cli/HypCommand.h"
 #include "cli/InitCommand.h"
@@ -28,6 +29,8 @@ int main(int argc, const char **argv) {
         return lshaz::runHypCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "exp") == 0)
         return lshaz::runExpCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "feedback") == 0)
+        return lshaz::runFeedbackCommand(argc - 2, argv + 2);
 
     if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
                       std::strcmp(argv[1], "--version") == 0)) {
@@ -50,6 +53,7 @@ int main(int argc, const char **argv) {
             << "  lshaz exp <scan.json> -o dir   Synthesize experiment bundles\n"
             << "  lshaz init [path]             Generate compile_commands.json and config\n"
             << "  lshaz diff <a.json> <b.json>  Compare two scan results\n"
+            << "  lshaz feedback <dir> --store  Ingest experiment results\n"
             << "  lshaz explain [rule]          Show rule documentation\n"
             << "  lshaz version                 Print version\n"
             << "  lshaz help                    Show this help\n"
@@ -59,7 +63,7 @@ int main(int argc, const char **argv) {
     }
 
     llvm::errs() << "lshaz: unknown command '" << argv[1] << "'\n\n"
-                 << "Available commands: scan, fix, hyp, exp, init, diff, explain, version, help\n"
+                 << "Available commands: scan, fix, hyp, exp, feedback, init, diff, explain, version, help\n"
                  << "Run 'lshaz help' for usage.\n";
     return 3;
 }

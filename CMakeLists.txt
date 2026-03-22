@@ -94,6 +94,7 @@ set(LSHAZ_SOURCES
     src/cli/FixCommand.cpp
     src/cli/HypCommand.cpp
     src/cli/ExpCommand.cpp
+    src/cli/FeedbackCommand.cpp
     src/cli/ScanResultParser.cpp
 )
 

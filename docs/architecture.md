@@ -143,6 +143,32 @@ Treatment and control kernels are generated per hazard class. 13 hazard classes 
 
 **Invariant:** Treatment and control are compiled as separate TUs and linked into a single binary. The harness dispatches via `--variant` at runtime. This prevents the compiler from optimizing across the comparison boundary while keeping measurement infrastructure identical.
 
+### Stage 3: Feedback Ingestion (`lshaz feedback`)
+
+Closes the loop: experiment results flow back into the scan pipeline via `CalibrationFeedbackStore`.
+
+```
+scan → hyp → exp → make → run → feedback → scan (with suppression)
+```
+
+`lshaz feedback` reads TSC samples from `results/{treatment,control}_samples.bin`, runs Welch's t-test, and assigns a verdict:
+
+- **Confirmed** — p ≤ α and effect size ≥ MDE
+- **Refuted** — p > 0.10
+- **Inconclusive** — otherwise
+
+Verdicts are ingested as `LabeledRecord`s with a quality score derived from:
+
+- **Power factor** — capped at 1.0
+- **Environment quality** — degraded for missing confound controls (turbo: −0.15, governor: −0.10, core pinning: −0.20)
+- **Confound risk** — placeholder 5% penalty
+
+Quality gates: labels below 0.60 quality are demoted to `Unlabeled`. Refutations with power < 0.80 are also demoted. Proven/Critical findings are never suppressed by calibration feedback.
+
+Refuted verdicts register in the false-positive registry. On subsequent scans with `--calibration-store`, diagnostics whose feature vectors fall within Euclidean radius 0.25 of an entry with ≥3 refutations are suppressed.
+
+PMU trace feedback (`--pmu-trace`) provides a parallel ingestion path using production `perf stat` data. Counter thresholds are calibrated per hazard class for x86-64 server workloads. A Bayesian prior over each hazard class is maintained and blended with base confidence, with production data weight saturating at 50 observations.
+
 ## Severity Escalation
 
 Risk severity increases when multiple hazards interact at the same code site:

@@ -120,7 +120,7 @@ ExperimentFile ExperimentSynthesizer::generateHarness(
        << "            variant = argv[++i];\n"
        << "    }\n\n"
        << "    pin_thread(core);\n"
-       << "    (void)std::system(\"mkdir -p results\");\n\n"
+       << "    { auto r_ = std::system(\"mkdir -p results\"); (void)r_; }\n\n"
        << "    std::vector<LatencySample> samples;\n\n"
        << "    if (strcmp(variant, \"treatment\") == 0) {\n"
        << "        run_variant(treatment_setup, treatment_kernel,\n"
