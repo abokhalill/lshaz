@@ -11,7 +11,7 @@ _lshaz() {
     subcmd=""
     for ((i=1; i < COMP_CWORD; i++)); do
         case "${COMP_WORDS[i]}" in
-            scan|fix|init|diff|explain|version|help)
+            scan|fix|hyp|exp|feedback|init|diff|explain|version|help)
                 subcmd="${COMP_WORDS[i]}"
                 break
                 ;;
@@ -20,7 +20,7 @@ _lshaz() {
 
     # Top-level completion.
     if [[ -z "$subcmd" ]]; then
-        COMPREPLY=($(compgen -W "scan fix init diff explain version help" -- "$cur"))
+        COMPREPLY=($(compgen -W "scan fix hyp exp feedback init diff explain version help" -- "$cur"))
         return
     fi
 
@@ -32,7 +32,7 @@ _lshaz() {
                     return
                     ;;
                 --format)
-                    COMPREPLY=($(compgen -W "cli json sarif" -- "$cur"))
+                    COMPREPLY=($(compgen -W "cli json sarif tidy" -- "$cur"))
                     return
                     ;;
                 --min-severity)
@@ -100,7 +100,57 @@ _lshaz() {
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--list --help" -- "$cur"))
             else
-                COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090" -- "$cur"))
+                COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+            fi
+            ;;
+        hyp)
+            case "$prev" in
+                -o|--output)
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    return
+                    ;;
+                --rule)
+                    COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "-o --output --rule --min-conf --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -f -X '!*.json' -- "$cur"))
+            fi
+            ;;
+        exp)
+            case "$prev" in
+                -o|--output)
+                    COMPREPLY=($(compgen -d -- "$cur"))
+                    return
+                    ;;
+                --rule)
+                    COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+                    return
+                    ;;
+                --sku)
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "-o --output --rule --min-conf --sku --dry-run --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -f -X '!*.json' -- "$cur"))
+            fi
+            ;;
+        feedback)
+            case "$prev" in
+                --store)
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--store --alpha --json --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -d -- "$cur"))
             fi
             ;;
     esac

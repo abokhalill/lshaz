@@ -6,6 +6,9 @@ _lshaz() {
     subcmds=(
         'scan:Analyze a project for hardware-level performance hazards'
         'fix:Auto-remediate fixable findings'
+        'hyp:Construct latency hypotheses from scan diagnostics'
+        'exp:Synthesize experiment bundles from scan diagnostics'
+        'feedback:Ingest experiment results into calibration store'
         'init:Generate compile_commands.json and starter config'
         'diff:Compare two JSON scan results'
         'explain:Show rule documentation'
@@ -27,7 +30,7 @@ _lshaz() {
                     _arguments \
                         '--compile-db[Path to compile_commands.json]:file:_files' \
                         '--config[Path to lshaz.config.yaml]:file:_files' \
-                        '--format[Output format]:format:(cli json sarif)' \
+                        '--format[Output format]:format:(cli json sarif tidy)' \
                         '--output[Write output to file]:file:_files' \
                         '--min-severity[Minimum severity]:level:(Informational Medium High Critical)' \
                         '--min-evidence[Minimum evidence tier]:tier:(speculative likely proven)' \
@@ -79,7 +82,35 @@ _lshaz() {
                     _arguments \
                         '--list[List all rules]' \
                         '--help[Show help]' \
-                        '1:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090)'
+                        '1:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)'
+                    ;;
+                hyp)
+                    _arguments \
+                        '-o[Output file]:file:_files' \
+                        '--output[Output file]:file:_files' \
+                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)' \
+                        '--min-conf[Minimum confidence]:threshold:' \
+                        '--help[Show help]' \
+                        '1:scan result:_files -g "*.json"'
+                    ;;
+                exp)
+                    _arguments \
+                        '-o[Output directory]:dir:_files -/' \
+                        '--output[Output directory]:dir:_files -/' \
+                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)' \
+                        '--min-conf[Minimum confidence]:threshold:' \
+                        '--sku[CPU SKU family]:sku:' \
+                        '--dry-run[Show what would be generated]' \
+                        '--help[Show help]' \
+                        '1:scan result:_files -g "*.json"'
+                    ;;
+                feedback)
+                    _arguments \
+                        '--store[Calibration store path]:file:_files' \
+                        '--alpha[Significance level]:alpha:' \
+                        '--json[Output verdict as JSON]' \
+                        '--help[Show help]' \
+                        '1:experiment directory:_files -/'
                     ;;
             esac
             ;;
