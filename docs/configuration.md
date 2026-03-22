@@ -278,6 +278,10 @@ lshaz exp <scan-result.json> [options]
 
 Synthesizes runnable experiment bundles from scan diagnostics. Input must be a scan result JSON file — **not** hypothesis JSON. If hypothesis JSON is passed, the command fails with an actionable error message.
 
+Each experiment is a self-contained directory with `src/treatment.cpp` (reproduces the hazard), `src/control.cpp` (hazard removed), a measurement harness, Makefile, PMU collection scripts, and environment setup/teardown. Treatment and control are compiled as separate TUs and linked into a single binary — the compiler cannot optimize across the comparison boundary.
+
+13 hazard classes have dedicated kernel generators parameterized by structural evidence (e.g., `sizeof`, `estimated_frame`, `depth`). 3 emit editable stubs.
+
 | Flag | Description |
 |---|---|
 | `-o, --output <dir>` | Output directory (default: `./experiments`) |
@@ -287,13 +291,20 @@ Synthesizes runnable experiment bundles from scan diagnostics. Input must be a s
 | `--dry-run` | Show what would be generated without writing |
 | `--help` | Show help |
 
-Generated experiment scripts require `perf` access. `run_all.sh` includes a preflight check for `perf_event_paranoid` and fails fast with instructions if access is restricted. See [hypothesis-engine.md](hypothesis-engine.md#perf-access-requirements) for details.
+Generated experiment scripts require `perf` access. `run_all.sh` includes a preflight check for `perf_event_paranoid` and fails fast with instructions if access is restricted.
 
 **Example:**
 
 ```bash
-lshaz exp scan.json --output ./experiments
+# Generate all experiments above 0.5 confidence
+lshaz exp scan.json -o ./experiments
+
+# Preview FL002 experiments without writing
 lshaz exp scan.json --dry-run --rule FL002
+
+# Build and run a single experiment
+cd experiments/H-FL002-*/
+make && ./experiment --variant treatment && ./experiment --variant control
 ```
 
 ---

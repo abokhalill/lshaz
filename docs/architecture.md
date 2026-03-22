@@ -105,6 +105,44 @@ AST analysis supports parallel execution via `--jobs N`:
 - **EscapeAnalysis ownership:** `EscapeAnalysis` is instantiated per-TU inside `LshazASTConsumer::HandleTranslationUnit` and passed by reference to all rules. Rules are stateless singletons — they never cache per-TU analysis state. This dependency injection pattern eliminates a class of non-determinism bugs caused by heap address reuse across TU boundaries in forked child processes.
 - **Cross-TU escape aggregation:** Each TU emits an `EscapeSummary` — a map from canonical qualified type name to `TypeEscapeSignals` (atomics, sync primitives, shared ownership, volatile, publication evidence, accessor count). Structural signals (atomics, sync, volatile, shared_ptr) are derivable from the type definition and are identical across TUs that include the same header. Publication signals (global store, thread-creation argument) are TU-specific. In the reduce phase (post-merge, pre-dedup), `applyCrossTUEscapeSuppression` queries the aggregated global `EscapeSummary` by the `type_name` stored in each diagnostic's `structuralEvidence`. Diagnostics for types with no cross-TU escape evidence are suppressed. Proven-tier findings and diagnostics without `type_name` are never suppressed. This replaces the earlier multiplicity-based heuristic that used diagnostic count as a proxy for multi-TU presence.
 
+## Experiment Synthesis Pipeline
+
+`lshaz hyp` and `lshaz exp` form a two-stage pipeline that converts static findings into runnable hardware experiments.
+
+### Stage 1: Hypothesis Construction (`lshaz hyp`)
+
+Each diagnostic is mapped to a `HazardClass` via `HypothesisConstructor::mapRuleToHazardClass`. The `HypothesisTemplateRegistry` provides per-class templates containing:
+
+- **H0/H1** — Null and alternative hypotheses in statistical terms
+- **PMU counter set** — Required and optional hardware counters, partitioned into groups that fit the PMU's multiplexing limit
+- **Primary metric** — The tail latency percentile under test (p99, p99.9, p99.99)
+- **MDE** — Minimum detectable effect (default 5% relative increase)
+- **Confound controls** — Turbo boost, C-states, THP, ASLR, CPU governor, interrupt isolation
+
+Evidence tier is inferred from the diagnostic's `structuralEvidence` map: AST-provable layout facts yield `Proven`, concurrency signals yield `Likely`, everything else `Speculative`.
+
+### Stage 2: Experiment Bundle Synthesis (`lshaz exp`)
+
+For each hypothesis, `ExperimentSynthesizer` generates a self-contained experiment directory:
+
+| File | Purpose |
+|---|---|
+| `src/common.h` | Anti-elision primitives (`lshaz_do_not_optimize`, `lshaz_clobber_memory`), `lfence`-bracketed `rdtsc` |
+| `src/treatment.cpp` | Kernel reproducing the structural hazard, parameterized by `structuralEvidence` |
+| `src/control.cpp` | Kernel with the hazard removed (aligned, sharded, lock-free, etc.) |
+| `src/harness.cpp` | Warmup → measurement loop, core pinning, binary sample output |
+| `Makefile` | Separate TU compilation to prevent cross-variant optimization |
+| `scripts/run_all.sh` | Environment setup → build → run → PMU collection → teardown |
+| `scripts/run_perf_stat.sh` | `perf stat` with counter groups partitioned to fit PMU slots |
+| `scripts/run_perf_c2c.sh` | `perf c2c` for false-sharing / contention hazards |
+| `scripts/setup_env.sh` | Disable turbo, THP, ASLR, C-states; set performance governor |
+| `hypothesis.json` | Machine-readable hypothesis metadata |
+| `README.md` | Human-readable experiment description with statistical parameters |
+
+Treatment and control kernels are generated per hazard class. 13 hazard classes have dedicated kernel generators; 3 (CentralizedDispatch, HazardAmplification, SynthesizedInteraction) emit editable stubs. Kernels are parameterized by structural evidence — FL001 uses `sizeof` and `lines_spanned`, FL021 uses `estimated_frame`, FL050 uses `depth`.
+
+**Invariant:** Treatment and control are compiled as separate TUs and linked into a single binary. The harness dispatches via `--variant` at runtime. This prevents the compiler from optimizing across the comparison boundary while keeping measurement infrastructure identical.
+
 ## Severity Escalation
 
 Risk severity increases when multiple hazards interact at the same code site:

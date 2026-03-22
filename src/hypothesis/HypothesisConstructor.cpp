@@ -35,7 +35,7 @@ EvidenceTier HypothesisConstructor::inferEvidenceTier(const Diagnostic &finding)
         return it != ev.end() && it->second == v;
     };
 
-    // Structural facts that are provable from AST alone.
+    /* Provable from AST layout alone */
     if (has("sizeof") || has("cache_lines") || has("estimated_frame")) {
         if (eq("thread_escape", "true") || eq("atomics", "yes"))
             return EvidenceTier::Likely;
@@ -61,7 +61,7 @@ std::vector<double> HypothesisConstructor::extractFeatures(const Diagnostic &fin
     features.push_back(finding.confidence);
     features.push_back(static_cast<double>(finding.escalations.size()));
 
-    // Extract numeric values from typed evidence map.
+    /* Strip trailing 'B' suffix, parse to double, zero on failure. */
     auto extract = [&](const std::string &key) -> double {
         auto it = finding.structuralEvidence.find(key);
         if (it == finding.structuralEvidence.end()) return 0.0;
@@ -110,9 +110,10 @@ std::optional<LatencyHypothesis> HypothesisConstructor::construct(
     hyp.minimumDetectableEffect = tmpl->defaultMDE;
     hyp.significanceLevel = 0.01;
     hyp.power = 0.90;
-    hyp.requiredRuns = 0; // Determined by pilot run.
+    hyp.requiredRuns = 0; /* computed from pilot variance */
     hyp.confoundControls = tmpl->confoundRequirements;
     hyp.structuralFeatures = extractFeatures(finding);
+    hyp.structuralEvidence = finding.structuralEvidence;
     hyp.evidenceTier = inferEvidenceTier(finding);
     hyp.verdict = ExperimentVerdict::Pending;
 

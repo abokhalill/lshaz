@@ -22,15 +22,14 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "#include <cstdint>\n"
        << "#include <atomic>\n"
        << "#include <cstring>\n\n"
-       << "// Anti-elision primitives.\n"
-       << "// Prevents the compiler from optimizing away the code under test.\n"
-       << "static volatile uint64_t lshaz_global_sink;\n\n"
+       << "/* Anti-elision: prevent dead-code elimination of measured work. */\n"
+       << "inline volatile uint64_t lshaz_global_sink;\n\n"
        << "template <typename T>\n"
        << "__attribute__((noinline)) void lshaz_do_not_optimize("
        << "T const& val) {\n"
        << "    asm volatile(\"\" : : \"r,m\"(val) : \"memory\");\n"
        << "}\n\n"
-       << "__attribute__((noinline)) void lshaz_clobber_memory() {\n"
+       << "inline __attribute__((noinline)) void lshaz_clobber_memory() {\n"
        << "    asm volatile(\"\" : : : \"memory\");\n"
        << "}\n\n"
        << "struct LatencySample {\n"
@@ -61,7 +60,7 @@ ExperimentFile ExperimentSynthesizer::generateHarness(
        << "#include <sched.h>\n"
        << "#include <thread>\n"
        << "#include <vector>\n\n"
-       << "// Treatment and control kernels are linked from separate TUs.\n"
+       << "/* Kernels linked from separate TUs — prevents cross-variant optimization. */\n"
        << "extern void treatment_kernel(uint64_t iteration);\n"
        << "extern void control_kernel(uint64_t iteration);\n"
        << "extern void treatment_setup();\n"
@@ -82,13 +81,13 @@ ExperimentFile ExperimentSynthesizer::generateHarness(
        << "    uint64_t warmup,\n"
        << "    uint64_t count) {\n\n"
        << "    setup();\n\n"
-       << "    // Warmup phase\n"
+       << "    /* Warmup: prime i-cache, branch predictors, TLB. */\n"
        << "    for (uint64_t i = 0; i < warmup; ++i) {\n"
        << "        kernel(i);\n"
        << "        lshaz_do_not_optimize(i);\n"
        << "    }\n"
        << "    lshaz_clobber_memory();\n\n"
-       << "    // Measurement phase\n"
+       << "    /* Measurement: lfence-bracketed rdtsc per iteration. */\n"
        << "    samples.resize(count);\n"
        << "    for (uint64_t i = 0; i < count; ++i) {\n"
        << "        samples[i].tsc_start = lshaz_rdtsc();\n"
@@ -120,7 +119,8 @@ ExperimentFile ExperimentSynthesizer::generateHarness(
        << "        else if (strcmp(argv[i], \"--variant\") == 0 && i+1 < argc)\n"
        << "            variant = argv[++i];\n"
        << "    }\n\n"
-       << "    pin_thread(core);\n\n"
+       << "    pin_thread(core);\n"
+       << "    (void)std::system(\"mkdir -p results\");\n\n"
        << "    std::vector<LatencySample> samples;\n\n"
        << "    if (strcmp(variant, \"treatment\") == 0) {\n"
        << "        run_variant(treatment_setup, treatment_kernel,\n"
@@ -143,17 +143,15 @@ ExperimentFile ExperimentSynthesizer::generateBuildScript(
     std::ostringstream os;
     os << "#!/bin/bash\n"
        << "set -euo pipefail\n\n"
-       << "# Auto-generated build script for " << hyp.hypothesisId << "\n"
-       << "# Separate compilation units prevent cross-variant optimization.\n\n"
+       << "# " << hyp.hypothesisId << "\n"
+       << "# Separate TUs prevent cross-variant optimization.\n\n"
        << "CXX=${CXX:-g++}\n"
        << "FLAGS=\"-O2 -march=native -fno-lto -std=c++20 -pthread\"\n\n"
        << "mkdir -p build results\n\n"
        << "$CXX $FLAGS -c src/treatment.cpp -o build/treatment.o\n"
        << "$CXX $FLAGS -c src/control.cpp -o build/control.o\n"
-       << "$CXX $FLAGS src/harness.cpp build/treatment.o "
-       << "-o experiment_treatment -Isrc\n"
-       << "$CXX $FLAGS src/harness.cpp build/control.o "
-       << "-o experiment_control -Isrc\n\n"
+       << "$CXX $FLAGS src/harness.cpp build/treatment.o build/control.o "
+       << "-o experiment -Isrc\n\n"
        << "echo \"[lshaz] Build complete\"\n";
 
     return {"scripts/build.sh", os.str()};
@@ -165,7 +163,7 @@ ExperimentFile ExperimentSynthesizer::generateRunAll(
     std::ostringstream os;
     os << "#!/bin/bash\n"
        << "set -euo pipefail\n\n"
-       << "# Pre-flight: check perf access\n"
+       << "# Bail early if perf_event_paranoid blocks PMU access.\n"
        << "if [ -f /proc/sys/kernel/perf_event_paranoid ]; then\n"
        << "  PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid)\n"
        << "  if [ \"$PARANOID\" -gt 1 ] && [ \"$(id -u)\" -ne 0 ]; then\n"
@@ -177,25 +175,25 @@ ExperimentFile ExperimentSynthesizer::generateRunAll(
        << "fi\n\n"
        << "echo \"[lshaz] Running full experiment: "
        << plan.hypothesisId << "\"\n\n"
-       << "# Environment setup (requires root)\n"
+       << "# Pin frequency, disable turbo/THP/ASLR/C-states.\n"
        << "sudo bash scripts/setup_env.sh\n\n"
        << "# Build\n"
        << "bash scripts/build.sh\n\n"
        << "mkdir -p results\n\n"
        << "# Run treatment\n"
-       << "./experiment_treatment --variant treatment\n\n"
+       << "./experiment --variant treatment\n\n"
        << "# Run control\n"
-       << "./experiment_control --variant control\n\n"
-       << "# PMU collection\n";
+       << "./experiment --variant control\n\n"
+       << "# PMU collection passes.\n";
 
     for (const auto &script : plan.scripts) {
         if (script.name == "setup_env.sh" || script.name == "teardown_env.sh")
             continue;
-        os << "bash scripts/" << script.name << " treatment\n";
-        os << "bash scripts/" << script.name << " control\n\n";
+        os << "bash scripts/" << script.name << "\n";
+        os << "bash scripts/" << script.name << "\n\n";
     }
 
-    os << "# Environment teardown\n"
+    os << "# Restore.\n"
        << "sudo bash scripts/teardown_env.sh\n\n"
        << "echo \"[lshaz] Experiment complete. Results in results/\"\n";
 
@@ -206,19 +204,17 @@ ExperimentFile ExperimentSynthesizer::generateMakefile() {
     std::ostringstream os;
     os << "CXX ?= g++\n"
        << "CXXFLAGS = -O2 -march=native -fno-lto -std=c++20 -pthread\n\n"
-       << "all: experiment_treatment experiment_control\n\n"
+       << "all: experiment\n\n"
        << "build/treatment.o: src/treatment.cpp src/common.h\n"
        << "\t@mkdir -p build\n"
        << "\t$(CXX) $(CXXFLAGS) -c $< -o $@ -Isrc\n\n"
        << "build/control.o: src/control.cpp src/common.h\n"
        << "\t@mkdir -p build\n"
        << "\t$(CXX) $(CXXFLAGS) -c $< -o $@ -Isrc\n\n"
-       << "experiment_treatment: src/harness.cpp build/treatment.o\n"
-       << "\t$(CXX) $(CXXFLAGS) $^ -o $@ -Isrc\n\n"
-       << "experiment_control: src/harness.cpp build/control.o\n"
+       << "experiment: src/harness.cpp build/treatment.o build/control.o\n"
        << "\t$(CXX) $(CXXFLAGS) $^ -o $@ -Isrc\n\n"
        << "clean:\n"
-       << "\trm -rf build experiment_treatment experiment_control results\n\n"
+       << "\trm -rf build experiment results\n\n"
        << ".PHONY: all clean\n";
 
     return {"Makefile", os.str()};
@@ -284,6 +280,628 @@ ExperimentFile ExperimentSynthesizer::generateHypothesisJson(
     return {"hypothesis.json", os.str()};
 }
 
+/*
+ * Per-hazard-class kernel synthesis.
+ *
+ * Each pair (treatment, control) isolates exactly one structural variable.
+ * Treatment reproduces the hazard; control removes it. Both are compiled
+ * as separate TUs and linked into a single binary to prevent the compiler
+ * from optimizing across the comparison boundary.
+ *
+ * Invariant: every kernel defines exactly {setup, teardown, kernel}.
+ * The harness calls them via function pointer — no devirtualization.
+ */
+
+namespace {
+
+unsigned evidenceUnsigned(const LatencyHypothesis &hyp, const char *key,
+                          unsigned fallback) {
+    auto it = hyp.structuralEvidence.find(key);
+    if (it == hyp.structuralEvidence.end()) return fallback;
+    std::string val = it->second;
+    if (!val.empty() && val.back() == 'B') val.pop_back();
+    try { return static_cast<unsigned>(std::stoul(val)); }
+    catch (...) { return fallback; }
+}
+
+std::string evidenceStr(const LatencyHypothesis &hyp, const char *key,
+                        const char *fallback = "") {
+    auto it = hyp.structuralEvidence.find(key);
+    if (it == hyp.structuralEvidence.end()) return fallback;
+    return it->second;
+}
+
+unsigned padToLine(unsigned sz) { return ((sz + 63u) / 64u) * 64u; }
+
+} // anonymous namespace
+
+/* FL001 — CacheGeometry: multi-line struct vs single-line aligned. */
+static ExperimentFile genTreatmentCacheGeometry(const LatencyHypothesis &hyp) {
+    unsigned sz = evidenceUnsigned(hyp, "sizeof", 128);
+    unsigned nlines = evidenceUnsigned(hyp, "lines_spanned", 2);
+    if (sz <= 64) sz = 65; /* must span >1 line */
+
+    std::ostringstream os;
+    os << "// Treatment kernel: CacheGeometry (FL001)\n"
+       << "// Original struct size: " << sz << "B spanning " << nlines
+       << " cache line(s)\n"
+       << "#include \"common.h\"\n\n"
+       << "struct Treatment {\n"
+       << "    char payload[" << sz << "];\n"
+       << "};\n\n"
+       << "static constexpr unsigned N = 4096;\n"
+       << "static Treatment *items;\n\n"
+       << "void treatment_setup() {\n"
+       << "    items = new Treatment[N];\n"
+       << "    memset(items, 0x42, sizeof(Treatment) * N);\n"
+       << "}\n\n"
+       << "void treatment_teardown() { delete[] items; }\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    auto &t = items[iteration % N];\n"
+       << "    /* Touch first+last byte: forces load across line boundary. */\n"
+       << "    t.payload[0]++;\n"
+       << "    t.payload[" << (sz - 1) << "]++;\n"
+       << "    lshaz_do_not_optimize(t);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlCacheGeometry(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: CacheGeometry (FL001)\n"
+       << "// Struct fits within a single 64B cache line.\n"
+       << "#include \"common.h\"\n\n"
+       << "struct alignas(64) Control {\n"
+       << "    char payload[56];\n"
+       << "};\n\n"
+       << "static constexpr unsigned N = 4096;\n"
+       << "static Control *items;\n\n"
+       << "void control_setup() {\n"
+       << "    items = new Control[N];\n"
+       << "    memset(items, 0x42, sizeof(Control) * N);\n"
+       << "}\n\n"
+       << "void control_teardown() { delete[] items; }\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    auto &c = items[iteration % N];\n"
+       << "    c.payload[0]++;\n"
+       << "    c.payload[55]++;\n"
+       << "    lshaz_do_not_optimize(c);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL002 — FalseSharing: adjacent atomics on same line vs padded. */
+static ExperimentFile genTreatmentFalseSharing(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: FalseSharing (FL002)\n"
+       << "// Two atomics on the same cache line.\n"
+       << "#include \"common.h\"\n"
+       << "#include <thread>\n\n"
+       << "struct Contended {\n"
+       << "    std::atomic<uint64_t> a{0};\n"
+       << "    std::atomic<uint64_t> b{0};\n"
+       << "};\n\n"
+       << "static Contended *shared;\n\n"
+       << "void treatment_setup() {\n"
+       << "    shared = new Contended;\n"
+       << "}\n\n"
+       << "void treatment_teardown() { delete shared; }\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    /* Single-writer side of the false-sharing pair. */\n"
+       << "    shared->a.store(iteration, std::memory_order_relaxed);\n"
+       << "    lshaz_do_not_optimize(shared->a);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlFalseSharing(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: FalseSharing (FL002)\n"
+       << "// Each atomic on its own cache line.\n"
+       << "#include \"common.h\"\n"
+       << "#include <thread>\n\n"
+       << "struct alignas(64) PaddedA {\n"
+       << "    std::atomic<uint64_t> a{0};\n"
+       << "};\n"
+       << "struct alignas(64) PaddedB {\n"
+       << "    std::atomic<uint64_t> b{0};\n"
+       << "};\n\n"
+       << "static PaddedA *sa;\n"
+       << "static PaddedB *sb;\n\n"
+       << "void control_setup() {\n"
+       << "    sa = new PaddedA;\n"
+       << "    sb = new PaddedB;\n"
+       << "}\n\n"
+       << "void control_teardown() { delete sa; delete sb; }\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    sa->a.store(iteration, std::memory_order_relaxed);\n"
+       << "    lshaz_do_not_optimize(sa->a);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL010 — AtomicOrdering: seq_cst vs release/acquire. */
+static ExperimentFile genTreatmentAtomicOrdering(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: AtomicOrdering (FL010)\n"
+       << "// seq_cst store in hot loop.\n"
+       << "#include \"common.h\"\n\n"
+       << "static std::atomic<uint64_t> counter{0};\n\n"
+       << "void treatment_setup() { counter.store(0); }\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    counter.store(iteration, std::memory_order_seq_cst);\n"
+       << "    uint64_t v = counter.load(std::memory_order_seq_cst);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlAtomicOrdering(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: AtomicOrdering (FL010)\n"
+       << "// release/acquire in hot loop.\n"
+       << "#include \"common.h\"\n\n"
+       << "static std::atomic<uint64_t> counter{0};\n\n"
+       << "void control_setup() { counter.store(0); }\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    counter.store(iteration, std::memory_order_release);\n"
+       << "    uint64_t v = counter.load(std::memory_order_acquire);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL011 — AtomicContention: shared atomic vs thread-local sharding. */
+static ExperimentFile genTreatmentAtomicContention(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: AtomicContention (FL011)\n"
+       << "#include \"common.h\"\n\n"
+       << "static std::atomic<uint64_t> shared_counter{0};\n\n"
+       << "void treatment_setup() { shared_counter.store(0); }\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    shared_counter.fetch_add(1, std::memory_order_relaxed);\n"
+       << "    lshaz_do_not_optimize(shared_counter);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlAtomicContention(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: AtomicContention (FL011)\n"
+       << "// Thread-local counter, no contention.\n"
+       << "#include \"common.h\"\n\n"
+       << "static thread_local uint64_t local_counter = 0;\n\n"
+       << "void control_setup() { local_counter = 0; }\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    ++local_counter;\n"
+       << "    lshaz_do_not_optimize(local_counter);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL012 — LockContention: mutex vs lock-free atomic. */
+static ExperimentFile genTreatmentLockContention(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: LockContention (FL012)\n"
+       << "#include \"common.h\"\n"
+       << "#include <mutex>\n\n"
+       << "static std::mutex mtx;\n"
+       << "static uint64_t shared_val = 0;\n\n"
+       << "void treatment_setup() { shared_val = 0; }\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    std::lock_guard<std::mutex> lock(mtx);\n"
+       << "    shared_val += iteration;\n"
+       << "    lshaz_do_not_optimize(shared_val);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlLockContention(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: LockContention (FL012)\n"
+       << "// Lock-free atomic increment.\n"
+       << "#include \"common.h\"\n\n"
+       << "static std::atomic<uint64_t> shared_val{0};\n\n"
+       << "void control_setup() { shared_val.store(0); }\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    shared_val.fetch_add(iteration, std::memory_order_relaxed);\n"
+       << "    lshaz_do_not_optimize(shared_val);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL020 — HeapAllocation: per-iteration malloc vs preallocated. */
+static ExperimentFile genTreatmentHeapAllocation(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: HeapAllocation (FL020)\n"
+       << "// malloc/free per iteration.\n"
+       << "#include \"common.h\"\n"
+       << "#include <cstdlib>\n\n"
+       << "void treatment_setup() {}\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    void *p = malloc(256);\n"
+       << "    memset(p, static_cast<int>(iteration & 0xFF), 256);\n"
+       << "    lshaz_do_not_optimize(p);\n"
+       << "    free(p);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlHeapAllocation(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: HeapAllocation (FL020)\n"
+       << "// Pre-allocated buffer, no malloc in hot loop.\n"
+       << "#include \"common.h\"\n\n"
+       << "static char *buf;\n\n"
+       << "void control_setup() {\n"
+       << "    buf = static_cast<char *>(malloc(256));\n"
+       << "}\n\n"
+       << "void control_teardown() { free(buf); }\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    memset(buf, static_cast<int>(iteration & 0xFF), 256);\n"
+       << "    lshaz_do_not_optimize(buf);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL021 — StackPressure: large frame (>1 page) vs sub-page. */
+static ExperimentFile genTreatmentStackPressure(const LatencyHypothesis &hyp) {
+    unsigned frame = evidenceUnsigned(hyp, "estimated_frame", 8192);
+    if (frame < 4096) frame = 4096; /* floor at one page */
+    std::ostringstream os;
+    os << "// Treatment kernel: StackPressure (FL021)\n"
+       << "// Large stack frame: " << frame << " bytes.\n"
+       << "#include \"common.h\"\n\n"
+       << "void treatment_setup() {}\n"
+       << "void treatment_teardown() {}\n\n"
+       << "__attribute__((noinline))\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    char buf[" << frame << "];\n"
+       << "    memset(buf, static_cast<int>(iteration & 0xFF), sizeof(buf));\n"
+       << "    lshaz_do_not_optimize(buf[0]);\n"
+       << "    lshaz_do_not_optimize(buf[" << (frame - 1) << "]);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlStackPressure(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: StackPressure (FL021)\n"
+       << "// Small stack frame (< one page).\n"
+       << "#include \"common.h\"\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "__attribute__((noinline))\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    char buf[64];\n"
+       << "    memset(buf, static_cast<int>(iteration & 0xFF), sizeof(buf));\n"
+       << "    lshaz_do_not_optimize(buf[0]);\n"
+       << "    lshaz_do_not_optimize(buf[63]);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL030 — VirtualDispatch: polymorphic (4 targets) vs monomorphic. */
+static ExperimentFile genTreatmentVirtualDispatch(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: VirtualDispatch (FL030)\n"
+       << "#include \"common.h\"\n\n"
+       << "struct Base {\n"
+       << "    virtual uint64_t process(uint64_t v) = 0;\n"
+       << "    virtual ~Base() = default;\n"
+       << "};\n"
+       << "struct ImplA : Base { uint64_t process(uint64_t v) override { return v + 1; } };\n"
+       << "struct ImplB : Base { uint64_t process(uint64_t v) override { return v + 2; } };\n"
+       << "struct ImplC : Base { uint64_t process(uint64_t v) override { return v + 3; } };\n"
+       << "struct ImplD : Base { uint64_t process(uint64_t v) override { return v + 4; } };\n\n"
+       << "static constexpr unsigned NTYPES = 4;\n"
+       << "static Base *targets[NTYPES];\n\n"
+       << "void treatment_setup() {\n"
+       << "    targets[0] = new ImplA;\n"
+       << "    targets[1] = new ImplB;\n"
+       << "    targets[2] = new ImplC;\n"
+       << "    targets[3] = new ImplD;\n"
+       << "}\n\n"
+       << "void treatment_teardown() {\n"
+       << "    for (auto *t : targets) delete t;\n"
+       << "}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = targets[iteration % NTYPES]->process(iteration);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlVirtualDispatch(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: VirtualDispatch (FL030)\n"
+       << "// Direct (non-virtual) call — monomorphic.\n"
+       << "#include \"common.h\"\n\n"
+       << "struct Direct {\n"
+       << "    uint64_t process(uint64_t v) { return v + 1; }\n"
+       << "};\n\n"
+       << "static Direct *target;\n\n"
+       << "void control_setup() { target = new Direct; }\n"
+       << "void control_teardown() { delete target; }\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = target->process(iteration);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL031 — StdFunction: type-erased callable vs template-inlined. */
+static ExperimentFile genTreatmentStdFunction(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: StdFunction (FL031)\n"
+       << "#include \"common.h\"\n"
+       << "#include <functional>\n\n"
+       << "static std::function<uint64_t(uint64_t)> fn;\n\n"
+       << "void treatment_setup() {\n"
+       << "    fn = [](uint64_t v) -> uint64_t { return v + 1; };\n"
+       << "}\n\n"
+       << "void treatment_teardown() { fn = nullptr; }\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = fn(iteration);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlStdFunction(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: StdFunction (FL031)\n"
+       << "// Template callable — no indirection.\n"
+       << "#include \"common.h\"\n\n"
+       << "static auto fn = [](uint64_t v) -> uint64_t { return v + 1; };\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = fn(iteration);\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL040 — GlobalState: mutable global vs local accumulator. */
+static ExperimentFile genTreatmentGlobalState(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: GlobalState (FL040)\n"
+       << "// Mutable global accessed in hot loop.\n"
+       << "#include \"common.h\"\n\n"
+       << "static uint64_t global_state = 0;\n\n"
+       << "void treatment_setup() { global_state = 0; }\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    global_state += iteration;\n"
+       << "    lshaz_do_not_optimize(global_state);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlGlobalState(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: GlobalState (FL040)\n"
+       << "// Local accumulator, no global state.\n"
+       << "#include \"common.h\"\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    uint64_t local = iteration;\n"
+       << "    local += iteration;\n"
+       << "    lshaz_do_not_optimize(local);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL041 — ContendedQueue: packed head/tail vs cache-line-padded. */
+static ExperimentFile genTreatmentContendedQueue(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: ContendedQueue (FL041)\n"
+       << "// head/tail atomics on same cache line.\n"
+       << "#include \"common.h\"\n\n"
+       << "struct Queue {\n"
+       << "    std::atomic<uint64_t> head{0};\n"
+       << "    std::atomic<uint64_t> tail{0};\n"
+       << "};\n\n"
+       << "static Queue *q;\n\n"
+       << "void treatment_setup() { q = new Queue; }\n"
+       << "void treatment_teardown() { delete q; }\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    q->tail.store(iteration, std::memory_order_release);\n"
+       << "    uint64_t h = q->head.load(std::memory_order_acquire);\n"
+       << "    lshaz_do_not_optimize(h);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlContendedQueue(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: ContendedQueue (FL041)\n"
+       << "// head/tail on separate cache lines.\n"
+       << "#include \"common.h\"\n\n"
+       << "struct alignas(64) PaddedQueue {\n"
+       << "    alignas(64) std::atomic<uint64_t> head{0};\n"
+       << "    alignas(64) std::atomic<uint64_t> tail{0};\n"
+       << "};\n\n"
+       << "static PaddedQueue *q;\n\n"
+       << "void control_setup() { q = new PaddedQueue; }\n"
+       << "void control_teardown() { delete q; }\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    q->tail.store(iteration, std::memory_order_release);\n"
+       << "    uint64_t h = q->head.load(std::memory_order_acquire);\n"
+       << "    lshaz_do_not_optimize(h);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL050 — DeepConditional: deep branch chain vs branchless. */
+static ExperimentFile genTreatmentDeepConditional(const LatencyHypothesis &hyp) {
+    unsigned depth = evidenceUnsigned(hyp, "depth", 8);
+    if (depth < 4) depth = 4; /* minimum for measurable misprediction */
+    std::ostringstream os;
+    os << "// Treatment kernel: DeepConditional (FL050)\n"
+       << "// " << depth << "-deep branch chain.\n"
+       << "#include \"common.h\"\n\n"
+       << "void treatment_setup() {}\n"
+       << "void treatment_teardown() {}\n\n"
+       << "__attribute__((noinline))\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = iteration;\n";
+    for (unsigned i = 0; i < depth; ++i)
+        os << "    if (v & " << (1ULL << (i % 16)) << ") v += " << (i + 1) << ";\n";
+    os << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlDeepConditional(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: DeepConditional (FL050)\n"
+       << "// Branchless arithmetic.\n"
+       << "#include \"common.h\"\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "__attribute__((noinline))\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    uint64_t v = iteration * 3 + 7;\n"
+       << "    lshaz_do_not_optimize(v);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* FL060 — NUMALocality: heap-allocated (first-touch) vs stack-local. */
+static ExperimentFile genTreatmentNUMALocality(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Treatment kernel: NUMALocality (FL060)\n"
+       << "// Allocate on node 0, access from (potentially) another node.\n"
+       << "#include \"common.h\"\n\n"
+       << "static constexpr unsigned N = 1 << 20; // 1M entries\n"
+       << "static uint64_t *data;\n\n"
+       << "void treatment_setup() {\n"
+       << "    data = new uint64_t[N];\n"
+       << "    memset(data, 0x42, N * sizeof(uint64_t));\n"
+       << "}\n\n"
+       << "void treatment_teardown() { delete[] data; }\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    data[iteration % N] += iteration;\n"
+       << "    lshaz_do_not_optimize(data[iteration % N]);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlNUMALocality(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "// Control kernel: NUMALocality (FL060)\n"
+       << "// Local stack buffer — guaranteed same-node.\n"
+       << "#include \"common.h\"\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    uint64_t local[64];\n"
+       << "    local[iteration % 64] += iteration;\n"
+       << "    lshaz_do_not_optimize(local[iteration % 64]);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+/* Fallback: stub kernels for hazard classes without synthetic reproduction. */
+static ExperimentFile genTreatmentFallback(const LatencyHypothesis &hyp) {
+    std::ostringstream os;
+    os << "// Treatment kernel: " << hazardClassName(hyp.hazardClass) << "\n"
+       << "// Placeholder — edit to reproduce the specific hazard.\n"
+       << "#include \"common.h\"\n\n"
+       << "void treatment_setup() {}\n"
+       << "void treatment_teardown() {}\n\n"
+       << "void treatment_kernel(uint64_t iteration) {\n"
+       << "    lshaz_do_not_optimize(iteration);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlFallback(const LatencyHypothesis &hyp) {
+    std::ostringstream os;
+    os << "// Control kernel: " << hazardClassName(hyp.hazardClass) << "\n"
+       << "// Placeholder — edit to implement the mitigated variant.\n"
+       << "#include \"common.h\"\n\n"
+       << "void control_setup() {}\n"
+       << "void control_teardown() {}\n\n"
+       << "void control_kernel(uint64_t iteration) {\n"
+       << "    lshaz_do_not_optimize(iteration);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
+ExperimentFile ExperimentSynthesizer::generateTreatment(
+    const LatencyHypothesis &hyp) {
+    switch (hyp.hazardClass) {
+        case HazardClass::CacheGeometry:       return genTreatmentCacheGeometry(hyp);
+        case HazardClass::FalseSharing:        return genTreatmentFalseSharing(hyp);
+        case HazardClass::AtomicOrdering:      return genTreatmentAtomicOrdering(hyp);
+        case HazardClass::AtomicContention:    return genTreatmentAtomicContention(hyp);
+        case HazardClass::LockContention:      return genTreatmentLockContention(hyp);
+        case HazardClass::HeapAllocation:      return genTreatmentHeapAllocation(hyp);
+        case HazardClass::StackPressure:       return genTreatmentStackPressure(hyp);
+        case HazardClass::VirtualDispatch:     return genTreatmentVirtualDispatch(hyp);
+        case HazardClass::StdFunction:         return genTreatmentStdFunction(hyp);
+        case HazardClass::GlobalState:         return genTreatmentGlobalState(hyp);
+        case HazardClass::ContendedQueue:      return genTreatmentContendedQueue(hyp);
+        case HazardClass::DeepConditional:     return genTreatmentDeepConditional(hyp);
+        case HazardClass::NUMALocality:        return genTreatmentNUMALocality(hyp);
+        default:                               return genTreatmentFallback(hyp);
+    }
+}
+
+ExperimentFile ExperimentSynthesizer::generateControl(
+    const LatencyHypothesis &hyp) {
+    switch (hyp.hazardClass) {
+        case HazardClass::CacheGeometry:       return genControlCacheGeometry(hyp);
+        case HazardClass::FalseSharing:        return genControlFalseSharing(hyp);
+        case HazardClass::AtomicOrdering:      return genControlAtomicOrdering(hyp);
+        case HazardClass::AtomicContention:    return genControlAtomicContention(hyp);
+        case HazardClass::LockContention:      return genControlLockContention(hyp);
+        case HazardClass::HeapAllocation:      return genControlHeapAllocation(hyp);
+        case HazardClass::StackPressure:       return genControlStackPressure(hyp);
+        case HazardClass::VirtualDispatch:     return genControlVirtualDispatch(hyp);
+        case HazardClass::StdFunction:         return genControlStdFunction(hyp);
+        case HazardClass::GlobalState:         return genControlGlobalState(hyp);
+        case HazardClass::ContendedQueue:      return genControlContendedQueue(hyp);
+        case HazardClass::DeepConditional:     return genControlDeepConditional(hyp);
+        case HazardClass::NUMALocality:        return genControlNUMALocality(hyp);
+        default:                               return genControlFallback(hyp);
+    }
+}
+
 ExperimentBundle ExperimentSynthesizer::synthesize(
     const LatencyHypothesis &hypothesis,
     const MeasurementPlan &plan,
@@ -297,6 +915,8 @@ ExperimentBundle ExperimentSynthesizer::synthesize(
 
     bundle.files.push_back(generateCommonHeader(hypothesis));
     bundle.files.push_back(generateHarness(hypothesis));
+    bundle.files.push_back(generateTreatment(hypothesis));
+    bundle.files.push_back(generateControl(hypothesis));
     bundle.files.push_back(generateBuildScript(hypothesis));
     bundle.files.push_back(generateMakefile());
     bundle.files.push_back(generateReadme(hypothesis));

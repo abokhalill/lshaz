@@ -6,6 +6,7 @@
 #include "lshaz/hypothesis/PMUCounter.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,7 @@ struct LatencyHypothesis {
 
     std::vector<ConfoundControl> confoundControls;
     std::vector<double> structuralFeatures;
+    std::map<std::string, std::string> structuralEvidence;
     EvidenceTier evidenceTier = EvidenceTier::Speculative;
 
     ExperimentVerdict verdict = ExperimentVerdict::Pending;

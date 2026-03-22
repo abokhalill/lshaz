@@ -34,6 +34,8 @@ public:
 private:
     static ExperimentFile generateCommonHeader(const LatencyHypothesis &hyp);
     static ExperimentFile generateHarness(const LatencyHypothesis &hyp);
+    static ExperimentFile generateTreatment(const LatencyHypothesis &hyp);
+    static ExperimentFile generateControl(const LatencyHypothesis &hyp);
     static ExperimentFile generateBuildScript(const LatencyHypothesis &hyp);
     static ExperimentFile generateRunAll(const MeasurementPlan &plan);
     static ExperimentFile generateMakefile();
