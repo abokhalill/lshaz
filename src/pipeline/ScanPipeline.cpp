@@ -41,6 +41,7 @@
 #include <string>
 #include <thread>
 #include <map>
+#include <unordered_set>
 #include <vector>
 
 #include <sys/types.h>
@@ -632,6 +633,7 @@ static void runIRPass(
         const ScanRequest &req,
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources,
+        const std::unordered_set<std::string> &failedFiles,
         std::vector<Diagnostic> &diagnostics,
         ExecutionMetadata &meta) {
 
@@ -641,6 +643,10 @@ static void runIRPass(
     std::vector<IRJob> jobs;
 
     for (const auto &srcPath : sources) {
+        // AST-failed TUs already reported; re-driving clang would just
+        // duplicate the same errors.
+        if (failedFiles.count(srcPath))
+            continue;
         auto cmds = compDB.getCompileCommands(srcPath);
         if (cmds.empty())
             continue;
@@ -1389,10 +1395,17 @@ ScanResult ScanPipeline::run(
         }
     }
 
-    // IR analysis pass.
-    if (request.ir.enabled && toolRet == 0) {
+    // IR analysis pass. gating on toolRet==0 meant one broken TU anywhere
+    // silently disabled refinement for the entire scan — confidence on
+    // every finding shifted because of an unrelated file. refine what
+    // parsed; failures are already reported per-TU.
+    if (request.ir.enabled && sources.size() > failedTUsDetailed.size()) {
         report("ir", "IR emission and analysis");
-        runIRPass(request, compDB, sources,
+        std::unordered_set<std::string> failedFiles;
+        failedFiles.reserve(failedTUsDetailed.size());
+        for (const auto &ftu : failedTUsDetailed)
+            failedFiles.insert(ftu.file);
+        runIRPass(request, compDB, sources, failedFiles,
                   result.diagnostics, result.metadata);
     }
 
