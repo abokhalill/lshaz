@@ -10,7 +10,10 @@ namespace lshaz {
 
 class DiagnosticRefiner {
 public:
-    explicit DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles);
+    // stackFrameWarnBytes: same threshold the AST rule (FL021) used —
+    // suppression must not judge against a different bar than emission.
+    explicit DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles,
+                               uint64_t stackFrameWarnBytes = 2048);
 
     // Refine diagnostics in-place using IR evidence.
     // May adjust confidence, add escalations, or suppress false positives.
@@ -44,6 +47,7 @@ private:
     static bool filePathSuffixMatch(const std::string &a, const std::string &b);
 
     const IRAnalyzer::ProfileMap &profiles_;
+    uint64_t stackFrameWarnBytes_;
 };
 
 } // namespace lshaz

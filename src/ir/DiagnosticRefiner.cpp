@@ -9,8 +9,9 @@
 
 namespace lshaz {
 
-DiagnosticRefiner::DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles)
-    : profiles_(profiles) {}
+DiagnosticRefiner::DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles,
+                                     uint64_t stackFrameWarnBytes)
+    : profiles_(profiles), stackFrameWarnBytes_(stackFrameWarnBytes) {}
 
 bool DiagnosticRefiner::filePathSuffixMatch(const std::string &a,
                                              const std::string &b) {
@@ -82,7 +83,7 @@ const IRFunctionProfile *DiagnosticRefiner::findProfile(
     }
 
     // among overloads, pick deterministically: exact demangled name wins,
-    // then lowest mangled name — never hash-map iteration order.
+    // then lowest mangled name; never hash-map iteration order.
     const IRFunctionProfile *best = nullptr;
     int bestRank = 3;
     for (const auto &[mangled, profile] : profiles_) {
@@ -287,7 +288,7 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
         return;
 
     uint64_t irStackSize = profile->totalAllocaBytes;
-    constexpr uint64_t threshold = 2048;
+    const uint64_t threshold = stackFrameWarnBytes_;
 
     // IR-precise frame below threshold: suppress the AST-based diagnostic.
     if (irStackSize < threshold && irStackSize > 0) {

@@ -797,7 +797,8 @@ static void runIRPass(
     }
 
     if (!irAnalyzer.profiles().empty()) {
-        DiagnosticRefiner refiner(irAnalyzer.profiles());
+        DiagnosticRefiner refiner(irAnalyzer.profiles(),
+                                  req.config.stackFrameWarnBytes);
         refiner.refine(diagnostics);
     }
 }
