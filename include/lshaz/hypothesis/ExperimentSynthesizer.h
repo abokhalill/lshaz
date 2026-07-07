@@ -37,10 +37,12 @@ private:
     static ExperimentFile generateTreatment(const LatencyHypothesis &hyp);
     static ExperimentFile generateControl(const LatencyHypothesis &hyp);
     static ExperimentFile generateBuildScript(const LatencyHypothesis &hyp);
-    static ExperimentFile generateRunAll(const MeasurementPlan &plan);
+    static ExperimentFile generateRunAll(const LatencyHypothesis &hyp,
+                                         const MeasurementPlan &plan);
     static ExperimentFile generateMakefile();
     static ExperimentFile generateReadme(const LatencyHypothesis &hyp);
     static ExperimentFile generateHypothesisJson(const LatencyHypothesis &hyp);
+    static ExperimentFile generateAnalyze(const LatencyHypothesis &hyp);
 };
 
 } // namespace lshaz
