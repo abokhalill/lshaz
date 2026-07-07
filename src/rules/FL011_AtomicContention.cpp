@@ -24,6 +24,7 @@ struct AtomicWriteSite {
     clang::SourceLocation loc;
     std::string op;
     std::string varName;
+    std::string ownerType; // canonical qualified name of the member's record
     unsigned inLoop = 0;
 };
 
@@ -91,14 +92,20 @@ public:
             return true;
 
         std::string varName = "<unknown>";
+        std::string ownerType;
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(
-                obj->IgnoreImplicit()))
+                obj->IgnoreImplicit())) {
             varName = ME->getMemberDecl()->getNameAsString();
-        else if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(
-                     obj->IgnoreImplicit()))
+            if (const auto *FD2 =
+                    llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl()))
+                ownerType = FD2->getParent()->getCanonicalDecl()
+                                ->getQualifiedNameAsString();
+        } else if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(
+                       obj->IgnoreImplicit()))
             varName = DRE->getDecl()->getNameAsString();
 
-        sites_.push_back({E->getBeginLoc(), name, varName, inLoop_});
+        sites_.push_back({E->getBeginLoc(), name, varName,
+                          std::move(ownerType), inLoop_});
         return true;
     }
 
@@ -123,7 +130,7 @@ public:
             default: return true;
         }
 
-        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", inLoop_});
+        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", {}, inLoop_});
         return true;
     }
 
@@ -249,12 +256,23 @@ public:
             opsStr += visitor.sites()[i].op + "(" + visitor.sites()[i].varName + ")";
             if (i + 1 < visitor.sites().size()) opsStr += ", ";
         }
+        std::string ownerTypes;
+        for (const auto &s : visitor.sites()) {
+            if (s.ownerType.empty()) continue;
+            if ((";" + ownerTypes + ";").find(";" + s.ownerType + ";") !=
+                std::string::npos)
+                continue;
+            if (!ownerTypes.empty()) ownerTypes += ";";
+            ownerTypes += s.ownerType;
+        }
         diag.structuralEvidence = {
             {"function", FD->getQualifiedNameAsString()},
             {"atomic_writes", std::to_string(writeCount)},
             {"loop_writes", hasLoopWrite ? "yes" : "no"},
             {"ops", opsStr},
         };
+        if (!ownerTypes.empty())
+            diag.structuralEvidence["type_name"] = ownerTypes;
 
         diag.mitigation =
             "Shard atomic state per-core to eliminate cross-core RFO. "

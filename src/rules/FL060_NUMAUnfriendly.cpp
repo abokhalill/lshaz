@@ -161,6 +161,7 @@ public:
             {"atomics", hasAtomics ? "yes" : "no"},
             {"thread_escape", "yes"},
             {"numa_placement", std::string(numaPlacementName(placement))},
+            {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
         diag.mitigation =

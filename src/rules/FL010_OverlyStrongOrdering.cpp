@@ -25,6 +25,7 @@ struct SeqCstSite {
     clang::SourceLocation loc;
     std::string atomicOp;
     std::string varName;
+    std::string ownerType; // canonical qualified name of the member's record
     AtomicOpClass opClass = AtomicOpClass::RMW;
     unsigned inLoop = 0;
 };
@@ -152,9 +153,14 @@ public:
 
         // Extract variable name from the object expression.
         std::string varName = "<unknown>";
+        std::string ownerType;
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(
                 obj->IgnoreImplicit())) {
             varName = ME->getMemberDecl()->getNameAsString();
+            if (const auto *FD2 =
+                    llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl()))
+                ownerType = FD2->getParent()->getCanonicalDecl()
+                                ->getQualifiedNameAsString();
         } else if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(
                        obj->IgnoreImplicit())) {
             varName = DRE->getDecl()->getNameAsString();
@@ -166,7 +172,8 @@ public:
         else if (methodName == "store")
             opClass = AtomicOpClass::Store;
 
-        sites_.push_back({E->getBeginLoc(), methodName, varName, opClass, inLoop_});
+        sites_.push_back({E->getBeginLoc(), methodName, varName,
+                          std::move(ownerType), opClass, inLoop_});
         return true;
     }
 
@@ -192,7 +199,8 @@ public:
             default: return true;
         }
 
-        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", AtomicOpClass::RMW, inLoop_});
+        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", {},
+                          AtomicOpClass::RMW, inLoop_});
         return true;
     }
 
@@ -384,6 +392,8 @@ public:
                 {"total_seq_cst_in_func", std::to_string(atomicCount)},
                 {"target_arch", isARM ? "arm64" : "x86-64"},
             };
+            if (!site.ownerType.empty())
+                diag.structuralEvidence["type_name"] = site.ownerType;
 
             if (isARM) {
                 if (isStore) {

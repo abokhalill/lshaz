@@ -144,6 +144,7 @@ public:
             {"atomic_pairs_same_line", std::to_string(atomicPairs.size())},
             {"queue_heuristic", looksLikeQueue ? "yes" : "no"},
             {"head_tail_names", hasHeadTail ? "yes" : "no"},
+            {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
         diag.mitigation =

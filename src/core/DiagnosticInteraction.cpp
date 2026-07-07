@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace lshaz {
 
@@ -41,39 +42,51 @@ std::string diagnosticSiteKey(const Diagnostic &d) {
 void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
     const auto &matrix = InteractionEligibilityMatrix::instance();
 
+    // entity keys, not just file:line.
     std::unordered_map<std::string, std::vector<size_t>> siteGroups;
+    auto addKeys = [&](const Diagnostic &d, size_t i) {
+        if (!d.location.file.empty() && d.location.line > 0)
+            siteGroups[d.location.file + ":" +
+                       std::to_string(d.location.line)].push_back(i);
+        auto tit = d.structuralEvidence.find("type_name");
+        if (tit != d.structuralEvidence.end() && !tit->second.empty()) {
+            const std::string &ts = tit->second; /* ';'-separated */
+            size_t start = 0;
+            while (start < ts.size()) {
+                auto end = ts.find(';', start);
+                auto len = (end == std::string::npos) ? std::string::npos
+                                                      : end - start;
+                std::string t = ts.substr(start, len);
+                if (!t.empty())
+                    siteGroups["type:" + t].push_back(i);
+                if (end == std::string::npos) break;
+                start = end + 1;
+            }
+        }
+        if (!d.functionName.empty())
+            siteGroups["fn:" + d.functionName].push_back(i);
+    };
+
     for (size_t i = 0; i < diagnostics.size(); ++i) {
         /* Skip FL090/FL091 to avoid recursive synthesis. */
         if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
             continue;
-        auto hc = ruleToHazardClass(diagnostics[i].ruleID);
-        if (!hc)
+        if (diagnostics[i].suppressed)
             continue;
-        siteGroups[diagnosticSiteKey(diagnostics[i])].push_back(i);
-    }
-
-    /* Secondary grouping: same struct at different lines. */
-    std::unordered_map<std::string, std::vector<size_t>> structGroups;
-    for (size_t i = 0; i < diagnostics.size(); ++i) {
-        if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
+        if (!ruleToHazardClass(diagnostics[i].ruleID))
             continue;
-        auto it = diagnostics[i].structuralEvidence.find("struct");
-        if (it != diagnostics[i].structuralEvidence.end() && !it->second.empty())
-            structGroups["struct:" + it->second].push_back(i);
-    }
-
-    for (auto &[key, indices] : structGroups) {
-        auto &merged = siteGroups[key];
-        for (auto idx : indices) {
-            bool dup = false;
-            for (auto existing : merged)
-                if (existing == idx) { dup = true; break; }
-            if (!dup)
-                merged.push_back(idx);
-        }
+        addKeys(diagnostics[i], i);
     }
 
     std::vector<Diagnostic> synthesized;
+
+    /* one compound per (template, participant set): multi-key membership
+       (site + type + fn) must not multiply findings. */
+    std::unordered_set<std::string> emitted;
+    auto participantKey = [&](const Diagnostic &d) {
+        return d.ruleID + "@" + d.location.file + ":" +
+               std::to_string(d.location.line);
+    };
 
     std::vector<std::string> sortedKeys; /* deterministic iteration */
     sortedKeys.reserve(siteGroups.size());
@@ -121,6 +134,11 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
 
                 const auto &dA = diagnostics[entries[i].diagIdx];
                 const auto &dB = diagnostics[entries[j].diagIdx];
+
+                std::string pk = participantKey(dA), pkB = participantKey(dB);
+                if (pkB < pk) std::swap(pk, pkB);
+                if (!emitted.insert(tmpl->id + "|" + pk + "|" + pkB).second)
+                    continue;
 
                 Diagnostic compound;
                 compound.ruleID = "FL091";
@@ -202,6 +220,14 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 const auto &dA = diagnostics[matchedIndices[0]];
                 const auto &dB = diagnostics[matchedIndices[1]];
                 const auto &dC = diagnostics[matchedIndices[2]];
+
+                std::vector<std::string> pks = {participantKey(dA),
+                                                participantKey(dB),
+                                                participantKey(dC)};
+                std::sort(pks.begin(), pks.end());
+                if (!emitted.insert(tmpl.id + "|" + pks[0] + "|" + pks[1] +
+                                    "|" + pks[2]).second)
+                    continue;
 
                 Diagnostic compound;
                 compound.ruleID = "FL091";
