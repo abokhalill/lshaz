@@ -91,8 +91,12 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
                             else if (cur.location.line == prv.location.line) {
                                 if (cur.location.column < prv.location.column)
                                     better = true;
-                                else if (cur.location.column == prv.location.column)
-                                    better = cur.functionName < prv.functionName;
+                                else if (cur.location.column == prv.location.column) {
+                                    if (cur.functionName != prv.functionName)
+                                        better = cur.functionName < prv.functionName;
+                                    else
+                                        better = diagnosticContentLess(cur, prv);
+                                }
                             }
                         }
                     }

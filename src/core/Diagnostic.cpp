@@ -24,4 +24,24 @@ std::string Diagnostic::serializeEvidence() const {
     return os.str();
 }
 
+
+
+bool diagnosticContentLess(const Diagnostic &a, const Diagnostic &b) {
+    if (a.severity != b.severity)
+        return static_cast<uint8_t>(a.severity) < static_cast<uint8_t>(b.severity);
+    if (a.confidence != b.confidence)
+        return a.confidence < b.confidence;
+    if (a.evidenceTier != b.evidenceTier)
+        return static_cast<uint8_t>(a.evidenceTier) <
+               static_cast<uint8_t>(b.evidenceTier);
+    if (a.functionName != b.functionName)
+        return a.functionName < b.functionName;
+    if (a.title != b.title)
+        return a.title < b.title;
+    if (a.structuralEvidence != b.structuralEvidence)
+        return a.structuralEvidence < b.structuralEvidence;
+    if (a.escalations != b.escalations)
+        return a.escalations < b.escalations;
+    return a.mitigation < b.mitigation;
+}
 } // namespace lshaz

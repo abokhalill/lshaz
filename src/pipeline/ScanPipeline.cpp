@@ -962,7 +962,9 @@ static bool outputOrder(const Diagnostic &a, const Diagnostic &b) {
         return a.location.line < b.location.line;
     if (a.location.column != b.location.column)
         return a.location.column < b.location.column;
-    return a.ruleID < b.ruleID;
+    if (a.ruleID != b.ruleID)
+        return a.ruleID < b.ruleID;
+    return diagnosticContentLess(a, b);
 }
 
 static void filterAndSort(const FilterOptions &filter,
@@ -1318,7 +1320,9 @@ ScanResult ScanPipeline::run(
                       return a.location.line < b.location.line;
                   if (a.location.column != b.location.column)
                       return a.location.column < b.location.column;
-                  return a.functionName < b.functionName;
+                  if (a.functionName != b.functionName)
+                      return a.functionName < b.functionName;
+                  return diagnosticContentLess(a, b);
               });
 
     // FL040 reduce phase: aggregate per-TU write counts into a global verdict.

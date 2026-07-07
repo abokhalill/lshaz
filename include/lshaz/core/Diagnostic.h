@@ -73,4 +73,10 @@ struct Diagnostic {
     std::string serializeEvidence() const;
 };
 
+// strict-weak content order for diagnostics whose location keys collide
+// (macro-generated twins: one line, two symbols/types). every sort and
+// dedup tiebreak must bottom out here or shard arrival order leaks into
+// the output — std::sort is unstable.
+bool diagnosticContentLess(const Diagnostic &a, const Diagnostic &b);
+
 } // namespace lshaz
