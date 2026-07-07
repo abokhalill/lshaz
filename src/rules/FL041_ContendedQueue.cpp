@@ -121,8 +121,10 @@ public:
         diag.ruleID    = "FL041";
         diag.title     = "Contended Queue Pattern";
         diag.severity  = sev;
-        diag.confidence = 0.82;
-        diag.evidenceTier = EvidenceTier::Proven;
+        bool exactLayout = map.isCacheLineAligned();
+        diag.confidence = exactLayout ? 0.82 : 0.76;
+        diag.evidenceTier = exactLayout ? EvidenceTier::Proven
+                                        : EvidenceTier::Likely;
 
         diag.location = resolveSourceLocation(loc, SM);
 

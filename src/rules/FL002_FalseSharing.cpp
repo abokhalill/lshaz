@@ -64,6 +64,11 @@ public:
         if (map.isRefcountOnly() && !hasAtomicPairs)
             return;
 
+        // proven only when bucketing is exact: alignment >= line size
+        // pins every field to one shift. below that, co-location holds
+        // for most-but-not-all base alignments the allocator may pick.
+        bool exactLayout = map.isCacheLineAligned();
+
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 
@@ -81,7 +86,11 @@ public:
             escalations.push_back(
                 "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
                 "' share line " + std::to_string(pair.lineIndex) +
-                ": guaranteed cross-core invalidation on write");
+                (exactLayout
+                     ? ": guaranteed cross-core invalidation on write"
+                     : ": cross-core invalidation on write (co-location "
+                       "depends on allocation alignment; struct align < "
+                       "line size)"));
         }
 
         for (size_t i = 0; i < fsCandidateLines.size(); ++i) {
@@ -102,7 +111,7 @@ public:
 
         double confidence = 0.55;
         if (hasAtomicPairs)
-            confidence = 0.88;
+            confidence = exactLayout ? 0.88 : 0.80;
         else if (map.totalAtomicFields() > 0)
             confidence = 0.68;
 
@@ -114,7 +123,9 @@ public:
         diag.title     = "False Sharing Candidate";
         diag.severity  = sev;
         diag.confidence = confidence;
-        diag.evidenceTier = hasAtomicPairs ? EvidenceTier::Proven : EvidenceTier::Likely;
+        diag.evidenceTier = (hasAtomicPairs && exactLayout)
+                                ? EvidenceTier::Proven
+                                : EvidenceTier::Likely;
 
         diag.location = resolveSourceLocation(loc, SM);
 

@@ -7,6 +7,8 @@
 #include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Type.h>
 
+#include <algorithm>
+
 namespace lshaz {
 
 CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
@@ -259,6 +261,29 @@ std::vector<const FieldLineEntry *> CacheLineMap::straddlingFields() const {
     return result;
 }
 
+namespace {
+
+// a pair whose fields co-occupy several buckets (straddlers, or the
+// union of best/worst shift ranges) must count once, not per bucket:
+// the duplicate inflated pair-count evidence and escalation lines.
+void dedupePairs(std::vector<CacheLineMap::SharedLinePair> &pairs) {
+    std::sort(pairs.begin(), pairs.end(),
+              [](const CacheLineMap::SharedLinePair &x,
+                 const CacheLineMap::SharedLinePair &y) {
+                  if (x.a != y.a) return x.a < y.a;
+                  if (x.b != y.b) return x.b < y.b;
+                  return x.lineIndex < y.lineIndex;
+              });
+    pairs.erase(std::unique(pairs.begin(), pairs.end(),
+                            [](const CacheLineMap::SharedLinePair &x,
+                               const CacheLineMap::SharedLinePair &y) {
+                                return x.a == y.a && x.b == y.b;
+                            }),
+                pairs.end());
+}
+
+} // anonymous namespace
+
 std::vector<CacheLineMap::SharedLinePair>
 CacheLineMap::mutablePairsOnSameLine() const {
     std::vector<SharedLinePair> result;
@@ -274,6 +299,7 @@ CacheLineMap::mutablePairsOnSameLine() const {
             }
         }
     }
+    dedupePairs(result);
     return result;
 }
 
@@ -292,6 +318,7 @@ CacheLineMap::atomicPairsOnSameLine() const {
             }
         }
     }
+    dedupePairs(result);
     return result;
 }
 
