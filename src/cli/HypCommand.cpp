@@ -82,6 +82,10 @@ int runHypCommand(int argc, const char **argv) {
             continue;
         if (auto h = HypothesisConstructor::construct(d))
             hypotheses.push_back(std::move(*h));
+        else
+            llvm::errs() << "lshaz hyp: no hypothesis template for "
+                         << d.ruleID << " at " << d.location.file << ":"
+                         << d.location.line << " — skipped\n";
     }
 
     // Select output stream.

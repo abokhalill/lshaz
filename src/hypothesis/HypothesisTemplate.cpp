@@ -362,6 +362,47 @@ HypothesisTemplateRegistry::HypothesisTemplateRegistry() {
             confounds,
             false,
         },
+        // FL040/FL050/FL061 previously had no template: hyp/exp dropped
+        // their findings without attribution.
+        {
+            HazardClass::GlobalState,
+            "Concurrent writes to a centralized mutable global do not cause "
+            "measurable cross-core cache line ownership transfer cost.",
+            "Multi-writer access to the shared global causes >= {mde}% "
+            "increase in HITM events and >= {mde}% increase in {percentile} "
+            "latency compared to per-core sharded control.",
+            {"p99.9_operation_latency_ns", "nanoseconds", "p99.9"},
+            atomicContentionCounters(),
+            0.05,
+            confounds,
+            true,
+        },
+        {
+            HazardClass::DeepConditional,
+            "Nested conditional depth does not cause measurable branch "
+            "misprediction cost on realistic input distributions.",
+            "Deep conditional tree causes >= {mde}% increase in "
+            "branch-misses and >= {mde}% increase in {percentile} latency "
+            "compared to table-driven control.",
+            {"p99_operation_latency_ns", "nanoseconds", "p99"},
+            indirectDispatchCounters(),
+            0.05,
+            confounds,
+            true,
+        },
+        {
+            HazardClass::CentralizedDispatch,
+            "Single-point dispatch fan-out does not cause measurable BTB or "
+            "I-cache pressure compared to partitioned dispatch.",
+            "Centralized dispatcher causes >= {mde}% increase in "
+            "branch-misses/iTLB pressure and >= {mde}% increase in "
+            "{percentile} latency compared to partitioned control.",
+            {"p99_operation_latency_ns", "nanoseconds", "p99"},
+            indirectDispatchCounters(),
+            0.05,
+            confounds,
+            false,
+        },
     };
 }
 

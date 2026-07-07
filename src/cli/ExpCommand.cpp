@@ -70,6 +70,9 @@ int runExpCommand(int argc, const char **argv) {
 
         auto hyp = HypothesisConstructor::construct(d);
         if (!hyp) {
+            llvm::errs() << "lshaz exp: no hypothesis template for "
+                         << d.ruleID << " at " << d.location.file << ":"
+                         << d.location.line << " — skipped\n";
             ++skipped;
             continue;
         }
