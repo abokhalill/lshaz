@@ -126,6 +126,36 @@ TestResult welchTest(const LatencyStats &treatment,
     return r;
 }
 
+double normCdf(double x) {
+    return 0.5 * std::erfc(-x / std::sqrt(2.0));
+}
+
+// one-sided normal quantile by bisection; no magic-constant approximation.
+double normQuantile(double p) {
+    double lo = 0.0, hi = 10.0;
+    for (int i = 0; i < 60; ++i) {
+        double mid = 0.5 * (lo + hi);
+        (normCdf(mid) < p ? lo : hi) = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
+// post-hoc power to detect a relative effect `mde` of the control mean
+// at the achieved sample sizes (two-sample z approximation). the previous
+// hardcoded 0.50-if-not-significant made every refutation unlabelable:
+// the >=0.80 power gate was structurally unsatisfiable.
+double achievedPower(const LatencyStats &t, const LatencyStats &c,
+                     double mde, double alpha) {
+    if (t.count == 0 || c.count == 0 || c.mean <= 0.0)
+        return 0.0;
+    double se = std::sqrt(t.stddev * t.stddev / (double)t.count +
+                          c.stddev * c.stddev / (double)c.count);
+    if (se < 1e-15)
+        return 1.0;
+    double z = (mde * c.mean) / se - normQuantile(1.0 - alpha);
+    return std::clamp(normCdf(z), 0.0, 1.0);
+}
+
 std::optional<HazardClass> parseHazardClass(llvm::StringRef name) {
     if (name == "CacheGeometry")       return HazardClass::CacheGeometry;
     if (name == "FalseSharing")        return HazardClass::FalseSharing;
@@ -220,6 +250,23 @@ int runFeedbackCommand(int argc, const char **argv) {
         return 1;
     }
 
+    /* Scan-side feature vector. Ingesting in any other space is a dead
+       write: isKnownFalsePositive defines mismatched dimensions as
+       infinitely distant, so the label could never suppress anything. */
+    std::vector<double> features;
+    if (const auto *sf = obj->getArray("structural_features")) {
+        features.reserve(sf->size());
+        for (const auto &v : *sf)
+            features.push_back(v.getAsNumber().value_or(0.0));
+    }
+    if (features.empty()) {
+        llvm::errs() << "lshaz feedback: hypothesis.json lacks "
+                        "structural_features — regenerate the bundle "
+                        "(lshaz exp); refusing to ingest into a feature "
+                        "space the scanner cannot match\n";
+        return 1;
+    }
+
     /* Load TSC samples. */
     std::string treatPath = std::string(expDir) + "/results/treatment_samples.bin";
     std::string ctrlPath  = std::string(expDir) + "/results/control_samples.bin";
@@ -238,17 +285,17 @@ int runFeedbackCommand(int argc, const char **argv) {
     auto ctrlStats  = computeStats(ctrlDeltas);
     auto test       = welchTest(treatStats, ctrlStats);
 
-    /* Determine verdict. */
+    double power = achievedPower(treatStats, ctrlStats, mde, alpha);
+
+    /* Determine verdict. Non-significance only refutes when the run had
+       the power to detect the MDE; otherwise it proves nothing. */
     ExperimentVerdict verdict;
     if (test.p <= alpha && test.d >= mde)
         verdict = ExperimentVerdict::Confirmed;
-    else if (test.p > 0.10)
+    else if (test.p > 0.10 && power >= 0.80)
         verdict = ExperimentVerdict::Refuted;
     else
         verdict = ExperimentVerdict::Inconclusive;
-
-    /* Compute approximate power (simplified). */
-    double power = (test.p <= alpha) ? 0.95 : 0.50;
 
     /* Build ExperimentResult. */
     ExperimentResult expResult;
@@ -261,8 +308,39 @@ int runFeedbackCommand(int argc, const char **argv) {
     expResult.power           = power;
     expResult.warmupIterations     = 10000;
     expResult.measurementIterations = treatStats.count;
-    expResult.envState.cpuModel    = "unknown";
-    expResult.envState.governor    = "unknown";
+
+    /* setup_env.sh snapshots the applied environment; without it the
+       quality gate keeps its penalties; degraded label, stated openly. */
+    expResult.envState.cpuModel = "unknown";
+    expResult.envState.governor = "unknown";
+    std::string envPath = std::string(expDir) + "/results/env.json";
+    if (auto envBuf = llvm::MemoryBuffer::getFile(envPath)) {
+        auto envParsed = llvm::json::parse((*envBuf)->getBuffer());
+        if (envParsed) {
+            if (const auto *eo = envParsed->getAsObject()) {
+                expResult.envState.governor =
+                    eo->getString("governor").value_or("unknown").str();
+                expResult.envState.cpuModel =
+                    eo->getString("cpu_model").value_or("unknown").str();
+                expResult.envState.kernel =
+                    eo->getString("kernel").value_or("").str();
+                expResult.envState.turboDisabled =
+                    eo->getBoolean("turbo_disabled").value_or(false);
+                if (const auto *cores = eo->getArray("cores"))
+                    for (const auto &cv : *cores)
+                        expResult.envState.coresUsed.push_back(
+                            static_cast<int>(cv.getAsInteger().value_or(-1)));
+            }
+        } else {
+            llvm::errs() << "lshaz feedback: warning: unparseable "
+                         << envPath << " ("
+                         << llvm::toString(envParsed.takeError())
+                         << ") — label quality degraded\n";
+        }
+    } else {
+        llvm::errs() << "lshaz feedback: warning: no results/env.json — "
+                        "environment unverified, label quality degraded\n";
+    }
 
     expResult.treatmentLatency.p50   = treatStats.median;
     expResult.treatmentLatency.p99   = treatStats.p99;
@@ -273,13 +351,6 @@ int runFeedbackCommand(int argc, const char **argv) {
     expResult.controlLatency.p99   = ctrlStats.p99;
     expResult.controlLatency.p99_9 = ctrlStats.p99_9;
     expResult.controlLatency.p99_99 = ctrlStats.p99_99;
-
-    /* Build feature vector from hypothesis metadata. */
-    std::vector<double> features;
-    features.push_back(treatStats.mean);
-    features.push_back(ctrlStats.mean);
-    features.push_back(test.d);
-    features.push_back(test.p);
 
     /* Load -> ingest -> persist. A verdict that never reaches disk never
        calibrates anything. */

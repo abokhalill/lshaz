@@ -46,7 +46,7 @@ private:
     static CollectionScript generatePerfC2C();
     static CollectionScript generatePerfLBR(const std::string &coreList);
     static CollectionScript generatePerfPEBS(const std::string &coreList);
-    static CollectionScript generateSetupEnv();
+    static CollectionScript generateSetupEnv(const std::string &coreList);
     static CollectionScript generateTeardownEnv();
     static bool needsC2C(HazardClass hc);
     static bool needsNUMA(HazardClass hc);

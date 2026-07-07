@@ -389,7 +389,17 @@ ExperimentFile ExperimentSynthesizer::generateHypothesisJson(
        << "  \"significance_level\": " << hyp.significanceLevel << ",\n"
        << "  \"power\": " << hyp.power << ",\n"
        << "  \"evidence_tier\": \"" << evidenceTierName(hyp.evidenceTier) << "\",\n"
-       << "  \"verdict\": \"" << verdictName(hyp.verdict) << "\"\n"
+       << "  \"verdict\": \"" << verdictName(hyp.verdict) << "\",\n";
+
+    // scan-side feature vector: feedback must ingest in this space or
+    // isKnownFalsePositive can never match (distance of mismatched dims
+    // is defined as infinite).
+    os << "  \"structural_features\": [";
+    for (size_t i = 0; i < hyp.structuralFeatures.size(); ++i) {
+        if (i) os << ", ";
+        os << hyp.structuralFeatures[i];
+    }
+    os << "]\n"
        << "}\n";
 
     return {"hypothesis.json", os.str()};

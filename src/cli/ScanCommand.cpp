@@ -343,6 +343,10 @@ int runScanCommand(int argc, const char **argv) {
         if (isTTY) llvm::errs() << "\r";
         llvm::errs() << "lshaz: 1/1 TU(s) parsed, "
                      << result.diagnostics.size() << " diagnostic(s)\n";
+        if (result.suppressedByCalibration > 0)
+            llvm::errs() << "lshaz: suppressed "
+                         << result.suppressedByCalibration
+                         << " diagnostic(s) via calibration feedback\n";
         return emitOutput(result, request, args.format, args.outputFile);
     }
 

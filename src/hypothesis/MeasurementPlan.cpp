@@ -127,7 +127,8 @@ CollectionScript MeasurementPlanGenerator::generatePerfPEBS(
     return {"run_perf_pebs.sh", os.str()};
 }
 
-CollectionScript MeasurementPlanGenerator::generateSetupEnv() {
+CollectionScript MeasurementPlanGenerator::generateSetupEnv(
+    const std::string &coreList) {
     std::ostringstream os;
     os << "#!/bin/bash\n"
        << "set -euo pipefail\n\n"
@@ -152,7 +153,21 @@ CollectionScript MeasurementPlanGenerator::generateSetupEnv() {
        << "lscpu >> results/env_state.txt\n"
        << "cat /proc/cpuinfo | grep \"model name\" | head -1 "
        << ">> results/env_state.txt\n"
-       << "numactl --hardware >> results/env_state.txt 2>/dev/null || true\n"
+       << "numactl --hardware >> results/env_state.txt 2>/dev/null || true\n\n"
+       << "# machine-readable snapshot, read *after* settings applied:\n"
+       << "# feedback gates label quality on it. unverifiable -> honest\n"
+       << "# 'unknown', which degrades the label instead of faking control.\n"
+       << "GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "
+       << "2>/dev/null || echo unknown)\n"
+       << "NT=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo "
+       << "2>/dev/null || echo 0)\n"
+       << "TD=false; [ \"$NT\" = \"1\" ] && TD=true\n"
+       << "MODEL=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- "
+       << "| sed 's/^ *//' || echo unknown)\n"
+       << "printf '{\"governor\":\"%s\",\"turbo_disabled\":%s,"
+       << "\"cpu_model\":\"%s\",\"kernel\":\"%s\",\"cores\":[" << coreList
+       << "]}\\n' \\\n"
+       << "    \"$GOV\" \"$TD\" \"$MODEL\" \"$(uname -r)\" > results/env.json\n"
        << "echo \"[lshaz] Environment configured\"\n";
 
     return {"setup_env.sh", os.str()};
@@ -200,7 +215,7 @@ MeasurementPlan MeasurementPlanGenerator::generate(
 
     std::string coreList = "4,5";
 
-    plan.scripts.push_back(generateSetupEnv());
+    plan.scripts.push_back(generateSetupEnv(coreList));
     plan.scripts.push_back(generatePerfStat(plan.counterGroups, coreList));
 
     if (plan.requiresC2C)
