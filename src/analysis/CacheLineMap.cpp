@@ -44,14 +44,6 @@ CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
 }
 
 bool CacheLineMap::isAtomicType(clang::QualType QT) const {
-    // C-style volatile typedefs whose name contains "atomic" — covers
-    // ngx_atomic_t (Nginx), atomic_t (Linux kernel), etc.  These are
-    // volatile integers manipulated via compiler builtins (__sync_*,
-    // __atomic_*) and represent real cross-process/cross-thread atomics.
-    //
-    // Gate: the canonical type must be volatile-qualified.  This avoids
-    // false positives on non-volatile helper typedefs like
-    // ngx_atomic_uint_t (plain uint64_t used as the underlying type).
     if (QT.getCanonicalType().isVolatileQualified()) {
         clang::QualType walk = QT;
         while (const auto *TDT = walk->getAs<clang::TypedefType>()) {
@@ -68,7 +60,7 @@ bool CacheLineMap::isAtomicType(clang::QualType QT) const {
     }
 
     // User-configured opaque atomic wrappers (atomic_t, spinlock_t, etc.).
-    // Must run before canonicalization — typedef names are lost after desugar.
+    // must run before canonicalization
     if (!atomicTypeNames_.empty()) {
         if (const auto *RT = QT->getAs<clang::RecordType>()) {
             std::string rn = RT->getDecl()->getNameAsString();
@@ -169,10 +161,14 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
     // Direct fields.
     unsigned idx = 0;
     for (const auto *field : RD->fields()) {
-        uint64_t offsetBits = layout.getFieldOffset(idx);
+        // increment before any skip: getFieldOffset is positional, and a
+        // continue that skipped ++idx shifted every later field's offset
+        // by one slot (live once FAM fields reach this loop).
+        uint64_t offsetBits = layout.getFieldOffset(idx++);
         uint64_t offsetBytes = offsetBits / 8;
         uint64_t absOffset = baseOffsetBytes + offsetBytes;
 
+        // FAM and other size-incomputable fields occupy no modeled bytes.
         if (!canComputeTypeSize(field->getType(), Ctx))
             continue;
         uint64_t fieldSize = Ctx.getTypeSizeInChars(field->getType()).getQuantity();
@@ -232,7 +228,6 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
         }
 
         fields_.push_back(std::move(entry));
-        ++idx;
     }
 }
 
