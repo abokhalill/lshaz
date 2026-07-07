@@ -110,11 +110,17 @@ public:
             const auto *arg = E->getArg(i)->IgnoreImplicit();
             clang::QualType argType = arg->getType().getCanonicalType();
 
-            // Only inspect arguments that are memory_order typed (enum/int).
-            std::string argTypeName = argType.getAsString();
-            bool isOrderArg =
-                argTypeName.find("memory_order") != std::string::npos ||
-                argType->isEnumeralType() || argType->isIntegerType();
+            // Only genuine std::memory_order arguments participate.
+            // Anything looser (isIntegerType) misclassifies the *stored
+            // value* as an ordering: store(0) read as "0 != seq_cst" and
+            // the site was silently skipped.
+            bool isOrderArg = false;
+            if (const auto *ET = argType->getAs<clang::EnumType>()) {
+                if (const auto *ED = ET->getDecl()) {
+                    isOrderArg = ED->getName() == "memory_order" ||
+                                 ED->getName().starts_with("__memory_order");
+                }
+            }
             if (!isOrderArg)
                 continue;
 
