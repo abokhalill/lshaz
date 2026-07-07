@@ -8,6 +8,9 @@
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Type.h>
 
+#include <functional>
+#include <vector>
+
 namespace lshaz {
 
 EscapeAnalysis::EscapeAnalysis(clang::ASTContext &Ctx) : ctx_(Ctx) {}
@@ -268,28 +271,50 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
         return;
     tuScanned_ = true;
 
+    // one recursive walk feeds all passes; top-level-only iteration was
+    // blind to namespaces and method bodies (FL040's map input included).
+    std::vector<const clang::VarDecl *> globals;
+    std::vector<const clang::FunctionDecl *> bodies;
+    std::function<void(const clang::DeclContext *)> walk =
+        [&](const clang::DeclContext *DC) {
+            for (const auto *D : DC->decls()) {
+                if (const auto *NS = llvm::dyn_cast<clang::NamespaceDecl>(D)) {
+                    walk(NS);
+                } else if (const auto *LS =
+                               llvm::dyn_cast<clang::LinkageSpecDecl>(D)) {
+                    walk(LS);
+                } else if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D)) {
+                    globals.push_back(VD);
+                } else if (const auto *FD =
+                               llvm::dyn_cast<clang::FunctionDecl>(D)) {
+                    if (FD->doesThisDeclarationHaveABody() &&
+                        !FD->isDependentContext())
+                        bodies.push_back(FD);
+                } else if (const auto *RD =
+                               llvm::dyn_cast<clang::CXXRecordDecl>(D)) {
+                    if (RD->isCompleteDefinition() && !RD->isDependentType())
+                        walk(RD);
+                }
+            }
+        };
+    walk(TU);
+
     // Pass 1: global/static mutable variable types.
-    for (const auto *D : TU->decls()) {
-        if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D)) {
-            if (isGlobalSharedMutable(VD))
-                markPublished(VD->getType());
-        }
+    for (const auto *VD : globals) {
+        if (isGlobalSharedMutable(VD))
+            markPublished(VD->getType());
     }
 
     // Pass 2: thread-creation call sites across all function bodies.
     PublicationVisitor visitor(*this);
-    for (auto *D : TU->decls()) {
-        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
-            if (FD->doesThisDeclarationHaveABody())
-                visitor.TraverseStmt(FD->getBody());
-        }
-    }
+    for (const auto *FD : bodies)
+        visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 
     // Pass 3: count write sites per global for write-once analysis.
-    collectGlobalWriteSites(TU);
+    collectGlobalWriteSites(bodies);
 
     // Pass 4: count distinct functions accessing each record type.
-    collectTypeAccessors(TU);
+    collectTypeAccessors(bodies);
 }
 
 bool EscapeAnalysis::isFieldMutable(const clang::FieldDecl *FD) const {
@@ -489,27 +514,20 @@ public:
 } // anonymous namespace
 
 void EscapeAnalysis::collectTypeAccessors(
-    const clang::TranslationUnitDecl *TU) {
-    for (auto *D : TU->decls()) {
-        auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D);
-        if (!FD || !FD->doesThisDeclarationHaveABody())
-            continue;
+    const std::vector<const clang::FunctionDecl *> &bodies) {
+    for (const auto *FD : bodies) {
         TypeAccessVisitor visitor;
-        visitor.TraverseStmt(FD->getBody());
+        visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
         for (const auto *RD : visitor.accessed)
             ++typeAccessorCounts_[RD];
     }
 }
 
 void EscapeAnalysis::collectGlobalWriteSites(
-    const clang::TranslationUnitDecl *TU) {
+    const std::vector<const clang::FunctionDecl *> &bodies) {
     GlobalWriteVisitor visitor(globalWriteCounts_);
-    for (auto *D : TU->decls()) {
-        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
-            if (FD->doesThisDeclarationHaveABody())
-                visitor.TraverseStmt(FD->getBody());
-        }
-    }
+    for (const auto *FD : bodies)
+        visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 }
 
 unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {

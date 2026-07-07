@@ -12,6 +12,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace lshaz {
 
@@ -114,8 +115,10 @@ private:
     // Key: canonical RecordDecl*. Populated by scanTranslationUnit Pass 4.
     std::unordered_map<const clang::RecordDecl *, unsigned> typeAccessorCounts_;
 
-    void collectGlobalWriteSites(const clang::TranslationUnitDecl *TU);
-    void collectTypeAccessors(const clang::TranslationUnitDecl *TU);
+    void collectGlobalWriteSites(
+        const std::vector<const clang::FunctionDecl *> &bodies);
+    void collectTypeAccessors(
+        const std::vector<const clang::FunctionDecl *> &bodies);
 };
 
 } // namespace lshaz
