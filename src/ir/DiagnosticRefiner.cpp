@@ -44,36 +44,35 @@ std::string DiagnosticRefiner::extractFunctionName(const Diagnostic &diag) const
     return {};
 }
 
+// AST qualified names carry no parameter list; demangled symbols always
+// do ("foo::bar" vs "foo::bar(int)"). exact/suffix equality therefore
+// never matched a demangled name and refinement silently degraded to the
+// decl-line fallback, which only covers diagnostics anchored at the
+// function declaration. match at a '::' boundary followed by end, '('
+// or '<'.
+static bool demangledMatches(const std::string &dn, const std::string &fn) {
+    size_t p = 0;
+    while ((p = dn.find(fn, p)) != std::string::npos) {
+        bool bOK = p == 0 || (p >= 2 && dn[p - 1] == ':' && dn[p - 2] == ':');
+        size_t e = p + fn.size();
+        bool eOK = e == dn.size() || dn[e] == '(' || dn[e] == '<';
+        if (bOK && eOK)
+            return true;
+        ++p;
+    }
+    return false;
+}
+
 const IRFunctionProfile *DiagnosticRefiner::findProfile(
     const std::string &funcName) const {
     if (funcName.empty())
         return nullptr;
-
-    // Exact demangled name match.
-    for (const auto &[mangled, profile] : profiles_) {
-        if (profile.demangledName == funcName)
-            return &profile;
-    }
-
-    // Qualified suffix match: "Foo::bar" matches "ns::Foo::bar".
-    // Require match at a namespace boundary (preceded by '::' or at start).
-    for (const auto &[mangled, profile] : profiles_) {
-        const auto &dn = profile.demangledName;
-        if (dn.size() > funcName.size()) {
-            auto pos = dn.size() - funcName.size();
-            if (dn.compare(pos, funcName.size(), funcName) == 0 &&
-                pos >= 2 && dn[pos - 1] == ':' && dn[pos - 2] == ':')
-                return &profile;
-        }
-    }
 
     // Exact mangled name match.
     auto it = profiles_.find(funcName);
     if (it != profiles_.end())
         return &it->second;
 
-    // strip "(anonymous namespace)::" from
-    // the AST name and retry suffix match against demangled IR names.
     static constexpr std::string_view kAnonNS = "(anonymous namespace)::";
     std::string stripped = funcName;
     for (;;) {
@@ -81,19 +80,30 @@ const IRFunctionProfile *DiagnosticRefiner::findProfile(
         if (pos == std::string::npos) break;
         stripped.erase(pos, kAnonNS.size());
     }
-    if (stripped != funcName && !stripped.empty()) {
-        for (const auto &[mangled, profile] : profiles_) {
-            const auto &dn = profile.demangledName;
-            if (dn.size() >= stripped.size()) {
-                auto spos = dn.size() - stripped.size();
-                if (dn.compare(spos, stripped.size(), stripped) == 0 &&
-                    (spos == 0 || (spos >= 2 && dn[spos-1] == ':' && dn[spos-2] == ':')))
-                    return &profile;
-            }
+
+    // among overloads, pick deterministically: exact demangled name wins,
+    // then lowest mangled name — never hash-map iteration order.
+    const IRFunctionProfile *best = nullptr;
+    int bestRank = 3;
+    for (const auto &[mangled, profile] : profiles_) {
+        const auto &dn = profile.demangledName;
+        int rank;
+        if (dn == funcName)
+            rank = 0;
+        else if (demangledMatches(dn, funcName))
+            rank = 1;
+        else if (stripped != funcName && demangledMatches(dn, stripped))
+            rank = 2;
+        else
+            continue;
+        if (rank < bestRank ||
+            (rank == bestRank && best &&
+             mangled < best->mangledName)) {
+            best = &profile;
+            bestRank = rank;
         }
     }
-
-    return nullptr;
+    return best;
 }
 
 const IRFunctionProfile *DiagnosticRefiner::findProfileByLocation(
