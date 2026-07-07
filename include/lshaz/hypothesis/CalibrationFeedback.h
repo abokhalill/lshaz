@@ -95,6 +95,12 @@ class CalibrationFeedbackStore {
 public:
     explicit CalibrationFeedbackStore(const std::string &storePath);
 
+    // absent file is a valid empty store; unreadable or corrupt is an
+    // error — callers must not proceed as if calibrated.
+    bool load(std::string &err);
+    // atomic replace (temp + rename); partial writes never observable.
+    bool save(std::string &err) const;
+
     std::optional<LabeledRecord> ingest(const ExperimentResult &result,
                                         const std::vector<double> &featureVector,
                                         HazardClass hazardClass);

@@ -281,12 +281,22 @@ int runFeedbackCommand(int argc, const char **argv) {
     features.push_back(test.d);
     features.push_back(test.p);
 
-    /* Ingest. */
+    /* Load -> ingest -> persist. A verdict that never reaches disk never
+       calibrates anything. */
     CalibrationFeedbackStore store(storePath);
+    std::string storeErr;
+    if (!store.load(storeErr)) {
+        llvm::errs() << "lshaz feedback: " << storeErr << "\n";
+        return 1;
+    }
     auto record = store.ingest(expResult, features, *hcOpt);
 
     if (!record) {
         llvm::errs() << "lshaz feedback: ingestion rejected (schema validation)\n";
+        return 1;
+    }
+    if (!store.save(storeErr)) {
+        llvm::errs() << "lshaz feedback: " << storeErr << "\n";
         return 1;
     }
 

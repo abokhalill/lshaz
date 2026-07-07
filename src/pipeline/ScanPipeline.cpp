@@ -1415,11 +1415,19 @@ ScanResult ScanPipeline::run(
     PrecisionBudget budget;
     budget.apply(result.diagnostics);
 
-    // Calibration feedback.
+    // Calibration feedback. A requested store that cannot be read is a
+    // hard error: proceeding would emit uncalibrated results while the
+    // caller believes otherwise.
     std::unique_ptr<CalibrationFeedbackStore> calStore;
     if (!request.feedback.calibrationStorePath.empty()) {
         calStore = std::make_unique<CalibrationFeedbackStore>(
             request.feedback.calibrationStorePath);
+        std::string storeErr;
+        if (!calStore->load(storeErr)) {
+            llvm::errs() << "lshaz: error: " << storeErr << "\n";
+            result.status = ScanStatus::ToolError;
+            return result;
+        }
     }
 
     if (calStore) {
@@ -1433,6 +1441,15 @@ ScanResult ScanPipeline::run(
                      !request.feedback.pmuPriorsPath.empty())) {
         report("pmu_feedback", "");
         applyPMUFeedback(request.feedback, result.diagnostics, *calStore);
+
+        // PMU ingestion mutated the store; unpersisted labels calibrate
+        // nothing and would silently vanish.
+        std::string storeErr;
+        if (!calStore->save(storeErr)) {
+            llvm::errs() << "lshaz: error: " << storeErr << "\n";
+            result.status = ScanStatus::ToolError;
+            return result;
+        }
     }
 
     // Filter and sort.

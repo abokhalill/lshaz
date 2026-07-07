@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -46,6 +47,16 @@ constexpr std::string_view hazardClassName(HazardClass hc) {
         case HazardClass::SynthesizedInteraction: return "SynthesizedInteraction";
     }
     return "Unknown";
+}
+
+inline std::optional<HazardClass> hazardClassFromName(std::string_view name) {
+    for (uint8_t i = 0;
+         i <= static_cast<uint8_t>(HazardClass::SynthesizedInteraction); ++i) {
+        auto hc = static_cast<HazardClass>(i);
+        if (hazardClassName(hc) == name)
+            return hc;
+    }
+    return std::nullopt;
 }
 
 } // namespace lshaz
