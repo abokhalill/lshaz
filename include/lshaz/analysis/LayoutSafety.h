@@ -52,13 +52,7 @@ inline bool canComputeTypeSizeImpl(clang::QualType QT,
             if (RD->isDependentType())
                 return false;
             for (const auto *field : RD->fields()) {
-                // flexible array member: the record is still a complete
-                // type with computable layout; the FAM occupies zero bytes
-                // of sizeof. rejecting it blinded FL001/FL002/FL090 to
-                // every classic C FAM struct (nginx, redis are full of
-                // them). the field's own type stays non-computable — the
-                // canComputeTypeSize -> getTypeSizeInChars contract at
-                // call sites is unchanged.
+                // FAM: record layout computable, field size is not.
                 if (const auto *IAT =
                         Ctx.getAsIncompleteArrayType(field->getType())) {
                     if (!canComputeTypeSizeImpl(IAT->getElementType(), Ctx,

@@ -110,10 +110,8 @@ public:
             const auto *arg = E->getArg(i)->IgnoreImplicit();
             clang::QualType argType = arg->getType().getCanonicalType();
 
-            // Only genuine std::memory_order arguments participate.
-            // Anything looser (isIntegerType) misclassifies the *stored
-            // value* as an ordering: store(0) read as "0 != seq_cst" and
-            // the site was silently skipped.
+            // memory_order-typed args only; anything looser reads the
+            // stored value as an ordering (store(0) -> "not seq_cst").
             bool isOrderArg = false;
             if (const auto *ET = argType->getAs<clang::EnumType>()) {
                 if (const auto *ED = ET->getDecl()) {

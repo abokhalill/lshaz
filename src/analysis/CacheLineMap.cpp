@@ -161,14 +161,11 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
     // Direct fields.
     unsigned idx = 0;
     for (const auto *field : RD->fields()) {
-        // increment before any skip: getFieldOffset is positional, and a
-        // continue that skipped ++idx shifted every later field's offset
-        // by one slot (live once FAM fields reach this loop).
+        // getFieldOffset is positional: idx must advance on skip paths.
         uint64_t offsetBits = layout.getFieldOffset(idx++);
         uint64_t offsetBytes = offsetBits / 8;
         uint64_t absOffset = baseOffsetBytes + offsetBytes;
 
-        // FAM and other size-incomputable fields occupy no modeled bytes.
         if (!canComputeTypeSize(field->getType(), Ctx))
             continue;
         uint64_t fieldSize = Ctx.getTypeSizeInChars(field->getType()).getQuantity();
