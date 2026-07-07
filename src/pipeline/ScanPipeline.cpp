@@ -156,7 +156,12 @@ std::vector<std::string> sanitizeForClangIR(
     result.push_back("-Wno-unknown-attributes");
     result.push_back("-Wno-ignored-attributes");
 
-    for (size_t i = 0; i < args.size(); ++i) {
+    // start at 1: args[0] is the DB compiler path. leaking it into the
+    // input list "worked" for directory scans only because an existing
+    // path is classified as an object input and -S skips the link; the
+    // FixedCompilationDatabase placeholder does not exist, so single-file
+    // IR emission failed on every invocation.
+    for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
 
         // Skip -c and -o <file> (we replace these)
