@@ -279,15 +279,22 @@ ExperimentFile ExperimentSynthesizer::generateRunAll(
        << " --alpha " << hyp.significanceLevel << " || VERDICT_STATUS=$?\n\n"
        << "# PMU collection passes.\n";
 
+    // guarded per-variant: a PMU failure must not skip teardown (which
+    // restores turbo/THP/ASLR), and must not be masked either.
+    os << "PMU_STATUS=0\n";
     for (const auto &script : plan.scripts) {
         if (script.name == "setup_env.sh" || script.name == "teardown_env.sh")
             continue;
-        os << "bash scripts/" << script.name << "\n";
-        os << "bash scripts/" << script.name << "\n\n";
+        os << "bash scripts/" << script.name << " treatment || PMU_STATUS=$?\n";
+        os << "bash scripts/" << script.name << " control || PMU_STATUS=$?\n\n";
     }
 
     os << "# Restore.\n"
        << "sudo bash scripts/teardown_env.sh\n\n"
+       << "if [ \"$PMU_STATUS\" -ne 0 ]; then\n"
+       << "  echo \"[lshaz] ERROR: PMU collection failed (status $PMU_STATUS)\"\n"
+       << "  exit 2\n"
+       << "fi\n"
        << "echo \"[lshaz] Experiment complete. Results in results/\"\n"
        << "# Non-zero == not CONFIRMED above the mde (refuted/inconclusive/confounded/\n"
        << "# error). Never masked — the caller sees system truth.\n"

@@ -77,7 +77,7 @@ CollectionScript MeasurementPlanGenerator::generatePerfStat(
         os << "taskset -c $CORES perf stat -e $EVENTS -r $RUNS "
            << "--detailed --output results/perf_stat_${VARIANT}_group"
            << g.groupId << ".txt "
-           << "./experiment_${VARIANT}\n\n";
+           << "./experiment --variant ${VARIANT}\n\n";
     }
 
     return {"run_perf_stat.sh", os.str()};
@@ -89,7 +89,7 @@ CollectionScript MeasurementPlanGenerator::generatePerfC2C() {
        << "set -euo pipefail\n\n"
        << "VARIANT=${1:?\"Usage: $0 <treatment|control>\"}\n\n"
        << "perf c2c record -o results/perf_c2c_${VARIANT}.data "
-       << "./experiment_${VARIANT}\n"
+       << "./experiment --variant ${VARIANT}\n"
        << "perf c2c report -i results/perf_c2c_${VARIANT}.data "
        << "--stdio > results/c2c_report_${VARIANT}.txt\n";
 
@@ -106,7 +106,7 @@ CollectionScript MeasurementPlanGenerator::generatePerfLBR(
        << "CORES=\"" << coreList << "\"\n\n"
        << "taskset -c $CORES perf record -e cycles:pp -b --call-graph lbr "
        << "-o results/perf_lbr_${VARIANT}.data "
-       << "./experiment_${VARIANT}\n";
+       << "./experiment --variant ${VARIANT}\n";
 
     return {"run_perf_lbr.sh", os.str()};
 }
@@ -122,7 +122,7 @@ CollectionScript MeasurementPlanGenerator::generatePerfPEBS(
        << "taskset -c $CORES perf record "
        << "-e mem_load_retired.l3_miss:pp "
        << "-o results/perf_pebs_${VARIANT}.data "
-       << "./experiment_${VARIANT}\n";
+       << "./experiment --variant ${VARIANT}\n";
 
     return {"run_perf_pebs.sh", os.str()};
 }
