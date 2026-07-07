@@ -28,6 +28,27 @@ struct AtomicWriteSite {
     unsigned inLoop = 0;
 };
 
+
+// target of &x / &s->f / plain _Atomic lvalue: name + owning record.
+static std::pair<std::string, std::string>
+atomicTargetOf(const clang::Expr *E) {
+    E = E->IgnoreParenImpCasts();
+    if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+        if (UO->getOpcode() == clang::UO_AddrOf)
+            E = UO->getSubExpr()->IgnoreParenImpCasts();
+    }
+    if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+        std::string owner;
+        if (const auto *FD = llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl()))
+            owner = FD->getParent()->getCanonicalDecl()
+                        ->getQualifiedNameAsString();
+        return {ME->getMemberDecl()->getNameAsString(), owner};
+    }
+    if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
+        return {DRE->getDecl()->getNameAsString(), {}};
+    return {"<unknown>", {}};
+}
+
 bool isStdAtomicType(clang::QualType QT) {
     QT = QT.getCanonicalType().getNonReferenceType();
     if (QT->isAtomicType())
@@ -131,6 +152,67 @@ public:
         }
 
         sites_.push_back({E->getBeginLoc(), opName, "<atomic>", {}, inLoop_});
+        return true;
+    }
+
+    // C forms (writes only): AtomicExpr except loads/init, _Atomic
+    // lvalue mutation operators, __sync_* builtins.
+    bool VisitAtomicExpr(clang::AtomicExpr *E) {
+        using AE = clang::AtomicExpr;
+        switch (E->getOp()) {
+            case AE::AO__c11_atomic_init:
+            case AE::AO__c11_atomic_load:
+            case AE::AO__atomic_load:
+            case AE::AO__atomic_load_n:
+                return true;
+            default: break;
+        }
+        auto [varName, owner] = atomicTargetOf(E->getPtr());
+        sites_.push_back({E->getBeginLoc(), "atomic_write", varName,
+                          std::move(owner), inLoop_});
+        return true;
+    }
+
+    bool VisitUnaryOperator(clang::UnaryOperator *UO) {
+        if (!UO->isIncrementDecrementOp() ||
+            !UO->getSubExpr()->getType()->isAtomicType())
+            return true;
+        auto [varName, owner] = atomicTargetOf(UO->getSubExpr());
+        sites_.push_back({UO->getBeginLoc(),
+                          UO->isIncrementOp() ? "atomic++" : "atomic--",
+                          varName, std::move(owner), inLoop_});
+        return true;
+    }
+
+    bool VisitBinaryOperator(clang::BinaryOperator *BO) {
+        if (!BO->isAssignmentOp() ||
+            !BO->getLHS()->getType()->isAtomicType())
+            return true;
+        auto [varName, owner] = atomicTargetOf(BO->getLHS());
+        sites_.push_back({BO->getBeginLoc(),
+                          BO->getOpcode() == clang::BO_Assign ? "atomic="
+                                                              : "atomic-op=",
+                          varName, std::move(owner), inLoop_});
+        return true;
+    }
+
+    bool VisitCallExpr(clang::CallExpr *E) {
+        const auto *callee = E->getDirectCallee();
+        if (!callee)
+            return true;
+        // operators/ctors have no identifier; getName() would deref null
+        const auto *II = callee->getIdentifier();
+        if (!II)
+            return true;
+        llvm::StringRef name = II->getName();
+        if (!name.starts_with("__sync_") ||
+            name.starts_with("__sync_synchronize")) // fence, not a write
+            return true;
+        std::string varName = "<unknown>", owner;
+        if (E->getNumArgs() > 0)
+            std::tie(varName, owner) = atomicTargetOf(E->getArg(0));
+        sites_.push_back({E->getBeginLoc(), name.str(), varName,
+                          std::move(owner), inLoop_});
         return true;
     }
 

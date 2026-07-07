@@ -30,6 +30,27 @@ struct SeqCstSite {
     unsigned inLoop = 0;
 };
 
+
+// target of &x / &s->f / plain _Atomic lvalue: name + owning record.
+static std::pair<std::string, std::string>
+atomicTargetOf(const clang::Expr *E) {
+    E = E->IgnoreParenImpCasts();
+    if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+        if (UO->getOpcode() == clang::UO_AddrOf)
+            E = UO->getSubExpr()->IgnoreParenImpCasts();
+    }
+    if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+        std::string owner;
+        if (const auto *FD = llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl()))
+            owner = FD->getParent()->getCanonicalDecl()
+                        ->getQualifiedNameAsString();
+        return {ME->getMemberDecl()->getNameAsString(), owner};
+    }
+    if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
+        return {DRE->getDecl()->getNameAsString(), {}};
+    return {"<unknown>", {}};
+}
+
 bool isStdAtomicType(clang::QualType QT) {
     QT = QT.getCanonicalType().getNonReferenceType();
     if (QT->isAtomicType())
@@ -201,6 +222,88 @@ public:
 
         sites_.push_back({E->getBeginLoc(), opName, "<atomic>", {},
                           AtomicOpClass::RMW, inLoop_});
+        return true;
+    }
+
+    // C11/GNU atomics never pass through CXXMemberCallExpr: atomic_*()
+    // macros and __atomic_* builtins are AtomicExpr; ++/--/=/op= on an
+    // _Atomic lvalue are plain operators with implicit seq_cst; __sync_*
+    // resolve to builtin CallExprs (full barrier). every C codebase was
+    // invisible to this rule.
+    bool VisitAtomicExpr(clang::AtomicExpr *E) {
+        using AE = clang::AtomicExpr;
+        auto op = E->getOp();
+        if (op == AE::AO__c11_atomic_init)
+            return true;
+        AtomicOpClass opClass = AtomicOpClass::RMW;
+        const char *opName = "atomic_rmw";
+        switch (op) {
+            case AE::AO__c11_atomic_load:
+            case AE::AO__atomic_load:
+            case AE::AO__atomic_load_n:
+                opClass = AtomicOpClass::Load; opName = "atomic_load"; break;
+            case AE::AO__c11_atomic_store:
+            case AE::AO__atomic_store:
+            case AE::AO__atomic_store_n:
+                opClass = AtomicOpClass::Store; opName = "atomic_store"; break;
+            default: break;
+        }
+        const clang::Expr *order = E->getOrder();
+        clang::Expr::EvalResult r;
+        if (!order || !order->EvaluateAsInt(r, ctx_))
+            return true; // runtime-variable order: unprovable, skip
+        if (r.Val.getInt().getExtValue() != 5)
+            return true;
+        auto [varName, owner] = atomicTargetOf(E->getPtr());
+        sites_.push_back({E->getBeginLoc(), opName, varName,
+                          std::move(owner), opClass, inLoop_});
+        return true;
+    }
+
+    bool VisitUnaryOperator(clang::UnaryOperator *UO) {
+        if (!UO->isIncrementDecrementOp() ||
+            !UO->getSubExpr()->getType()->isAtomicType())
+            return true;
+        auto [varName, owner] = atomicTargetOf(UO->getSubExpr());
+        sites_.push_back({UO->getBeginLoc(),
+                          UO->isIncrementOp() ? "atomic++" : "atomic--",
+                          varName, std::move(owner), AtomicOpClass::RMW,
+                          inLoop_});
+        return true;
+    }
+
+    bool VisitBinaryOperator(clang::BinaryOperator *BO) {
+        if (!BO->isAssignmentOp() ||
+            !BO->getLHS()->getType()->isAtomicType())
+            return true;
+        bool plain = BO->getOpcode() == clang::BO_Assign;
+        auto [varName, owner] = atomicTargetOf(BO->getLHS());
+        sites_.push_back({BO->getBeginLoc(),
+                          plain ? "atomic=" : "atomic-op=", varName,
+                          std::move(owner),
+                          plain ? AtomicOpClass::Store : AtomicOpClass::RMW,
+                          inLoop_});
+        return true;
+    }
+
+    bool VisitCallExpr(clang::CallExpr *E) {
+        const auto *callee = E->getDirectCallee();
+        if (!callee)
+            return true;
+        // operators/ctors have no identifier; getName() would deref null
+        const auto *II = callee->getIdentifier();
+        if (!II)
+            return true;
+        llvm::StringRef name = II->getName();
+        if (!name.starts_with("__sync_") ||
+            name.starts_with("__sync_synchronize") ||
+            name.starts_with("__sync_lock_release")) // release, not seq_cst
+            return true;
+        std::string varName = "<unknown>", owner;
+        if (E->getNumArgs() > 0)
+            std::tie(varName, owner) = atomicTargetOf(E->getArg(0));
+        sites_.push_back({E->getBeginLoc(), name.str(), varName,
+                          std::move(owner), AtomicOpClass::RMW, inLoop_});
         return true;
     }
 
