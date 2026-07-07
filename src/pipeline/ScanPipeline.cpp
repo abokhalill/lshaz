@@ -951,6 +951,20 @@ static unsigned applyCrossTUEscapeSuppression(
     return suppressed;
 }
 
+// severity desc, then file/line/column/ruleID: the output-order contract.
+static bool outputOrder(const Diagnostic &a, const Diagnostic &b) {
+    if (a.severity != b.severity)
+        return static_cast<uint8_t>(a.severity) >
+               static_cast<uint8_t>(b.severity);
+    if (a.location.file != b.location.file)
+        return a.location.file < b.location.file;
+    if (a.location.line != b.location.line)
+        return a.location.line < b.location.line;
+    if (a.location.column != b.location.column)
+        return a.location.column < b.location.column;
+    return a.ruleID < b.ruleID;
+}
+
 static void filterAndSort(const FilterOptions &filter,
                            std::vector<Diagnostic> &diagnostics) {
     diagnostics.erase(
@@ -968,19 +982,7 @@ static void filterAndSort(const FilterOptions &filter,
                        }),
         diagnostics.end());
 
-    std::sort(diagnostics.begin(), diagnostics.end(),
-              [](const Diagnostic &a, const Diagnostic &b) {
-                  if (a.severity != b.severity)
-                      return static_cast<uint8_t>(a.severity) >
-                             static_cast<uint8_t>(b.severity);
-                  if (a.location.file != b.location.file)
-                      return a.location.file < b.location.file;
-                  if (a.location.line != b.location.line)
-                      return a.location.line < b.location.line;
-                  if (a.location.column != b.location.column)
-                      return a.location.column < b.location.column;
-                  return a.ruleID < b.ruleID;
-              });
+    std::sort(diagnostics.begin(), diagnostics.end(), outputOrder);
 }
 
 // --- Entry points ---
@@ -1490,7 +1492,10 @@ ScanResult ScanPipeline::run(
         }
     }
 
-    // Emit warnings for headers missing from >= 3 TUs.
+    // Emit warnings for headers missing from >= 3 TUs. B001 reports a
+    // broken scan, so it bypasses severity/evidence filters by design —
+    // but it must not break the sorted-output contract (re-sort below).
+    bool b001Emitted = false;
     for (const auto &[header, count] : missingHeaderCounts) {
         if (count >= 3) {
             Diagnostic diag;
@@ -1505,11 +1510,15 @@ ScanResult ScanPipeline::run(
                 << " TUs. This usually indicates the project needs a full build "
                    "before scanning (custom_target, configure_file).";
             diag.title = msg.str();
-            diag.structuralEvidence["missing_header"] = header;
+                diag.structuralEvidence["missing_header"] = header;
             diag.structuralEvidence["tu_count"] = std::to_string(count);
             result.diagnostics.push_back(std::move(diag));
+            b001Emitted = true;
         }
     }
+    if (b001Emitted)
+        std::sort(result.diagnostics.begin(), result.diagnostics.end(),
+                  outputOrder);
 
     // Extract file paths for compatibility with existing metadata/failedTUs.
     result.failedTUs.clear();
