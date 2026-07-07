@@ -205,6 +205,29 @@ EvidenceTier parseEvidenceTier(const std::string &s) {
     return EvidenceTier::Speculative;
 }
 
+// false on unknown arch (caller exits 3). shared by both scan modes so
+// single-file mode cannot silently ignore an accepted flag.
+bool applyTargetArch(Config &cfg, const std::string &arch) {
+    if (arch.empty())
+        return true;
+    if (arch == "arm64") {
+        cfg.targetArch = TargetArch::ARM64;
+        cfg.cacheLineBytes = 64;
+    } else if (arch == "arm64-apple") {
+        cfg.targetArch = TargetArch::ARM64Apple;
+        cfg.cacheLineBytes = 128;
+        cfg.cacheLineSpanWarn = 128;
+        cfg.cacheLineSpanCrit = 256;
+    } else if (arch == "x86-64") {
+        cfg.targetArch = TargetArch::X86_64;
+    } else {
+        llvm::errs() << "lshaz scan: unknown --target-arch '" << arch
+                     << "' (valid: x86-64, arm64, arm64-apple)\n";
+        return false;
+    }
+    return true;
+}
+
 int emitOutput(const ScanResult &result, const ScanRequest &request,
                const std::string &format, const std::string &outputFile) {
     std::unique_ptr<OutputFormatter> formatter;
@@ -281,6 +304,8 @@ int runScanCommand(int argc, const char **argv) {
             : Config::loadFromFile(args.configPath);
         if (!args.allocator.empty())
             request.config.linkedAllocator = args.allocator;
+        if (!applyTargetArch(request.config, args.targetArch))
+            return 3;
         request.config.minSeverity = parseSeverity(args.minSeverity);
         applyRuleFilter(request.config, args.enabledRules);
         request.ir.enabled = !args.noIR;
@@ -288,6 +313,11 @@ int runScanCommand(int argc, const char **argv) {
         request.ir.cacheEnabled = !args.noIRCache;
         request.ir.maxJobs = args.irJobs;
         request.ir.batchSize = args.irBatchSize;
+        request.feedback.calibrationStorePath = args.calibrationStore;
+        request.feedback.pmuTracePath = args.pmuTrace;
+        request.feedback.pmuPriorsPath = args.pmuPriors;
+        request.perfProfilePath = args.perfProfile;
+        request.hotnessThreshold = args.hotnessThreshold;
         request.filter.minSeverity = request.config.minSeverity;
         request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
         if (args.format == "sarif")
@@ -356,24 +386,8 @@ int runScanCommand(int argc, const char **argv) {
         ? Config::defaults()
         : Config::loadFromFile(args.configPath);
 
-    if (!args.targetArch.empty()) {
-        if (args.targetArch == "arm64") {
-            cfg.targetArch = TargetArch::ARM64;
-            cfg.cacheLineBytes = 64;
-        } else if (args.targetArch == "arm64-apple") {
-            cfg.targetArch = TargetArch::ARM64Apple;
-            cfg.cacheLineBytes = 128;
-            cfg.cacheLineSpanWarn = 128;
-            cfg.cacheLineSpanCrit = 256;
-        } else if (args.targetArch == "x86-64") {
-            cfg.targetArch = TargetArch::X86_64;
-        } else {
-            llvm::errs() << "lshaz scan: unknown --target-arch '"
-                         << args.targetArch
-                         << "' (valid: x86-64, arm64, arm64-apple)\n";
-            return 3;
-        }
-    }
+    if (!applyTargetArch(cfg, args.targetArch))
+        return 3;
 
     if (!args.allocator.empty())
         cfg.linkedAllocator = args.allocator;
