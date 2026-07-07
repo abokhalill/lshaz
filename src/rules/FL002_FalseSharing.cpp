@@ -69,8 +69,26 @@ public:
         // for most-but-not-all base alignments the allocator may pick.
         bool exactLayout = map.isCacheLineAligned();
 
+        // explicit line alignment / trailing pad-to-line = the author
+        // already reasons in cache lines; co-located atomics under that
+        // idiom are typically single-writer by design (IOThread,
+        // used_memory_entry). structurally true, so report — but not at
+        // strike severity. FL041 deliberately exempt: head/tail naming
+        // implies multi-writer roles where this idiom IS the bug.
+        bool deliberateLayout =
+            exactLayout ||
+            CacheLineMap::hasTrailingLinePad(RD, Ctx, Cfg.cacheLineBytes);
+
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
+        if (deliberateLayout) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "deliberate cache-line layout detected (explicit alignment "
+                "or trailing line padding): co-located atomics are often "
+                "single-writer by design — verify write ownership before "
+                "acting");
+        }
 
         constexpr size_t kMaxDetailedPairs = 5;
         constexpr size_t kMaxDetailedLines = 5;

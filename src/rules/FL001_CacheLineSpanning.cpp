@@ -106,6 +106,17 @@ public:
                 "%): escape via shared_ptr/publication only");
         }
 
+        if (map.totalAtomicFields() > 0 &&
+            (map.isCacheLineAligned() ||
+             CacheLineMap::hasTrailingLinePad(RD, Ctx, Cfg.cacheLineBytes)) &&
+            sev > Severity::Medium) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "deliberate cache-line layout detected (explicit alignment "
+                "or trailing line padding): verify write ownership before "
+                "acting");
+        }
+
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 

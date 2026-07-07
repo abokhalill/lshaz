@@ -120,6 +120,31 @@ bool CacheLineMap::isAtomicType(clang::QualType QT) const {
     return false;
 }
 
+bool CacheLineMap::hasTrailingLinePad(const clang::RecordDecl *RD,
+                                      clang::ASTContext &Ctx,
+                                      uint64_t lineBytes) {
+    if (!RD || !RD->isCompleteDefinition() || lineBytes == 0)
+        return false;
+    if (!canComputeRecordLayout(RD, Ctx))
+        return false;
+    const clang::FieldDecl *last = nullptr;
+    for (const auto *f : RD->fields())
+        last = f;
+    if (!last)
+        return false;
+    const auto *AT = Ctx.getAsConstantArrayType(last->getType());
+    if (!AT || !AT->getElementType()->isCharType())
+        return false;
+    const auto &layout = Ctx.getASTRecordLayout(RD);
+    uint64_t size = layout.getSize().getQuantity();
+    if (size == 0 || size % lineBytes != 0)
+        return false;
+    uint64_t padOffset =
+        layout.getFieldOffset(last->getFieldIndex()) / 8;
+    uint64_t padSize = Ctx.getTypeSizeInChars(last->getType()).getQuantity();
+    return padOffset + padSize == size;
+}
+
 bool CacheLineMap::isFieldMutable(const clang::FieldDecl *FD) {
     if (!FD)
         return false;

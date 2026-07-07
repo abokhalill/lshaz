@@ -81,6 +81,13 @@ public:
     // real false sharing.
     bool isRefcountOnly() const;
 
+    // trailing byte-array pad reaching an exact line multiple: the
+    // used_memory_entry idiom. paired with explicit alignment it is the
+    // strongest available signal of deliberate, line-aware layout.
+    static bool hasTrailingLinePad(const clang::RecordDecl *RD,
+                                   clang::ASTContext &Ctx,
+                                   uint64_t lineBytes);
+
 private:
     void collectFields(const clang::RecordDecl *RD,
                        clang::ASTContext &Ctx,
