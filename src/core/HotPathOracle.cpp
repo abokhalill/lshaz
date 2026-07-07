@@ -25,12 +25,13 @@ bool HotPathOracle::isFunctionHot(const clang::FunctionDecl *FD) const {
     if (!FD)
         return false;
 
-    if (hotCache_.count(FD))
+    const auto *canon = FD->getCanonicalDecl();
+    if (hotCache_.count(canon))
         return true;
 
     if (hasHotAnnotation(FD) || matchesConfigPattern(FD) ||
         matchesProfileFunction(FD)) {
-        hotCache_.insert(FD);
+        hotCache_.insert(canon);
         return true;
     }
 
@@ -59,7 +60,7 @@ bool HotPathOracle::matchesProfileFunction(
 
 void HotPathOracle::markHot(const clang::FunctionDecl *FD) {
     if (FD)
-        hotCache_.insert(FD);
+        hotCache_.insert(FD->getCanonicalDecl());
 }
 
 bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
