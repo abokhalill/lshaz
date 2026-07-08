@@ -157,8 +157,9 @@ diagnostic's escalation trace — refinement is visible, never silent.
 In execution order:
 
 1. **Canonical sort** of merged diagnostics (see Determinism).
-2. **FL040 reduce** — sums per-TU write counts per `(var, type)` and applies
-   the write-once threshold on the global sum.
+2. **FL040 reduce** — sums per-TU write and loop-write counts per
+   `(var, type)` and grades severity on the global aggregate (write
+   pressure, not site count; see [rules.md](rules.md#fl040--centralized-mutable-global-state)).
 3. **Cross-TU escape suppression** — per-TU `EscapeSummary` maps are merged;
    diagnostics whose `type_name` shows no escape evidence in any TU are
    suppressed. Runs before dedup so all duplicate instances are reclassified

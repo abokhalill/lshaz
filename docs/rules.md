@@ -334,14 +334,27 @@ but one socket under NUMA.
 **Detection:** Global or namespace-scope mutable variables. Write sites are
 counted per TU across **all** write forms (plain assignment, `++`/`--`,
 member writes through the global, and every atomic form — an `atomicIncr`
-macro expanding to `__atomic_add_fetch` counts). Variables containing or
-being atomic rate Critical: the author has confirmed multi-writer intent.
+macro expanding to `__atomic_add_fetch` counts), with loop context recorded
+per site.
+
+**Severity grades on write pressure, not site count** — write rate is what
+coherence sees:
+
+| Evidence (global aggregate) | Verdict |
+|---|---|
+| Atomic + any in-loop write, or ≥4 flat sites | Critical |
+| Atomic + 2–3 flat sites (start/stop lifecycle signature) | High |
+| Plain type, multiple sites | High |
+| Plain type, single in-loop site (one write path; concurrent writers would be a data race) | Informational |
+| At most one flat write total (write-once: configuration, not contention) | Informational |
+
+A single site inside a loop is never write-once — one *site* is not one
+*write*.
 
 **Cross-TU aggregation:** FL040 is map/reduce. Each TU emits candidates
-unconditionally with per-TU write counts; the pipeline sums counts globally
-before applying the write-once threshold. Verdicts are therefore identical
-regardless of shard count. Write-once globals (initialized once, at most one
-body write) are suppressed — configuration, not contention.
+unconditionally with per-TU write and loop-write counts; the pipeline sums
+globally before grading. Verdicts are therefore identical regardless of
+shard count.
 
 **Mitigation:** Per-thread/per-core partitions with read-time aggregation;
 dependency injection over ambient state.
