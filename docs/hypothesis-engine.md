@@ -1,162 +1,120 @@
 # Hypothesis Engine
 
-The hypothesis engine generates formal experiment designs for runtime validation of flagged hazards. The `lshaz hyp` and `lshaz exp` subcommands operate standalone on scan JSON. The `--calibration-store` flag enables closed-loop feedback integration during scans.
+Static analysis identifies structural risk; it cannot measure runtime impact.
+The hypothesis engine closes that gap: it converts findings into falsifiable
+experiments, measures them on hardware, and feeds the verdicts back into scan
+calibration.
 
-## Overview
+```
+scan → hyp → exp → build/run → feedback → scan (with suppression)
+```
 
-The engine transforms static analysis findings into falsifiable experiments with measurable outcomes. It bridges the gap between structural analysis (compile-time) and runtime validation (PMU counters, latency measurements).
+Every stage is a standalone CLI subcommand operating on files; flags are in
+[configuration.md](configuration.md).
 
-## Components
+## Stage 1: `lshaz hyp` — hypothesis construction
 
-### HypothesisConstructor
+Maps each diagnostic to a `LatencyHypothesis`:
 
-Maps each diagnostic to a `LatencyHypothesis` containing:
-
-| Field | Description |
+| Field | Content |
 |---|---|
-| H0 (null hypothesis) | The flagged pattern does not cause measurable latency impact |
-| H1 (alternative hypothesis) | The flagged pattern causes latency degradation exceeding the minimum detectable effect |
-| Primary metric | p99 / p99.9 / p99.99 latency |
-| Required PMU counters | Hardware counters needed to measure the effect |
-| Optional PMU counters | Additional counters for deeper analysis |
-| Minimum detectable effect | Smallest effect size the experiment can reliably detect |
-| Significance level | α = 0.01 |
-| Target power | 1 − β = 0.90 |
-| Confound controls | Variables that must be held constant |
+| H0 / H1 | Null: the flagged pattern has no measurable latency impact. Alternative: degradation exceeds the minimum detectable effect. |
+| Primary metric | Tail latency percentile under test (p99 / p99.9 / p99.99) |
+| PMU counters | Required and optional hardware counters, partitioned into groups that fit the PMU multiplexing limit |
+| MDE | Minimum detectable effect (default 5% relative) |
+| α, power | Significance 0.01, target power 0.90 |
+| Confound controls | Turbo, C-states, THP, ASLR, governor, interrupt isolation |
+| Structural features | The diagnostic's evidence vector, embedded for later calibration matching |
 
-### ExperimentSynthesizer
+Every hazard class the rules emit has a hypothesis template. Evidence tier is
+inferred from the structural evidence: AST-provable layout facts → `Proven`,
+concurrency signals → `Likely`, otherwise `Speculative`.
 
-Generates runnable experiment bundles written to disk:
+Input is scan JSON. Hypothesis JSON is an output artifact — passing it back
+into `hyp` or `exp` is rejected with an actionable error.
 
-- Treatment/control C++ harnesses
-- Build scripts and Makefile
-- `perf stat` collection scripts
-- Hypothesis metadata JSON
-- README with execution instructions
+## Stage 2: `lshaz exp` — experiment synthesis
 
-### MeasurementPlanGenerator
+Generates one self-contained directory per hypothesis:
 
-Partitions counter sets into hardware-compatible groups (respecting per-group counter limits) and generates:
+| Artifact | Purpose |
+|---|---|
+| `src/common.h` | Anti-elision primitives (`lshaz_do_not_optimize`, `lshaz_clobber_memory`), `lfence`-bracketed `rdtsc` |
+| `src/treatment.cpp` | Kernel reproducing the hazard, parameterized by the diagnostic's structural evidence (`sizeof`, `estimated_frame`, `depth`, …) |
+| `src/control.cpp` | The same kernel with the hazard removed (aligned, sharded, direct-dispatch, …) |
+| `src/harness.cpp` | Warmup → measurement loop, core pinning, binary sample output; dispatches variants via `--variant` |
+| `analyze` (built by the Makefile) | Bootstraps the (1−α) percentile CI of the **relative p99.9 effect** between arms (percentile-method bootstrap; `--bootstrap` reps, α configurable) |
+| `Makefile` | Treatment and control compiled as **separate TUs**, linked into one binary — the compiler cannot optimize across the comparison boundary |
+| `scripts/setup_env.sh` | Disables turbo/THP/ASLR/C-states, sets performance governor, records the achieved environment to `results/env.json` |
+| `scripts/run_all.sh` | Preflight (`perf_event_paranoid` check) → build → per-variant runs with guarded PMU passes; any failed pass tears the environment down and exits non-zero rather than reporting partial results |
+| `scripts/run_perf_stat.sh` / `run_perf_c2c.sh` | Counter collection partitioned to PMU limits; `perf c2c` for sharing/contention classes |
+| `hypothesis.json` | Machine-readable hypothesis, including the structural features required by `feedback` |
+| `README.md` | Human-readable design with the statistical parameters |
 
-- `perf stat` scripts for counter collection
-- `perf c2c` scripts for false sharing detection
-- `perf record -b` (LBR) scripts for branch analysis
+13 hazard classes have dedicated treatment/control kernel generators.
+CentralizedDispatch, HazardAmplification, and SynthesizedInteraction emit
+editable stubs — compound hazards need context a generator cannot invent.
 
-### CalibrationFeedbackStore
+### Perf access
 
-Ingests experiment results and maintains:
-
-- Per-diagnostic labels: Positive, Negative, Unlabeled, Excluded
-- Per-rule false-positive rate tracking
-- Feature-neighborhood false-positive registry (Euclidean distance, radius 0.25)
-
-Safety rail: Critical or High severity findings with Proven evidence tier are never suppressed by calibration.
-
-### PMUTraceFeedbackLoop
-
-Closed-loop learning from production PMU traces:
-
-1. Ingests counter data collected at flagged sites
-2. Evaluates against per-hazard-class thresholds
-3. Updates Bayesian priors
-4. Feeds labeled records back into the calibration store
-
-Priors persist across runs via `--pmu-priors`.
-
-## CLI Subcommands
-
-### `lshaz hyp` — Generate Hypotheses
-
-Reads a **scan result** JSON (the output of `lshaz scan --format json`) and emits formal hypotheses for each diagnostic.
+`run_all.sh` fails fast when `perf_event_paranoid` is too restrictive:
 
 ```bash
-# Write hypotheses to a file
-lshaz hyp scan-results.json --output hypotheses.json
-
-# Write to stdout (default if --output is omitted)
-lshaz hyp scan-results.json
-
-# Filter by rule and minimum confidence
-lshaz hyp scan-results.json --rule FL002 --min-conf 0.7 -o out.json
-```
-
-| Flag | Description |
-|---|---|
-| `-o, --output <file>` | Write hypothesis JSON to file (default: stdout) |
-| `--rule <id>` | Only hypothesize for a specific rule ID |
-| `--min-conf <f>` | Minimum confidence threshold (default: 0.0) |
-
-Output includes H0/H1, required PMU counters, minimum detectable effect, and confound controls for each finding.
-
-> **Important:** The input must be scan JSON (containing a `"diagnostics"` array). Passing hypothesis JSON (the output of `lshaz hyp`) will produce an error. The hypothesis file is an output artifact, not an input to further pipeline stages.
-
-### `lshaz exp` — Synthesize Experiments
-
-Generates runnable experiment bundles (treatment/control harnesses, build scripts, perf stat collection).
-
-**Input:** `lshaz exp` requires the **original scan result JSON** — the same file you pass to `lshaz hyp`. It does **not** accept hypothesis JSON. If you pass hypothesis output by mistake, it will fail with:
-
-```
-lshaz exp: file contains hypothesis output, not scan results.
-Pass the original scan JSON (from 'lshaz scan'), not the output of 'lshaz hyp'.
-```
-
-```bash
-# Generate experiments into ./experiments/
-lshaz exp scan-results.json --output ./experiments
-
-# Preview without writing files
-lshaz exp scan-results.json --dry-run
-
-# Filter by rule and confidence
-lshaz exp scan-results.json --rule FL002 --min-conf 0.7 -o ./experiments
-```
-
-| Flag | Description |
-|---|---|
-| `-o, --output <dir>` | Output directory (default: `./experiments`) |
-| `--rule <id>` | Only generate for a specific rule ID |
-| `--min-conf <f>` | Minimum confidence threshold (default: 0.5) |
-| `--sku <name>` | CPU SKU family (default: `generic`) |
-| `--dry-run` | Show what would be generated without writing |
-
-Each experiment directory contains a README, Makefile, harness sources, and hypothesis metadata.
-
-### Perf Access Requirements
-
-Generated `scripts/run_all.sh` includes a **preflight check** for `perf_event_paranoid`. If the system restricts perf access (paranoid > 1) and the script is not run as root, it will fail immediately with actionable instructions:
-
-```
-[lshaz] ERROR: perf_event_paranoid=4 (needs <=1 or root)
-  Fix: sudo sysctl kernel.perf_event_paranoid=1
-  Or run this script with sudo.
-```
-
-To configure perf access system-wide:
-
-```bash
-# Temporary (until reboot)
-sudo sysctl kernel.perf_event_paranoid=1
-
-# Permanent
+sudo sysctl kernel.perf_event_paranoid=1                  # until reboot
 echo 'kernel.perf_event_paranoid=1' | sudo tee /etc/sysctl.d/99-perf.conf
-sudo sysctl --system
+sudo sysctl --system                                      # permanent
 ```
 
-On systems without passwordless sudo, either run the experiment script as root or configure `perf_event_paranoid` beforehand. The `setup_env.sh` and `teardown_env.sh` scripts also require root (they pin CPUs and disable frequency scaling).
+`setup_env.sh`/`teardown_env.sh` require root (frequency scaling, core
+isolation).
 
-### Calibration Feedback
+## Stage 3: `lshaz feedback` — verdict ingestion
 
-```bash
-# Run with calibration store
-lshaz scan . --calibration-store ./calibration.db
+Reads `hypothesis.json`, `results/{treatment,control}_samples.bin`, and
+`results/env.json`; computes per-arm percentile statistics, Welch's t-test,
+and the **achieved power** at the observed sample sizes (two-sample z
+approximation — target power is a design parameter, achieved power is what
+gates the verdict).
 
-# With PMU trace feedback
-lshaz scan . --calibration-store ./calibration.db \
-  --pmu-trace ./pmu-data.tsv \
-  --pmu-priors ./priors.json
-```
+| Verdict | Criterion |
+|---|---|
+| Confirmed | p ≤ α and effect ≥ MDE |
+| Refuted | p > 0.10 **and** achieved power ≥ 0.80 |
+| Inconclusive | otherwise |
 
-## Limitations
+### Feedback and quality gates
 
-Three hazard classes lack hypothesis templates: `DeepConditional` (FL050), `GlobalState` (FL040), and `CentralizedDispatch` (FL061). The hypothesis subsystem returns empty results for these classes.
+Each verdict is stored as a labeled record with a quality score:
+
+- Power factor (capped at 1.0)
+- Environment quality from `results/env.json` — penalties for missing
+  confound controls: turbo enabled −0.15, non-performance governor −0.10, no
+  core pinning −0.20
+- Confound risk margin
+
+Labels below 0.60 quality demote to unlabeled. Underpowered refutations never
+enter the false-positive registry: an experiment too weak to detect the
+effect is not evidence of absence. Bundles missing structural features
+(output of pre-feature tool versions) are refused outright.
+
+### Calibration store
+
+A versioned JSON file, written atomically (temp file + rename — a crashed
+write cannot corrupt the store). An absent file is a valid empty store; an
+unparseable file is a **hard error** (scan exits 3) — scanning with silently
+disabled calibration would misreport findings the user believes are
+calibrated.
+
+On subsequent scans with `--calibration-store`, a diagnostic is suppressed
+when its 10-dimension structural feature vector falls within Euclidean radius
+0.25 of a pattern with **≥3 refuted** instances. Safety rail: Critical/High
+findings at `Proven` tier are never suppressed. Suppression counts are
+reported in the scan summary.
+
+## PMU trace feedback
+
+A parallel ingestion path from production `perf stat` data
+(`--pmu-trace <file>`): counters collected at flagged sites are evaluated
+against per-hazard-class thresholds, updating a Bayesian prior per class that
+blends with base confidence (production weight saturates at 50 observations).
+Priors persist across runs via `--pmu-priors <file>`.

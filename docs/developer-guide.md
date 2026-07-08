@@ -2,12 +2,12 @@
 
 ## Requirements
 
-| Dependency | Minimum Version |
+| Dependency | Version |
 |---|---|
-| Linux x86-64 | Required |
-| LLVM + Clang development libraries | 16 |
-| CMake | 3.20 |
-| C++ compiler with C++20 support | GCC 12+ or Clang 16+ |
+| Linux x86-64 | required |
+| LLVM + Clang development libraries | ≥16; 18 preferred (CI builds against 18) |
+| CMake | ≥3.20 |
+| C++20 compiler | GCC 13/14 or Clang 17/18 (the CI matrix) |
 
 ```bash
 # Ubuntu / Debian
@@ -31,97 +31,100 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
 ```
 
-### Build Outputs
+### Build outputs
 
 | Binary | Purpose |
 |---|---|
 | `build/lshaz` | The analyzer |
-| `build/analysis_ground_truth_test` | Analysis ground truth tests |
-| `build/output_contract_test` | Output schema contract tests |
-| `build/pipeline_unit_test` | Pipeline unit tests |
-| `build/scan_e2e_test` | End-to-end scan tests |
+| `build/analysis_ground_truth_test` | Layout / cache-line / escape ground truth (needs full Clang link) |
+| `build/output_contract_test` | JSON / SARIF / CLI output contracts |
+| `build/pipeline_unit_test` | Pipeline, IPC, escape summary, cross-TU suppression |
+| `build/scan_e2e_test` | End-to-end scan behavior |
 
 ## Testing
 
-216+ tests across four suites:
+Four hand-rolled harnesses (own `main()`, no framework, no arguments — each
+runs its full suite; narrow a run by editing the harness's `main()`):
 
 ```bash
-./build/analysis_ground_truth_test  # 88 tests — layout, cache line, escape analysis ground truth
-./build/output_contract_test        # 55 tests — JSON, SARIF, CLI output contracts
-./build/pipeline_unit_test          # 73 tests — pipeline, IPC, escape summary, cross-TU suppression
-./build/scan_e2e_test               # end-to-end scan behavior
+./build/analysis_ground_truth_test   # 88 tests
+./build/output_contract_test         # 55 tests
+./build/pipeline_unit_test           # 73 tests
+./build/scan_e2e_test                # 71 tests
 ```
 
-All tests must pass before committing.
+**All four must pass before committing.** CI
+(`.github/workflows/ci.yml`) builds a gcc-13/14 × clang-17/18 matrix against
+LLVM 18 with Ninja + ccache and runs the three suites that do not need a full
+Clang link.
 
-## Architecture
+When changing analysis semantics, validate against a real corpus as well: a
+full scan of a pinned OSS tree before and after the change, with every count
+or severity delta attributed to the change that caused it. Determinism is part
+of the bar — `md5sum` over timestamp-stripped JSON from `--jobs 1` and
+`--jobs N` must match.
 
-The codebase is organized as:
+## Codebase layout
 
 ```
 src/
-  main.cpp                     # Entry point, subcommand dispatch
-  cli/
-    ScanCommand.cpp            # lshaz scan implementation
-    InitCommand.cpp            # lshaz init — project setup, compile_commands.json generation
-    DiffCommand.cpp            # lshaz diff — scan result comparison
-    FixCommand.cpp             # lshaz fix — auto-remediation
-    ExplainCommand.cpp         # lshaz explain implementation
-    HypCommand.cpp             # lshaz hyp — hypothesis generation
-    ExpCommand.cpp             # lshaz exp — experiment synthesis
-    FeedbackCommand.cpp        # lshaz feedback — experiment result ingestion
-    ScanResultParser.cpp       # JSON scan result parser for hyp/exp
+  main.cpp                     # flat strcmp subcommand dispatch
+  cli/                         # one file per subcommand
+    ScanCommand.cpp            #   scan (incl. single-file mode)
+    InitCommand.cpp            #   init — build-system detection, compile_commands.json
+    DiffCommand.cpp            #   diff — scan comparison / CI gate
+    FixCommand.cpp             #   fix — mechanical remediation
+    ExplainCommand.cpp         #   explain — rule mechanisms
+    HypCommand.cpp             #   hyp — hypothesis construction
+    ExpCommand.cpp             #   exp — experiment synthesis
+    FeedbackCommand.cpp        #   feedback — verdict ingestion, statistics
+    ScanResultParser.cpp       #   scan-JSON parser shared by hyp/exp
   analysis/
-    LshazASTConsumer.cpp       # AST traversal, rule dispatch, suppression
-    LshazAction.cpp            # Clang FrontendAction + factory
-    CacheLineMap.cpp           # Cache line mapping for struct fields
-    EscapeAnalysis.cpp         # Thread-escape heuristics
-    StructLayoutVisitor.cpp    # Recursive struct layout walker
-    AllocatorTopology.cpp      # Allocator classification
-    NUMATopology.cpp           # NUMA placement inference
-    CallGraph.cpp              # Per-TU call graph construction
-    DataFlowAnalyzer.cpp       # Intra-procedural data-flow analysis
-  rules/
-    FL001_CacheLineSpanning.cpp
-    FL002_FalseSharing.cpp
-    ...                        # One file per rule
+    LshazASTConsumer.cpp       # TU walk, rule dispatch, inline suppression
+    LshazAction.cpp            # FrontendAction + factory
+    CacheLineMap.cpp           # field→line mapping, pair co-residency, straddle semantics
+    EscapeAnalysis.cpp         # escape signals, global/field write collection
+    StructLayoutVisitor.cpp    # recursive layout walker
+    AllocatorTopology.cpp      # allocator contention classes
+    NUMATopology.cpp           # first-touch placement inference
+    CallGraph.cpp              # per-TU call graph
+    DataFlowAnalyzer.cpp       # intra-procedural taint (heap, atomic-feeds-branch)
+  rules/                       # one file per FL0xx rule, stateless singletons
   pipeline/
-    ScanPipeline.cpp           # Orchestration: AST + IR + post-processing
-    CompileDBResolver.cpp      # compile_commands.json discovery/generation
-    AbsolutePathCompilationDatabase.cpp  # Wrapper resolving relative paths to absolute
-    RepoProvider.cpp           # Git clone for remote URLs
-    SourceFilter.cpp           # Glob-based source filtering
+    ScanPipeline.cpp           # orchestration: fork shards, IPC, merge, post-processing
+    CompileDBResolver.cpp      # compile_commands.json discovery
+    AbsolutePathCompilationDatabase.cpp
+    RepoProvider.cpp           # remote URL cloning
+    SourceFilter.cpp           # include/exclude globs
+  core/
+    DiagnosticDedup.cpp        # cross-TU dedup, survivor selection
+    DiagnosticInteraction.cpp  # FL091 entity-keyed synthesis
+    Diagnostic.cpp             # diagnosticContentLess total order
+    HotPathOracle.cpp          # hotness classification
+    RuleRegistry.cpp           # LSHAZ_REGISTER_RULE machinery
+    Config.cpp                 # YAML config
   ir/
-    IRAnalyzer.cpp             # LLVM IR analysis
-    DiagnosticRefiner.cpp      # Confidence adjustment from IR evidence
+    IRAnalyzer.cpp             # LLVM IR facts per function
+    DiagnosticRefiner.cpp      # confidence deltas from IR evidence
   hypothesis/
-    HypothesisConstructor.cpp  # Hypothesis formalization
-    ExperimentSynthesizer.cpp  # Experiment bundle generation
-    MeasurementPlan.cpp        # PMU counter grouping
-    CalibrationFeedback.cpp    # Feedback store
-    PMUTraceFeedback.cpp       # Closed-loop PMU learning
-    InteractionModel.cpp       # FL091 interaction synthesis
-  output/
-    JSONOutput.cpp             # JSON formatter
-    SARIFOutput.cpp            # SARIF 2.1.0 formatter
-    CLIOutput.cpp              # Terminal formatter
-    ClangTidyOutput.cpp        # clang-tidy-compatible formatter
+    HypothesisConstructor.cpp  # diagnostic → LatencyHypothesis
+    HypothesisTemplate.cpp     # per-hazard-class templates
+    ExperimentSynthesizer.cpp  # kernel + bundle generation
+    MeasurementPlan.cpp        # PMU grouping, env setup scripts
+    CalibrationFeedback.cpp    # versioned store, label quality
+    PMUTraceFeedback.cpp       # production PMU ingestion
+    InteractionModel.cpp       # FL091 eligibility matrix
+  output/                      # JSON / SARIF / CLI / clang-tidy formatters
 
-include/lshaz/
-  core/                        # Diagnostic, Rule, Config, Severity, Version
-  analysis/                    # CacheLineMap, EscapeAnalysis, LayoutSafety, etc.
-  pipeline/                    # ScanPipeline, ScanRequest, ScanResult
-  output/                      # OutputFormatter interface
-  ir/                          # IRAnalyzer, DiagnosticRefiner
-  hypothesis/                  # Hypothesis engine interfaces
-
-test/fixtures/hft_core/        # Test fixture files
+include/lshaz/                 # public headers mirroring src/ structure
+test/fixtures/                 # scan fixtures for the e2e suite
+docs/                          # this documentation
 ```
 
-## Adding a New Rule
+## Adding a rule
 
-1. Create `src/rules/FLXXX_YourRule.cpp`
-2. Implement the `Rule` interface:
+1. Create `src/rules/FLXXX_YourRule.cpp` implementing the `Rule` interface:
+
    ```cpp
    class FLXXX_YourRule : public Rule {
    public:
@@ -135,29 +138,22 @@ test/fixtures/hft_core/        # Test fixture files
                     std::vector<Diagnostic> &out) override;
    };
    ```
-3. Register with `LSHAZ_REGISTER_RULE(FLXXX_YourRule)` at the bottom of the file
-4. Add the `.cpp` to `CMakeLists.txt` `LSHAZ_SOURCES`
-5. Add test fixtures and update `scan_e2e_test`
 
-Rules must map to a concrete hardware mechanism. If it cannot be tied to cache, coherence, store buffer, TLB, branch predictor, NUMA, or allocator — it does not belong.
+2. Register with `LSHAZ_REGISTER_RULE(FLXXX_YourRule)` at the bottom of the
+   file.
+3. Add the `.cpp` to `LSHAZ_SOURCES` in `CMakeLists.txt` (the list is
+   explicit, not globbed).
+4. Add fixtures under `test/fixtures/` and extend `scan_e2e_test`.
 
-## OSS Validation Targets
+Constraints that are not optional:
 
-The tool is regularly stress-tested against open-source codebases:
-
-| Project | Build System | TUs | Notes |
-|---|---|---|---|
-| Redis | Make/bear | 276 | C, moderate concurrency |
-| DPDK | Meson | 2059 | C, large scale, generated headers |
-| memcached | autotools/bear | 65 | C, heavy threading + atomics |
-| libuv | CMake | 238 | C, I/O concurrency, clean CMake |
-| folly | CMake | 356 | C++, atomics-heavy, deep templates, 2540 escape types |
-
-These targets exercise different axes: build system integration, scale, template depth, escape analysis density, and crash recovery.
-
-## Commit Discipline
-
-- Each commit must be logically atomic and traceable to a specific change
-- All tests must pass before pushing
-- No batching of unrelated changes
-- Prefer minimal upstream fixes over downstream workarounds
+- **Mechanism or it does not ship.** The rule must map to cache, coherence,
+  store buffer, TLB, branch predictor, NUMA, or allocator.
+- **Stateless rules.** All per-TU state comes from the injected analyses.
+  Caching analysis state on the rule object has caused real non-determinism
+  under forked parallelism.
+- **Cross-TU logic is map/reduce.** Emit per-TU facts; let the pipeline
+  compute the global verdict (see FL040). Never emit a per-TU partial
+  verdict.
+- **Determinism is part of review.** Byte-identical output across `--jobs`
+  values, verified on a real corpus, not just the suites.
