@@ -94,6 +94,12 @@ private:
                        uint64_t baseOffsetBytes);
     void buildBuckets();
 
+    // exists a realizable base shift placing both fields on one line.
+    // bucket co-membership alone over-approximates: it unions each
+    // field's line range across shifts, pairing fields that never
+    // co-reside at the same shift.
+    bool canCoReside(const FieldLineEntry *a, const FieldLineEntry *b) const;
+
     bool isAtomicType(clang::QualType QT) const;
     static bool isFieldMutable(const clang::FieldDecl *FD);
 

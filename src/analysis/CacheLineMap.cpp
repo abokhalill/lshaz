@@ -309,6 +309,22 @@ void dedupePairs(std::vector<CacheLineMap::SharedLinePair> &pairs) {
 
 } // anonymous namespace
 
+bool CacheLineMap::canCoReside(const FieldLineEntry *a,
+                               const FieldLineEntry *b) const {
+    uint64_t lo = std::min(a->offsetBytes, b->offsetBytes);
+    uint64_t hi = std::max(a->offsetBytes + std::max<uint64_t>(a->sizeBytes, 1),
+                           b->offsetBytes + std::max<uint64_t>(b->sizeBytes, 1));
+    if (hi - lo > cacheLineBytes_)
+        return false;
+    // step = recordAlign degenerates to the exact same-line test (s=0
+    // only) when the record is line-aligned.
+    uint64_t step = std::min(recordAlign_, cacheLineBytes_);
+    for (uint64_t s = 0; s < cacheLineBytes_; s += step)
+        if ((lo + s) / cacheLineBytes_ == (hi - 1 + s) / cacheLineBytes_)
+            return true;
+    return false;
+}
+
 std::vector<CacheLineMap::SharedLinePair>
 CacheLineMap::mutablePairsOnSameLine() const {
     std::vector<SharedLinePair> result;
@@ -318,6 +334,8 @@ CacheLineMap::mutablePairsOnSameLine() const {
                 continue;
             for (size_t j = i + 1; j < bucket.fields.size(); ++j) {
                 if (!bucket.fields[j]->isMutable)
+                    continue;
+                if (!canCoReside(bucket.fields[i], bucket.fields[j]))
                     continue;
                 result.push_back({bucket.fields[i], bucket.fields[j],
                                   bucket.lineIndex});
@@ -337,6 +355,8 @@ CacheLineMap::atomicPairsOnSameLine() const {
                 continue;
             for (size_t j = i + 1; j < bucket.fields.size(); ++j) {
                 if (!bucket.fields[j]->isAtomic)
+                    continue;
+                if (!canCoReside(bucket.fields[i], bucket.fields[j]))
                     continue;
                 result.push_back({bucket.fields[i], bucket.fields[j],
                                   bucket.lineIndex});
