@@ -57,8 +57,22 @@ public:
         if (signalCount < 3)
             return;
 
+        // same demotion contract as FL001/FL002: the compound must not
+        // outrank its mitigation-adjusted components.
+        bool deliberateLayout =
+            map.isCacheLineAligned() ||
+            CacheLineMap::hasTrailingLinePad(RD, Ctx, Cfg.cacheLineBytes);
+
         Severity sev = Severity::Critical;
         std::vector<std::string> escalations;
+        if (deliberateLayout) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "deliberate cache-line layout detected (explicit alignment "
+                "or trailing line padding): co-located atomics are often "
+                "single-writer by design — verify write ownership before "
+                "acting");
+        }
 
         unsigned atomicLines = 0;
         unsigned hotLines = 0;
