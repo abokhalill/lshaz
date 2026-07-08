@@ -103,6 +103,8 @@ public:
             {"atomics", hasAtomics ? "yes" : "no"},
             {"has_init", hasInit ? "yes" : "no"},
             {"tu_write_count", std::to_string(tuWriteCount)},
+            {"tu_loop_writes",
+             std::to_string(escape.getGlobalLoopWriteCount(VD))},
         };
 
         diag.mitigation =

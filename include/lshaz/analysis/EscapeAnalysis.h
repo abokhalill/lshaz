@@ -98,6 +98,10 @@ public:
     // only explicit assignments/increments in function bodies within this TU.
     unsigned getGlobalWriteCount(const clang::VarDecl *VD) const;
 
+    // Writes to the global inside a loop. One in-loop site can sustain
+    // millions of RFOs/s; site count alone cannot see that.
+    unsigned getGlobalLoopWriteCount(const clang::VarDecl *VD) const;
+
     // Per-field write evidence within this TU: direct member mutation
     // (assignment, ++/--, atomic store/RMW forms) attributed to the
     // enclosing function. Constructor member-init lists deliberately
@@ -132,6 +136,7 @@ private:
     // Key: VarDecl canonical pointer. Value: number of write sites in TU
     // (excluding the initializer expression on the VarDecl itself).
     std::unordered_map<const clang::VarDecl *, unsigned> globalWriteCounts_;
+    std::unordered_map<const clang::VarDecl *, unsigned> globalLoopWriteCounts_;
 
     // Per-type: how many distinct functions access fields of this type.
     // Key: canonical RecordDecl*. Populated by scanTranslationUnit Pass 4.

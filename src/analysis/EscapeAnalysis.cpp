@@ -453,13 +453,43 @@ public:
                            EscapeAnalysis::FieldWriteRecord>;
 
     std::unordered_map<const clang::VarDecl *, unsigned> &counts;
+    std::unordered_map<const clang::VarDecl *, unsigned> &loopCounts;
     FieldWrites &fieldWrites;
     const clang::FunctionDecl *currentFn = nullptr;
+    unsigned loopDepth = 0;
 
     GlobalWriteVisitor(
         std::unordered_map<const clang::VarDecl *, unsigned> &c,
+        std::unordered_map<const clang::VarDecl *, unsigned> &lc,
         FieldWrites &fw)
-        : counts(c), fieldWrites(fw) {}
+        : counts(c), loopCounts(lc), fieldWrites(fw) {}
+
+    // write rate, not site count, is what coherence sees: a write under
+    // any of these is repeatable per iteration.
+    bool TraverseForStmt(clang::ForStmt *S) {
+        ++loopDepth;
+        bool r = RecursiveASTVisitor::TraverseForStmt(S);
+        --loopDepth;
+        return r;
+    }
+    bool TraverseWhileStmt(clang::WhileStmt *S) {
+        ++loopDepth;
+        bool r = RecursiveASTVisitor::TraverseWhileStmt(S);
+        --loopDepth;
+        return r;
+    }
+    bool TraverseDoStmt(clang::DoStmt *S) {
+        ++loopDepth;
+        bool r = RecursiveASTVisitor::TraverseDoStmt(S);
+        --loopDepth;
+        return r;
+    }
+    bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
+        ++loopDepth;
+        bool r = RecursiveASTVisitor::TraverseCXXForRangeStmt(S);
+        --loopDepth;
+        return r;
+    }
 
     bool VisitBinaryOperator(clang::BinaryOperator *BO) {
         if (!BO->isAssignmentOp())
@@ -533,8 +563,11 @@ private:
                 E = UO->getSubExpr()->IgnoreParenImpCasts();
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
             if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl())) {
-                if (VD->hasGlobalStorage())
+                if (VD->hasGlobalStorage()) {
                     ++counts[VD->getCanonicalDecl()];
+                    if (loopDepth > 0)
+                        ++loopCounts[VD->getCanonicalDecl()];
+                }
             }
         }
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
@@ -586,7 +619,8 @@ void EscapeAnalysis::collectTypeAccessors(
 
 void EscapeAnalysis::collectGlobalWriteSites(
     const std::vector<const clang::FunctionDecl *> &bodies) {
-    GlobalWriteVisitor visitor(globalWriteCounts_, fieldWrites_);
+    GlobalWriteVisitor visitor(globalWriteCounts_, globalLoopWriteCounts_,
+                               fieldWrites_);
     for (const auto *FD : bodies) {
         visitor.currentFn = FD;
         visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
@@ -627,6 +661,14 @@ unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {
         return 0;
     auto it = globalWriteCounts_.find(VD->getCanonicalDecl());
     return (it != globalWriteCounts_.end()) ? it->second : 0;
+}
+
+unsigned EscapeAnalysis::getGlobalLoopWriteCount(
+    const clang::VarDecl *VD) const {
+    if (!VD || !VD->hasGlobalStorage())
+        return 0;
+    auto it = globalLoopWriteCounts_.find(VD->getCanonicalDecl());
+    return (it != globalLoopWriteCounts_.end()) ? it->second : 0;
 }
 
 bool EscapeAnalysis::isWriteOnceGlobal(const clang::VarDecl *VD) const {

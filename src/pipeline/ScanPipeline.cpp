@@ -1334,6 +1334,7 @@ ScanResult ScanPipeline::run(
         // Accumulate: key = "var|type", value = {total_writes, any_has_init}
         struct FL040Agg {
             unsigned totalWrites = 0;
+            unsigned loopWrites = 0;
             bool anyHasInit = false;
         };
         std::unordered_map<std::string, FL040Agg> fl040Agg;
@@ -1348,15 +1349,19 @@ ScanResult ScanPipeline::run(
                 key += "|" + typeIt->second;
 
             auto wcIt = d.structuralEvidence.find("tu_write_count");
+            auto lwIt = d.structuralEvidence.find("tu_loop_writes");
             auto hiIt = d.structuralEvidence.find("has_init");
-            unsigned wc = 0;
+            unsigned wc = 0, lw = 0;
             if (wcIt != d.structuralEvidence.end())
                 wc = static_cast<unsigned>(std::stoul(wcIt->second));
+            if (lwIt != d.structuralEvidence.end())
+                lw = static_cast<unsigned>(std::stoul(lwIt->second));
             bool hi = (hiIt != d.structuralEvidence.end()
                        && hiIt->second == "yes");
 
             auto &agg = fl040Agg[key];
             agg.totalWrites += wc;
+            agg.loopWrites += lw;
             if (hi) agg.anyHasInit = true;
         }
 
@@ -1376,20 +1381,29 @@ ScanResult ScanPipeline::run(
             const auto &agg = it->second;
             // Same logic as EscapeAnalysis::isWriteOnceGlobal, but on
             // the global sum across all TUs instead of a single TU.
+            // One site inside a loop is one *site*, not one write —
+            // never write-once.
             bool writeOnce = false;
-            if (agg.anyHasInit && agg.totalWrites == 0)
-                writeOnce = true;
-            else if (!agg.anyHasInit && agg.totalWrites <= 1)
-                writeOnce = true;
-            else if (agg.anyHasInit && agg.totalWrites <= 1)
-                writeOnce = true;
+            if (agg.loopWrites == 0) {
+                if (agg.anyHasInit && agg.totalWrites == 0)
+                    writeOnce = true;
+                else if (agg.totalWrites <= 1)
+                    writeOnce = true;
+            }
 
             // Replace per-TU metadata with global verdict.
             d.structuralEvidence.erase("tu_write_count");
+            d.structuralEvidence.erase("tu_loop_writes");
             d.structuralEvidence.erase("has_init");
             d.structuralEvidence["write_once"] = writeOnce ? "yes" : "no";
             d.structuralEvidence["global_write_count"] =
                 std::to_string(agg.totalWrites);
+            d.structuralEvidence["global_loop_writes"] =
+                std::to_string(agg.loopWrites);
+
+            bool atomicVar =
+                d.structuralEvidence.count("atomics") &&
+                d.structuralEvidence.at("atomics") == "yes";
 
             if (writeOnce) {
                 d.severity = Severity::Informational;
@@ -1398,6 +1412,27 @@ ScanResult ScanPipeline::run(
                 d.escalations.push_back(
                     "write-once (global): across all TUs, at most one write "
                     "site — negligible runtime contention");
+            } else if (!atomicVar && agg.totalWrites <= 1) {
+                // single in-loop site on a plain type: repeated writes but
+                // one write path; concurrent writers would be a data race,
+                // not a latency hazard. thread confinement is the likely
+                // reading; keep it visible, not alarming.
+                d.severity = Severity::Informational;
+                d.confidence = 0.35;
+                d.evidenceTier = EvidenceTier::Speculative;
+                d.escalations.push_back(
+                    "single write site (in a loop) on a non-atomic global: "
+                    "one write path, no multi-writer topology");
+            } else if (d.severity == Severity::Critical &&
+                       agg.loopWrites == 0 && agg.totalWrites < 4) {
+                // Critical means sustained RFO pressure: a write in a loop,
+                // or write responsibility spread over >=4 sites. 2-3 flat
+                // sites is the start/stop lifecycle signature.
+                d.severity = Severity::High;
+                d.escalations.push_back(
+                    "atomic global with " + std::to_string(agg.totalWrites) +
+                    " flat write site(s) across all TUs, none in a loop: "
+                    "lifecycle-signaling pattern, not sustained contention");
             }
         }
     }
