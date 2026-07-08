@@ -98,6 +98,28 @@ public:
     // only explicit assignments/increments in function bodies within this TU.
     unsigned getGlobalWriteCount(const clang::VarDecl *VD) const;
 
+    // Per-field write evidence within this TU: direct member mutation
+    // (assignment, ++/--, atomic store/RMW forms) attributed to the
+    // enclosing function. Constructor member-init lists deliberately
+    // excluded: initialization is not contention.
+    struct FieldWriteEvidence {
+        unsigned writeSites = 0;
+        unsigned writerFunctions = 0;
+    };
+    FieldWriteEvidence fieldWriteEvidence(const clang::FieldDecl *FD) const;
+
+    // Union of the two fields' writer functions has >=2 members: the
+    // pair is written from more than one function in this TU. A single
+    // common writer is the init-pattern signature.
+    bool pairHasDistinctWriters(const clang::FieldDecl *A,
+                                const clang::FieldDecl *B) const;
+
+    // Public so the TU-scan visitor (anonymous namespace) can populate it.
+    struct FieldWriteRecord {
+        unsigned sites = 0;
+        std::unordered_set<const clang::FunctionDecl *> writers;
+    };
+
 private:
 
     clang::ASTContext &ctx_;
@@ -114,6 +136,11 @@ private:
     // Per-type: how many distinct functions access fields of this type.
     // Key: canonical RecordDecl*. Populated by scanTranslationUnit Pass 4.
     std::unordered_map<const clang::RecordDecl *, unsigned> typeAccessorCounts_;
+
+    // Per-field write sites and distinct writer functions. Key: canonical
+    // FieldDecl*. Populated alongside globalWriteCounts_ (same traversal).
+    std::unordered_map<const clang::FieldDecl *, FieldWriteRecord>
+        fieldWrites_;
 
     void collectGlobalWriteSites(
         const std::vector<const clang::FunctionDecl *> &bodies);

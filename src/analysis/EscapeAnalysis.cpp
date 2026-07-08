@@ -440,17 +440,26 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::RecordDecl *RD) const {
 
 namespace {
 
-// Counts write references to global variables within function bodies.
-// A "write" is: LHS of assignment/compound-assignment, ++/-- operand,
-// receiver of a non-const mutating atomic method, or target of a
-// C11/GNU atomic store/RMW.
+// Counts writes to globals and record fields in one traversal. A write:
+// LHS of assignment/compound-assignment, ++/-- operand, receiver of a
+// non-const mutating atomic method, target of a C11/GNU atomic
+// store/RMW. Constructor member-init lists excluded: init is not
+// contention.
 class GlobalWriteVisitor
     : public clang::RecursiveASTVisitor<GlobalWriteVisitor> {
 public:
+    using FieldWrites =
+        std::unordered_map<const clang::FieldDecl *,
+                           EscapeAnalysis::FieldWriteRecord>;
+
     std::unordered_map<const clang::VarDecl *, unsigned> &counts;
-    explicit GlobalWriteVisitor(
-        std::unordered_map<const clang::VarDecl *, unsigned> &c)
-        : counts(c) {}
+    FieldWrites &fieldWrites;
+    const clang::FunctionDecl *currentFn = nullptr;
+
+    GlobalWriteVisitor(
+        std::unordered_map<const clang::VarDecl *, unsigned> &c,
+        FieldWrites &fw)
+        : counts(c), fieldWrites(fw) {}
 
     bool VisitBinaryOperator(clang::BinaryOperator *BO) {
         if (!BO->isAssignmentOp())
@@ -528,8 +537,16 @@ private:
                     ++counts[VD->getCanonicalDecl()];
             }
         }
-        // Member access on a global: g.field = x counts as write to g.
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+            if (const auto *FD =
+                    llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl())) {
+                auto &rec = fieldWrites[llvm::cast<clang::FieldDecl>(
+                    FD->getCanonicalDecl())];
+                ++rec.sites;
+                if (currentFn)
+                    rec.writers.insert(currentFn->getCanonicalDecl());
+            }
+            // Member access on a global: g.field = x counts as write to g.
             recordWrite(ME->getBase());
         }
     }
@@ -569,9 +586,40 @@ void EscapeAnalysis::collectTypeAccessors(
 
 void EscapeAnalysis::collectGlobalWriteSites(
     const std::vector<const clang::FunctionDecl *> &bodies) {
-    GlobalWriteVisitor visitor(globalWriteCounts_);
-    for (const auto *FD : bodies)
+    GlobalWriteVisitor visitor(globalWriteCounts_, fieldWrites_);
+    for (const auto *FD : bodies) {
+        visitor.currentFn = FD;
         visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
+    }
+}
+
+EscapeAnalysis::FieldWriteEvidence
+EscapeAnalysis::fieldWriteEvidence(const clang::FieldDecl *FD) const {
+    if (!FD)
+        return {};
+    auto it = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl()));
+    if (it == fieldWrites_.end())
+        return {};
+    return {it->second.sites,
+            static_cast<unsigned>(it->second.writers.size())};
+}
+
+bool EscapeAnalysis::pairHasDistinctWriters(const clang::FieldDecl *A,
+                                            const clang::FieldDecl *B) const {
+    if (!A || !B)
+        return false;
+    auto ia = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(A->getCanonicalDecl()));
+    auto ib = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(B->getCanonicalDecl()));
+    if (ia == fieldWrites_.end() || ib == fieldWrites_.end())
+        return false;
+    const auto &wa = ia->second.writers;
+    const auto &wb = ib->second.writers;
+    if (wa.size() > 1 || wb.size() > 1)
+        return true;
+    return !wa.empty() && !wb.empty() && *wa.begin() != *wb.begin();
 }
 
 unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {

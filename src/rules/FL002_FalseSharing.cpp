@@ -133,6 +133,43 @@ public:
         else if (map.totalAtomicFields() > 0)
             confidence = 0.68;
 
+        // The strongest TU wins cross-TU dedup through confidence.
+        enum { kNoWrites, kPartial, kMultiWriter };
+        int wev = kNoWrites;
+        const auto &evPairs = hasAtomicPairs ? atomicPairs : mutablePairs;
+        for (const auto &p : evPairs) {
+            auto ea = escape.fieldWriteEvidence(p.a->decl);
+            auto eb = escape.fieldWriteEvidence(p.b->decl);
+            int level = kNoWrites;
+            if (ea.writeSites && eb.writeSites &&
+                escape.pairHasDistinctWriters(p.a->decl, p.b->decl)) {
+                level = kMultiWriter;
+                if (wev < kMultiWriter)
+                    escalations.push_back(
+                        "write evidence: '" + p.a->name + "' (" +
+                        std::to_string(ea.writeSites) + " site(s)/" +
+                        std::to_string(ea.writerFunctions) + " fn(s)) and '" +
+                        p.b->name + "' (" + std::to_string(eb.writeSites) +
+                        " site(s)/" + std::to_string(eb.writerFunctions) +
+                        " fn(s)) written from distinct functions in this TU");
+            } else if (ea.writeSites || eb.writeSites) {
+                level = kPartial;
+            }
+            wev = std::max(wev, level);
+        }
+        if (wev == kMultiWriter) {
+            confidence = std::min(confidence + 0.06, 0.95);
+        } else if (wev == kNoWrites) {
+            // Writers may live in another TU; that TU's instance then
+            // carries the evidence and outranks this one at dedup.
+            if (sev == Severity::Critical)
+                sev = Severity::High;
+            confidence = std::max(confidence - 0.08, 0.50);
+            escalations.push_back(
+                "no write sites to the co-located fields observed in "
+                "this TU: co-location is structural evidence only");
+        }
+
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 
