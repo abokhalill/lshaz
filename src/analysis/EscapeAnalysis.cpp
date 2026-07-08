@@ -271,8 +271,11 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
         return;
     tuScanned_ = true;
 
-    // one recursive walk feeds all passes; top-level-only iteration was
-    // blind to namespaces and method bodies (FL040's map input included).
+    // one recursive walk feeding every pass. the previous four loops
+    // iterated TU->decls() top-level only: publication evidence, global
+    // write counts (FL040's map input) and accessor counts were blind to
+    // anything inside a namespace or a method body  i.e. most real C++.
+    // CallGraph already recursed; the asymmetry was the bug.
     std::vector<const clang::VarDecl *> globals;
     std::vector<const clang::FunctionDecl *> bodies;
     std::function<void(const clang::DeclContext *)> walk =
@@ -438,8 +441,9 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::RecordDecl *RD) const {
 namespace {
 
 // Counts write references to global variables within function bodies.
-// A "write" is: LHS of assignment/compound-assignment, operand of
-// increment/decrement, or passed as non-const pointer/reference argument.
+// A "write" is: LHS of assignment/compound-assignment, ++/-- operand,
+// receiver of a non-const mutating atomic method, or target of a
+// C11/GNU atomic store/RMW.
 class GlobalWriteVisitor
     : public clang::RecursiveASTVisitor<GlobalWriteVisitor> {
 public:
@@ -474,10 +478,50 @@ public:
         return true;
     }
 
+    bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *CE) {
+        const auto *MD = CE->getMethodDecl();
+        // const gate: a user type with a method merely named 'store'
+        // must not mint write evidence; atomic mutators are non-const.
+        if (!MD || !MD->getIdentifier() || MD->isConst())
+            return true;
+        llvm::StringRef n = MD->getName();
+        if (n == "store" || n == "exchange" || n.starts_with("fetch_") ||
+            n.starts_with("compare_exchange"))
+            recordWrite(CE->getImplicitObjectArgument());
+        return true;
+    }
+
+    bool VisitAtomicExpr(clang::AtomicExpr *AE) {
+        auto op = AE->getOp();
+        if (op == clang::AtomicExpr::AO__c11_atomic_load ||
+            op == clang::AtomicExpr::AO__atomic_load ||
+            op == clang::AtomicExpr::AO__atomic_load_n ||
+            op == clang::AtomicExpr::AO__c11_atomic_init)
+            return true;
+        recordWrite(AE->getPtr());
+        return true;
+    }
+
+    bool VisitCallExpr(clang::CallExpr *CE) {
+        const auto *callee = CE->getDirectCallee();
+        if (!callee) return true;
+        const auto *II = callee->getIdentifier();
+        if (!II) return true;
+        llvm::StringRef n = II->getName();
+        if (n.starts_with("__sync_") && n != "__sync_synchronize" &&
+            CE->getNumArgs() > 0)
+            recordWrite(CE->getArg(0));
+        return true;
+    }
+
 private:
     void recordWrite(const clang::Expr *E) {
         if (!E) return;
         E = E->IgnoreParenImpCasts();
+        // &member as an atomic-builtin target.
+        if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
+            if (UO->getOpcode() == clang::UO_AddrOf)
+                E = UO->getSubExpr()->IgnoreParenImpCasts();
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
             if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl())) {
                 if (VD->hasGlobalStorage())
