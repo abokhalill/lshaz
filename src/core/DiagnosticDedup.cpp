@@ -35,8 +35,15 @@ std::string makeKey(const Diagnostic &d) {
         }
     }
     if (isStructLevelRule(d.ruleID)) {
-        return d.ruleID + "|" + d.location.file + "|" +
-               std::to_string(d.location.line);
+        std::string key = d.ruleID + "|" + d.location.file + "|" +
+                          std::to_string(d.location.line);
+        // one line can mint distinct types per TU via macro paste (the
+        // jemalloc je_ twin pattern); location alone merges them and
+        // silently absorbs the sibling's finding.
+        auto t = d.structuralEvidence.find("type_name");
+        if (t != d.structuralEvidence.end() && !t->second.empty())
+            key += "|" + t->second;
+        return key;
     }
     if (!d.functionName.empty())
         return d.ruleID + "|" + d.functionName + "|" +
