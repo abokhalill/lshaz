@@ -224,6 +224,18 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
             }
         }
 
+        // Widest single access the type admits: element size for arrays,
+        // scalar size otherwise. Distinguishes geometric spanning (the
+        // straddles flag) from split-access risk (straddlingFields()).
+        uint64_t granule = fieldSize;
+        {
+            clang::QualType elemQT = field->getType();
+            while (const auto *AT = Ctx.getAsArrayType(elemQT))
+                elemQT = AT->getElementType();
+            if (canComputeTypeSize(elemQT, Ctx))
+                granule = Ctx.getTypeSizeInChars(elemQT).getQuantity();
+        }
+
         bool atomic = isAtomicType(field->getType());
         bool mutable_ = isFieldMutable(field);
 
@@ -240,6 +252,7 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
         entry.worstStartLine  = wStart;
         entry.worstEndLine    = wEnd;
         entry.straddles       = straddles;
+        entry.accessGranuleBytes = granule;
         entry.isAtomic        = atomic;
         entry.isMutable       = mutable_;
 
@@ -280,7 +293,9 @@ void CacheLineMap::buildBuckets() {
 std::vector<const FieldLineEntry *> CacheLineMap::straddlingFields() const {
     std::vector<const FieldLineEntry *> result;
     for (const auto &f : fields_) {
-        if (f.straddles)
+        // split load/store needs an access wider than one byte: byte
+        // arrays (pads, buffers) span lines but never split an access.
+        if (f.straddles && f.accessGranuleBytes > 1)
             result.push_back(&f);
     }
     return result;

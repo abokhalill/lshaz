@@ -23,6 +23,7 @@ struct FieldLineEntry {
     uint64_t worstStartLine = 0; // worst case: base shifted to maximize line index
     uint64_t worstEndLine   = 0; // worst case: inclusive
     bool straddles       = false; // field spans a line boundary under any valid base alignment
+    uint64_t accessGranuleBytes = 0; // widest single access (element size for arrays)
     bool isAtomic        = false;
     bool isMutable       = false;
 };
@@ -54,7 +55,9 @@ public:
     const std::vector<FieldLineEntry> &fields() const { return fields_; }
     const std::vector<CacheLineBucket> &buckets() const { return buckets_; }
 
-    // Fields that straddle a cache line boundary.
+    // Fields that straddle a line boundary with an access granule wide
+    // enough to split (>1 byte). Geometric spanning alone is in the
+    // per-field straddles flag.
     std::vector<const FieldLineEntry *> straddlingFields() const;
 
     // Pairs of fields sharing a cache line where both are mutable.
