@@ -35,6 +35,15 @@ class CallEdgeVisitor
 public:
     std::unordered_set<const clang::FunctionDecl *> callees;
     std::unordered_set<const clang::FunctionDecl *> threadEntries;
+    // The fn-slot argument was a parameter of the enclosing function: the
+    // enclosing function is a spawner wrapper (memcached's create_worker),
+    // and function literals at that argument position of its call sites
+    // are entries. Resolved TU-wide after all functions are processed.
+    int spawnerParamIdx = -1;
+    // (callee, argIdx, passed function) for every function-literal
+    // argument observed, to resolve against detected spawners.
+    std::vector<std::tuple<const clang::FunctionDecl *, unsigned,
+                           const clang::FunctionDecl *>> literalFnArgs;
 
     bool VisitCallExpr(clang::CallExpr *CE) {
         const auto *Callee = CE->getDirectCallee();
@@ -42,18 +51,23 @@ public:
             return true;
         callees.insert(Callee->getCanonicalDecl());
 
+        for (unsigned i = 0; i < CE->getNumArgs(); ++i)
+            if (const auto *FD = entryArgToFunction(CE->getArg(i)))
+                literalFnArgs.emplace_back(Callee->getCanonicalDecl(), i,
+                                           FD->getCanonicalDecl());
+
         // pthread_create(&t, attr, fn, arg) / thrd_create(&t, fn, arg) /
         // std::async([policy,] fn, ...). Entry position varies per
         // primitive; std::async's optional launch policy is disambiguated
         // by which argument resolves to a function.
         llvm::StringRef name = Callee->getName();
         if (name == "pthread_create" && CE->getNumArgs() >= 3)
-            addEntry(CE->getArg(2));
+            addEntryOrSpawner(CE->getArg(2));
         else if (name == "thrd_create" && CE->getNumArgs() >= 2)
-            addEntry(CE->getArg(1));
+            addEntryOrSpawner(CE->getArg(1));
         else if (name == "async" && CE->getNumArgs() >= 1) {
-            if (!addEntry(CE->getArg(0)) && CE->getNumArgs() >= 2)
-                addEntry(CE->getArg(1));
+            if (!addEntryOrSpawner(CE->getArg(0)) && CE->getNumArgs() >= 2)
+                addEntryOrSpawner(CE->getArg(1));
         }
         return true;
     }
@@ -80,6 +94,19 @@ private:
             threadEntries.insert(FD->getCanonicalDecl());
             return true;
         }
+        return false;
+    }
+
+    bool addEntryOrSpawner(const clang::Expr *arg) {
+        if (addEntry(arg))
+            return true;
+        if (!arg) return false;
+        const auto *E = arg->IgnoreParenImpCasts();
+        if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
+            if (const auto *PV =
+                    llvm::dyn_cast<clang::ParmVarDecl>(DRE->getDecl()))
+                spawnerParamIdx =
+                    static_cast<int>(PV->getFunctionScopeIndex());
         return false;
     }
 };
@@ -119,6 +146,7 @@ void CallGraph::buildFromTU(const clang::TranslationUnitDecl *TU) {
         };
 
     visit(const_cast<clang::TranslationUnitDecl *>(TU));
+    resolveSpawnerEntries();
 }
 
 void CallGraph::processFunction(const clang::FunctionDecl *FD) {
@@ -137,6 +165,25 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
     }
     for (const auto *entry : visitor.threadEntries)
         threadEntries_.insert(entry->getQualifiedNameAsString());
+    if (visitor.spawnerParamIdx >= 0)
+        spawnerParams_[canon] =
+            static_cast<unsigned>(visitor.spawnerParamIdx);
+    pendingLiteralFnArgs_.insert(pendingLiteralFnArgs_.end(),
+                                 visitor.literalFnArgs.begin(),
+                                 visitor.literalFnArgs.end());
+}
+
+void CallGraph::resolveSpawnerEntries() {
+    // Spawner wrappers forward a parameter into a thread-create fn slot;
+    // function literals at that argument position of their call sites are
+    // entries.
+    if (spawnerParams_.empty())
+        return;
+    for (const auto &[callee, argIdx, fn] : pendingLiteralFnArgs_) {
+        auto it = spawnerParams_.find(callee);
+        if (it != spawnerParams_.end() && it->second == argIdx)
+            threadEntries_.insert(fn->getQualifiedNameAsString());
+    }
 }
 
 void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {

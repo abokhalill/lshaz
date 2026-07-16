@@ -8,6 +8,7 @@
 
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -55,6 +56,7 @@ public:
 
 private:
     void processFunction(const clang::FunctionDecl *FD);
+    void resolveSpawnerEntries();
 
     clang::ASTContext &ctx_;
 
@@ -71,6 +73,12 @@ private:
     size_t edgeCount_ = 0;
 
     std::set<std::string> threadEntries_;
+
+    // Spawner wrappers (function -> forwarded param index) and observed
+    // function-literal arguments, resolved TU-wide after buildFromTU.
+    std::unordered_map<const clang::FunctionDecl *, unsigned> spawnerParams_;
+    std::vector<std::tuple<const clang::FunctionDecl *, unsigned,
+                           const clang::FunctionDecl *>> pendingLiteralFnArgs_;
 
     static const std::unordered_set<const clang::FunctionDecl *> empty_;
 };
