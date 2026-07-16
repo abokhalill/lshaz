@@ -349,6 +349,7 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"o\":" + std::to_string(sig.hasSharedOwner ? 1 : 0);
             buf += ",\"v\":" + std::to_string(sig.hasVolatile ? 1 : 0);
             buf += ",\"p\":" + std::to_string(sig.hasPublication ? 1 : 0);
+            buf += ",\"l\":" + std::to_string(sig.hasDeliberateLayout ? 1 : 0);
             buf += ",\"n\":" + std::to_string(sig.accessorCount);
             buf += '}';
             first = false;
@@ -628,6 +629,7 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     else if (sk == "o") sig.hasSharedOwner = val != 0;
                     else if (sk == "v") sig.hasVolatile = val != 0;
                     else if (sk == "p") sig.hasPublication = val != 0;
+                    else if (sk == "l") sig.hasDeliberateLayout = val != 0;
                     else if (sk == "n") sig.accessorCount = static_cast<unsigned>(val);
                     ipc::expect(json, i, ',');
                 }
@@ -1090,6 +1092,88 @@ static unsigned applyThreadRoleEscalation(
         ++escalated;
     }
     return escalated;
+}
+
+// FL092: unapplied in-tree mitigation. Synthesized when an FL002 with
+// cross-thread writer attribution sits in a codebase that demonstrably
+// applies cache-line isolation to other types. The precedent join is the
+// merge-shaped evidence: the codebase itself validates both the hazard
+// class and the fix idiom; this struct just never received it. Runs
+// post-dedup (one compound per surviving component); never outranks the
+// component's mitigation-adjusted severity.
+static unsigned synthesizeUnappliedMitigation(
+        std::vector<Diagnostic> &diagnostics,
+        const EscapeSummary &globalEscape) {
+    std::vector<std::string> mitigated;
+    for (const auto &[name, sig] : globalEscape)
+        if (sig.hasDeliberateLayout)
+            mitigated.push_back(name);
+    if (mitigated.empty())
+        return 0;
+    std::sort(mitigated.begin(), mitigated.end());
+
+    std::vector<Diagnostic> compounds;
+    std::set<std::string> emittedTypes;
+    for (const auto &d : diagnostics) {
+        // FL002 joins at pair granularity; FL090 at struct granularity —
+        // large structs put the disjoint pair beyond FL002's pair-evidence
+        // cap, and FL090's uncapped type-level attribution catches those.
+        // One compound per type: FL002 wins the tie by sort order.
+        if (d.suppressed || (d.ruleID != "FL002" && d.ruleID != "FL090"))
+            continue;
+        auto tit = d.structuralEvidence.find("type_name");
+        if (tit == d.structuralEvidence.end() || tit->second.empty())
+            continue;
+        if (emittedTypes.count(tit->second))
+            continue;
+        auto git = globalEscape.find(tit->second);
+        if (git != globalEscape.end() && git->second.hasDeliberateLayout)
+            continue; // already carries the idiom; FL002's demotion applies
+        bool attributed = false;
+        for (const auto &e : d.escalations)
+            if (e.rfind("cross-TU thread-role attribution", 0) == 0) {
+                attributed = true;
+                break;
+            }
+        if (!attributed)
+            continue;
+
+        Diagnostic c;
+        c.ruleID = "FL092";
+        c.title = "Unapplied In-Tree Mitigation";
+        c.severity = d.severity;
+        c.confidence = d.confidence;
+        c.evidenceTier = d.evidenceTier;
+        c.location = d.location;
+        c.functionName = d.functionName;
+        c.hardwareReasoning =
+            "Struct '" + tit->second + "' has false sharing with "
+            "cross-thread-attributed writers while this codebase already "
+            "isolates " + std::to_string(mitigated.size()) +
+            " other type(s) on dedicated cache lines (e.g. '" +
+            mitigated.front() + "'). The MESI invalidation mechanism and "
+            "its fix idiom are both established in-tree; this struct never "
+            "received the treatment.";
+        c.structuralEvidence = {
+            {"component", d.ruleID},
+            {"type_name", tit->second},
+            {"mitigated_exemplar", mitigated.front()},
+            {"mitigated_type_count", std::to_string(mitigated.size())},
+        };
+        c.mitigation =
+            "Apply the codebase's existing isolation idiom (as on '" +
+            mitigated.front() + "') to the disjoint-writer fields of '" +
+            tit->second + "'.";
+        c.escalations = {
+            "precedent join: " + std::to_string(mitigated.size()) +
+            " deliberately line-isolated type(s) in this codebase"};
+        emittedTypes.insert(tit->second);
+        compounds.push_back(std::move(c));
+    }
+
+    for (auto &c : compounds)
+        diagnostics.push_back(std::move(c));
+    return static_cast<unsigned>(compounds.size());
 }
 
 // Cross-TU escape suppression using aggregated EscapeSummary.
@@ -1674,6 +1758,13 @@ ScanResult ScanPipeline::run(
     // Interaction synthesis.
     report("interactions", "");
     synthesizeInteractions(result.diagnostics);
+
+    // FL092 precedent join.
+    unsigned unapplied = synthesizeUnappliedMitigation(
+        result.diagnostics, result.escapeSummary);
+    if (unapplied > 0)
+        report("interactions", std::to_string(unapplied) +
+               " FL092 unapplied-mitigation compound(s)");
 
     // Precision budget.
     PrecisionBudget budget;
