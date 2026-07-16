@@ -672,10 +672,18 @@ void testThreadRoleStdThreadEntry() {
         class thread {
         public:
             template <class F> thread(F f);
+            template <class F, class O> thread(F f, O o);
         };
+        template <class F, class... A> int bind(F, A...);
         }
         void workerFn() {}
         void spawn() { std::thread t(workerFn); }
+        struct Engine {
+            void run();
+            void bound();
+        };
+        void spawnMember(Engine *e) { std::thread t(&Engine::run, e); }
+        void spawnBind(Engine *e) { std::thread t(std::bind(&Engine::bound, e)); }
     )cpp";
 
     auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
@@ -689,6 +697,66 @@ void testThreadRoleStdThreadEntry() {
     cg.buildFromTU(AST->getASTContext().getTranslationUnitDecl());
     check(cg.threadEntryNames().count("workerFn") == 1,
           "std::thread ctor arg detected as entry");
+    check(cg.threadEntryNames().count("Engine::run") == 1,
+          "member-function-pointer entry detected");
+    check(cg.threadEntryNames().count("Engine::bound") == 1,
+          "std::bind target detected as entry");
+}
+
+void testThreadRoleLambdaEntry() {
+    std::cerr << "test: lambda thread entry with own-node attribution\n";
+    const std::string src = R"cpp(
+        namespace std {
+        class thread {
+        public:
+            template <class F> thread(F f);
+        };
+        }
+        struct Stats { int mainCount; int ioCount; };
+        Stats g;
+        void mainSide() { g.mainCount++; }
+        void spawn() {
+            std::thread t([] { g.ioCount++; });
+            mainSide();
+        }
+        int main() { spawn(); return 0; }
+    )cpp";
+
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) {
+        std::cerr << "  FAIL: AST parse failed\n";
+        ++failures;
+        return;
+    }
+    auto &Ctx = AST->getASTContext();
+    auto *TU = Ctx.getTranslationUnitDecl();
+
+    lshaz::CallGraph cg(Ctx);
+    cg.buildFromTU(TU);
+    check(cg.threadEntryNames().size() == 1 &&
+              cg.threadEntryNames().begin()->rfind("spawn::lambda:", 0) == 0,
+          "lambda entry named by enclosing function + position");
+
+    lshaz::ThreadRoleSummary facts;
+    cg.snapshotForThreadRoles(facts);
+    lshaz::EscapeAnalysis escape(Ctx);
+    escape.scanTranslationUnit(TU);
+    escape.appendFieldWriterNames(facts);
+
+    // The worker lambda's write must attribute to the lambda node, not
+    // the spawner, and the pair must come out disjoint end to end.
+    bool ioWriterIsLambda = false;
+    auto it = facts.fieldWriters.find("Stats::ioCount");
+    if (it != facts.fieldWriters.end() && it->second.size() == 1)
+        ioWriterIsLambda =
+            it->second.begin()->rfind("spawn::lambda:", 0) == 0;
+    check(ioWriterIsLambda, "lambda-body write attributed to lambda node");
+
+    auto v = lshaz::computeThreadRoles(facts, {}, {});
+    check(v.fieldsHaveDisjointWriterRoles(facts, "Stats::mainCount",
+                                          "Stats::ioCount"),
+          "end-to-end: lambda worker vs main writers disjoint");
 }
 
 } // anonymous namespace
@@ -712,6 +780,7 @@ int main() {
     testThreadRoleFactCollection();
     testThreadRoleSpawnerWrapper();
     testThreadRoleStdThreadEntry();
+    testThreadRoleLambdaEntry();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
