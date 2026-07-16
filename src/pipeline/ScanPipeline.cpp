@@ -275,7 +275,8 @@ std::string resolveCompiler(const std::string &dbCompiler) {
 std::string serializeShardResult(int exitCode,
                                   const std::vector<FailedTU> &failedTUs,
                                   const std::vector<Diagnostic> &diagnostics,
-                                  const EscapeSummary &escapeSummary) {
+                                  const EscapeSummary &escapeSummary,
+                                  const ThreadRoleSummary &threadRoles) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
         out.reserve(s.size() + 4);
@@ -355,6 +356,40 @@ std::string serializeShardResult(int exitCode,
     }
     buf += "}";
 
+    // Thread-role facts: {"entries":[...],"edges":{caller:[callees]},
+    // "fieldWriters":{"Type::field":[writers]}}. Ordered containers give
+    // a canonical byte sequence for identical facts.
+    auto emitNameSets =
+        [&](const std::map<std::string, std::set<std::string>> &m) {
+            bool firstKey = true;
+            for (const auto &[k, vals] : m) {
+                if (!firstKey) buf += ',';
+                buf += '"'; buf += esc(k); buf += "\":[";
+                bool firstVal = true;
+                for (const auto &v : vals) {
+                    if (!firstVal) buf += ',';
+                    buf += '"'; buf += esc(v); buf += '"';
+                    firstVal = false;
+                }
+                buf += ']';
+                firstKey = false;
+            }
+        };
+    buf += ",\"threadRoles\":{\"entries\":[";
+    {
+        bool first = true;
+        for (const auto &e : threadRoles.threadEntries) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(e); buf += '"';
+            first = false;
+        }
+    }
+    buf += "],\"edges\":{";
+    emitNameSets(threadRoles.callEdges);
+    buf += "},\"fieldWriters\":{";
+    emitNameSets(threadRoles.fieldWriters);
+    buf += "}}";
+
     buf += "}";
     return buf;
 }
@@ -364,6 +399,7 @@ struct ShardIPC {
     std::vector<FailedTU> failedTUs;
     std::vector<Diagnostic> diagnostics;
     EscapeSummary escapeSummary;
+    ThreadRoleSummary threadRoles;
 };
 
 namespace ipc {
@@ -596,6 +632,53 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     ipc::expect(json, i, ',');
                 }
                 out.escapeSummary[typeName].merge(sig);
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "threadRoles") {
+            auto parseStrArray = [&](std::set<std::string> &dst) {
+                ipc::expect(json, i, '[');
+                while (true) {
+                    ipc::skipWS(json, i);
+                    if (i >= json.size() || json[i] == ']') {
+                        if (i < json.size()) ++i;
+                        break;
+                    }
+                    dst.insert(ipc::parseStr(json, i));
+                    ipc::expect(json, i, ',');
+                }
+            };
+            auto parseNameSets =
+                [&](std::map<std::string, std::set<std::string>> &dst) {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string k = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        parseStrArray(dst[k]);
+                        ipc::expect(json, i, ',');
+                    }
+                };
+            ipc::expect(json, i, '{');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == '}') {
+                    if (i < json.size()) ++i;
+                    break;
+                }
+                std::string tk = ipc::parseStr(json, i);
+                ipc::expect(json, i, ':');
+                if (tk == "entries")
+                    parseStrArray(out.threadRoles.threadEntries);
+                else if (tk == "edges")
+                    parseNameSets(out.threadRoles.callEdges);
+                else if (tk == "fieldWriters")
+                    parseNameSets(out.threadRoles.fieldWriters);
+                else
+                    ipc::skipValue(json, i);
                 ipc::expect(json, i, ',');
             }
         } else {
@@ -1172,6 +1255,7 @@ ScanResult ScanPipeline::run(
                 std::make_move_iterator(tuDiags.begin()),
                 std::make_move_iterator(tuDiags.end()));
             mergeEscapeSummaries(result.escapeSummary, factory.escapeSummary());
+            result.threadRoleFacts.merge(factory.threadRoles());
             ++completedTUs;
             report("progress", std::to_string(completedTUs) + "/" +
                    std::to_string(totalTUs));
@@ -1220,6 +1304,7 @@ ScanResult ScanPipeline::run(
                 std::vector<Diagnostic> childDiags;
                 std::vector<FailedTU> childFailed;
                 EscapeSummary childEscape;
+                ThreadRoleSummary childThreadRoles;
                 int childRet = 0;
 
                 for (const auto &src : shards[j]) {
@@ -1249,10 +1334,12 @@ ScanResult ScanPipeline::run(
                         std::make_move_iterator(tuDiags.begin()),
                         std::make_move_iterator(tuDiags.end()));
                     mergeEscapeSummaries(childEscape, factory.escapeSummary());
+                    childThreadRoles.merge(factory.threadRoles());
                 }
 
                 std::string json = serializeShardResult(
-                    childRet, childFailed, childDiags, childEscape);
+                    childRet, childFailed, childDiags, childEscape,
+                    childThreadRoles);
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (!ec)
@@ -1282,6 +1369,7 @@ ScanResult ScanPipeline::run(
                         shard.failedTUs.begin(), shard.failedTUs.end());
                     mergeEscapeSummaries(result.escapeSummary,
                         shard.escapeSummary);
+                    result.threadRoleFacts.merge(shard.threadRoles);
                 } else {
                     llvm::errs() << "lshaz: failed to parse IPC from shard "
                                  << child.shardIdx << "\n";
@@ -1462,6 +1550,19 @@ ScanResult ScanPipeline::run(
             report("cross_tu", std::to_string(crossTUSuppressed) +
                    " finding(s) suppressed (no cross-TU escape evidence)");
     }
+
+    // Thread-role reduce: verdicts from the merged facts. Runs on the
+    // parent's aggregate regardless of jobs count; children never see
+    // enough of the graph to classify anything.
+    result.threadRoles = computeThreadRoles(result.threadRoleFacts,
+                                            request.config.threadEntryPatterns,
+                                            request.config.mainFunctionPatterns);
+    if (!result.threadRoles.functionRoles.empty())
+        report("thread_roles",
+               std::to_string(result.threadRoleFacts.threadEntries.size()) +
+               " thread entry point(s), " +
+               std::to_string(result.threadRoles.functionRoles.size()) +
+               " function(s) attributed");
 
     // Cross-TU deduplication.
     report("dedup", "");

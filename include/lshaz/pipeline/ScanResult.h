@@ -4,6 +4,7 @@
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/core/ExecutionMetadata.h"
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <cstdint>
 #include <string>
@@ -28,6 +29,10 @@ struct ScanResult {
 
     // Cross-TU aggregated escape summary. Merged from all per-TU summaries.
     EscapeSummary escapeSummary;
+
+    // Cross-TU thread-attribution facts and the roles reduced from them.
+    ThreadRoleSummary threadRoleFacts;
+    ThreadRoleVerdicts threadRoles;
 
     // Counts for summary reporting.
     unsigned suppressedByCalibration = 0;
