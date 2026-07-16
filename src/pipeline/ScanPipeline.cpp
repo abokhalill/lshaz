@@ -1503,8 +1503,7 @@ ScanResult ScanPipeline::run(
             } else if (!atomicVar && agg.totalWrites <= 1) {
                 // single in-loop site on a plain type: repeated writes but
                 // one write path; concurrent writers would be a data race,
-                // not a latency hazard. thread confinement is the likely
-                // reading; keep it visible, not alarming.
+                // not a latency hazard.
                 d.severity = Severity::Informational;
                 d.confidence = 0.35;
                 d.evidenceTier = EvidenceTier::Speculative;
