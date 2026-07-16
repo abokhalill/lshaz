@@ -47,6 +47,10 @@ PrecisionBudget::PrecisionBudget() {
 
     // Synthesized interaction: post-hoc correlation, tighter confidence floor.
     add("FL091", 0, 0.60, Severity::Critical);
+
+    // Unapplied in-tree mitigation: inherits an attributed FL002, so the
+    // component's floor already applies; keep parity with FL091.
+    add("FL092", 0, 0.60, Severity::Critical);
 }
 
 void PrecisionBudget::setPolicy(const RulePrecisionPolicy &policy) {
