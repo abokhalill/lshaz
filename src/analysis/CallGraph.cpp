@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/CallGraph.h"
+#include "lshaz/analysis/SymbolNames.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Expr.h>
@@ -7,6 +8,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/SmallPtrSet.h>
 
 #include <queue>
 
@@ -17,7 +19,8 @@ const std::unordered_set<const clang::FunctionDecl *> CallGraph::empty_;
 namespace {
 
 // Resolve a thread-entry argument to the function it names, through
-// parens, casts, and unary &.
+// parens, casts, and unary &. Member-function pointers resolve here too:
+// &Engine::run is AddrOf over a DeclRefExpr to a CXXMethodDecl.
 const clang::FunctionDecl *entryArgToFunction(const clang::Expr *E) {
     if (!E) return nullptr;
     E = E->IgnoreParenImpCasts();
@@ -28,6 +31,32 @@ const clang::FunctionDecl *entryArgToFunction(const clang::Expr *E) {
     if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
         return llvm::dyn_cast<clang::FunctionDecl>(DRE->getDecl());
     return nullptr;
+}
+
+// Unwrap the temporary/copy scaffolding std::thread's by-value functor
+// argument arrives in. Over-unwrapping a non-functor construct is
+// harmless: the result simply matches neither lambda nor bind.
+const clang::Expr *stripFunctorWrapping(const clang::Expr *E) {
+    while (E) {
+        E = E->IgnoreParenImpCasts();
+        if (const auto *M =
+                llvm::dyn_cast<clang::MaterializeTemporaryExpr>(E)) {
+            E = M->getSubExpr();
+            continue;
+        }
+        if (const auto *B = llvm::dyn_cast<clang::CXXBindTemporaryExpr>(E)) {
+            E = B->getSubExpr();
+            continue;
+        }
+        if (const auto *C = llvm::dyn_cast<clang::CXXConstructExpr>(E)) {
+            if (C->getNumArgs() >= 1) {
+                E = C->getArg(0);
+                continue;
+            }
+        }
+        break;
+    }
+    return E;
 }
 
 class CallEdgeVisitor
@@ -44,6 +73,25 @@ public:
     // argument observed, to resolve against detected spawners.
     std::vector<std::tuple<const clang::FunctionDecl *, unsigned,
                            const clang::FunctionDecl *>> literalFnArgs;
+    // Lambdas become their own graph nodes; their bodies are deliberately
+    // NOT traversed in the enclosing context, or every call and write in
+    // a worker lambda would attribute to the spawner.
+    struct LambdaRec {
+        const clang::CXXMethodDecl *op;
+        bool isThreadEntry;
+    };
+    std::vector<LambdaRec> lambdas;
+    llvm::SmallPtrSet<const clang::LambdaExpr *, 4> entryLambdas;
+
+    bool TraverseLambdaExpr(clang::LambdaExpr *LE) {
+        // Capture initializers evaluate in the enclosing frame.
+        for (auto *init : LE->capture_inits())
+            if (init)
+                TraverseStmt(init);
+        if (const auto *Op = LE->getCallOperator())
+            lambdas.push_back(LambdaRec{Op, entryLambdas.count(LE) > 0});
+        return true;
+    }
 
     bool VisitCallExpr(clang::CallExpr *CE) {
         const auto *Callee = CE->getDirectCallee();
@@ -66,8 +114,8 @@ public:
         else if (name == "thrd_create" && CE->getNumArgs() >= 2)
             addEntryOrSpawner(CE->getArg(1));
         else if (name == "async" && CE->getNumArgs() >= 1) {
-            if (!addEntryOrSpawner(CE->getArg(0)) && CE->getNumArgs() >= 2)
-                addEntryOrSpawner(CE->getArg(1));
+            if (!addEntryAnyOrSpawner(CE->getArg(0)) && CE->getNumArgs() >= 2)
+                addEntryAnyOrSpawner(CE->getArg(1));
         }
         return true;
     }
@@ -83,7 +131,7 @@ public:
         if (RD && CE->getNumArgs() >= 1) {
             llvm::StringRef cls = RD->getName();
             if (cls == "thread" || cls == "jthread")
-                addEntry(CE->getArg(0));
+                addEntryAny(CE->getArg(0));
         }
         return true;
     }
@@ -108,6 +156,26 @@ private:
                 spawnerParamIdx =
                     static_cast<int>(PV->getFunctionScopeIndex());
         return false;
+    }
+
+    // Function/member pointer, lambda, or std::bind(&C::f, ...).
+    bool addEntryAny(const clang::Expr *arg) {
+        if (addEntry(arg))
+            return true;
+        const auto *S = stripFunctorWrapping(arg);
+        if (const auto *LE = llvm::dyn_cast_or_null<clang::LambdaExpr>(S)) {
+            entryLambdas.insert(LE);
+            return true;
+        }
+        if (const auto *BC = llvm::dyn_cast_or_null<clang::CallExpr>(S))
+            if (const auto *BF = BC->getDirectCallee())
+                if (BF->getName() == "bind" && BC->getNumArgs() >= 1)
+                    return addEntry(BC->getArg(0));
+        return false;
+    }
+
+    bool addEntryAnyOrSpawner(const clang::Expr *arg) {
+        return addEntryAny(arg) || addEntryOrSpawner(arg);
     }
 };
 
@@ -164,13 +232,32 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         ++edgeCount_;
     }
     for (const auto *entry : visitor.threadEntries)
-        threadEntries_.insert(entry->getQualifiedNameAsString());
+        threadEntries_.insert(threadRoleNodeName(entry, ctx_));
     if (visitor.spawnerParamIdx >= 0)
         spawnerParams_[canon] =
             static_cast<unsigned>(visitor.spawnerParamIdx);
     pendingLiteralFnArgs_.insert(pendingLiteralFnArgs_.end(),
                                  visitor.literalFnArgs.begin(),
                                  visitor.literalFnArgs.end());
+
+    // Lambda nodes. Entry lambdas get no creation edge; a spawner's role
+    // must not leak into its worker. Non-entry lambdas keep one so hotness
+    // still reaches their bodies. Edges before recursion: processFunction
+    // mutates calleeMap_ and would invalidate `targets`.
+    for (const auto &L : visitor.lambdas) {
+        const auto *opCanon =
+            llvm::cast<clang::CXXMethodDecl>(L.op->getCanonicalDecl());
+        if (L.isThreadEntry) {
+            threadEntries_.insert(threadRoleNodeName(L.op, ctx_));
+        } else {
+            calleeMap_[canon].insert(opCanon);
+            callerMap_[opCanon].insert(canon);
+            ++edgeCount_;
+        }
+    }
+    for (const auto &L : visitor.lambdas)
+        if (L.op->doesThisDeclarationHaveABody())
+            processFunction(L.op);
 }
 
 void CallGraph::resolveSpawnerEntries() {
@@ -182,7 +269,7 @@ void CallGraph::resolveSpawnerEntries() {
     for (const auto &[callee, argIdx, fn] : pendingLiteralFnArgs_) {
         auto it = spawnerParams_.find(callee);
         if (it != spawnerParams_.end() && it->second == argIdx)
-            threadEntries_.insert(fn->getQualifiedNameAsString());
+            threadEntries_.insert(threadRoleNodeName(fn, ctx_));
     }
 }
 
@@ -191,9 +278,9 @@ void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
     for (const auto &[caller, callees] : calleeMap_) {
         if (callees.empty())
             continue;
-        auto &names = out.callEdges[caller->getQualifiedNameAsString()];
+        auto &names = out.callEdges[threadRoleNodeName(caller, ctx_)];
         for (const auto *callee : callees)
-            names.insert(callee->getQualifiedNameAsString());
+            names.insert(threadRoleNodeName(callee, ctx_));
     }
 }
 
