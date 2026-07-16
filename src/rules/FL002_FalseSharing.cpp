@@ -193,6 +193,15 @@ public:
            << "fields trigger MESI invalidation per write.";
         diag.hardwareReasoning = hw.str();
 
+        // Flagged pairs by name, so post processing can join them against
+        // cross-TU writer attribution at pair granularity; a type-level
+        // join could escalate on a pair this rule never flagged.
+        std::string pairFields;
+        for (size_t i = 0; i < evPairs.size() && i < kMaxDetailedLines; ++i) {
+            if (i) pairFields += ';';
+            pairFields += evPairs[i].a->name + "|" + evPairs[i].b->name;
+        }
+
         diag.structuralEvidence = {
             {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
             {"lines", std::to_string(map.maxLinesSpanned())},
@@ -201,6 +210,7 @@ public:
             {"thread_escape", "true"},
             {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
             {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
+            {"pair_fields", pairFields},
         };
 
         diag.mitigation =
