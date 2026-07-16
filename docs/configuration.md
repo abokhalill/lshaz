@@ -105,7 +105,7 @@ cloned to a temp directory; build-system execution on clones requires
 | `-a` | `--target-arch <arch>` | `x86-64` (default), `arm64`, `arm64-apple` |
 | `-w` | `--watch` | Re-scan on file changes (`--watch-interval <N>`, default 2s) |
 | | `--no-ir` | Disable the LLVM IR refinement pass |
-| | `--ir-opt <O0\|O1\|O2>` | IR optimization level (default: `O0`) |
+| | `--ir-opt <O0\|O1\|O2>` | IR optimization level (default: `O2`) |
 | | `--ir-jobs <N>` | Max parallel IR emission jobs (default: nproc) |
 | | `--ir-batch-size <N>` | TUs per IR shard (default: 1) |
 | | `--no-ir-cache` | Disable the content-addressed IR cache (recommended in CI) |
