@@ -4,6 +4,7 @@
 // No subprocess invocations. Isolated, deterministic.
 
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/pipeline/CompileDBResolver.h"
 #include "lshaz/pipeline/RepoProvider.h"
@@ -477,6 +478,108 @@ void testCrossTUSuppressionNoTypeName() {
     check(!diags[0].suppressed, "no type_name = not suppressed");
 }
 
+// ===== ThreadRoleSummary =====
+
+void testThreadRoleSummaryMerge() {
+    std::cerr << "test: ThreadRoleSummary merge unions facts\n";
+    using namespace lshaz;
+    ThreadRoleSummary a, b;
+    a.threadEntries = {"worker"};
+    a.callEdges["main"] = {"f"};
+    a.fieldWriters["T::x"] = {"f"};
+    b.threadEntries = {"worker2"};
+    b.callEdges["main"] = {"g"};
+    b.fieldWriters["T::x"] = {"g"};
+    a.merge(b);
+    check(a.threadEntries.size() == 2, "entries unioned");
+    check(a.callEdges["main"].size() == 2, "edges unioned per caller");
+    check(a.fieldWriters["T::x"].size() == 2, "writers unioned per field");
+}
+
+void testThreadRolePropagation() {
+    std::cerr << "test: thread role BFS propagation\n";
+    using namespace lshaz;
+    // main -> a -> shared; worker -> c -> shared. worker spawned via
+    // pthread_create observed in some TU (already in threadEntries).
+    ThreadRoleSummary facts;
+    facts.threadEntries = {"worker"};
+    facts.callEdges["main"]   = {"a"};
+    facts.callEdges["a"]      = {"shared"};
+    facts.callEdges["worker"] = {"c"};
+    facts.callEdges["c"]      = {"shared"};
+    facts.fieldWriters["T::mainField"]   = {"a"};
+    facts.fieldWriters["T::workerField"] = {"c"};
+    facts.fieldWriters["T::sharedField"] = {"shared"};
+    facts.fieldWriters["T::orphanField"] = {"nowhere_reachable"};
+
+    auto v = computeThreadRoles(facts, {}, {});
+    check(v.roleOf("main") == ROLE_MAIN, "main is MAIN");
+    check(v.roleOf("a") == ROLE_MAIN, "a inherits MAIN");
+    check(v.roleOf("worker") == ROLE_WORKER, "worker is WORKER");
+    check(v.roleOf("c") == ROLE_WORKER, "c inherits WORKER");
+    check(v.roleOf("shared") == (ROLE_MAIN | ROLE_WORKER),
+          "shared reachable from both");
+    check(v.roleOf("nowhere_reachable") == ROLE_NONE, "unreached is unknown");
+
+    check(v.fieldsHaveDisjointWriterRoles(facts, "T::mainField",
+                                          "T::workerField"),
+          "main-only vs worker-only fields are disjoint");
+    check(!v.fieldsHaveDisjointWriterRoles(facts, "T::mainField",
+                                           "T::sharedField"),
+          "mixed-role writer defeats disjointness");
+    check(!v.fieldsHaveDisjointWriterRoles(facts, "T::mainField",
+                                           "T::orphanField"),
+          "unknown writer defeats disjointness");
+    check(!v.fieldsHaveDisjointWriterRoles(facts, "T::mainField",
+                                           "T::absent"),
+          "absent field is never disjoint");
+}
+
+void testThreadRolePatternRoots() {
+    std::cerr << "test: thread role pattern-seeded roots\n";
+    using namespace lshaz;
+    // No thread-creation observed (function-pointer dispatch); config
+    // globs name the roots instead.
+    ThreadRoleSummary facts;
+    facts.callEdges["main"] = {"dispatch"};
+    facts.callEdges["io_thread_run"] = {"handle_io"};
+    facts.fieldWriters["C::state"] = {"handle_io"};
+    facts.fieldWriters["C::bytes"] = {"dispatch"};
+
+    auto v = computeThreadRoles(facts, {"io_thread_*"}, {});
+    check(v.roleOf("io_thread_run") == ROLE_WORKER, "glob seeds worker root");
+    check(v.roleOf("handle_io") == ROLE_WORKER, "worker role propagates");
+    check(v.fieldsHaveDisjointWriterRoles(facts, "C::state", "C::bytes"),
+          "attribution works from pattern roots");
+}
+
+void testThreadRoleNoWorkers() {
+    std::cerr << "test: thread role single-threaded null verdict\n";
+    using namespace lshaz;
+    ThreadRoleSummary facts;
+    facts.callEdges["main"] = {"a"};
+    facts.fieldWriters["T::x"] = {"a"};
+    auto v = computeThreadRoles(facts, {}, {});
+    check(v.functionRoles.empty(), "no worker roots = no attribution");
+    check(!v.fieldsHaveDisjointWriterRoles(facts, "T::x", "T::x"),
+          "no verdicts, no disjointness");
+}
+
+void testThreadRoleCycle() {
+    std::cerr << "test: thread role propagation terminates on cycles\n";
+    using namespace lshaz;
+    ThreadRoleSummary facts;
+    facts.threadEntries = {"w"};
+    facts.callEdges["main"] = {"a"};
+    facts.callEdges["a"] = {"b"};
+    facts.callEdges["b"] = {"a"};
+    facts.callEdges["w"] = {"w"};
+    auto v = computeThreadRoles(facts, {}, {});
+    check(v.roleOf("a") == ROLE_MAIN && v.roleOf("b") == ROLE_MAIN,
+          "mutual recursion converges");
+    check(v.roleOf("w") == ROLE_WORKER, "self-recursion converges");
+}
+
 } // anonymous namespace
 
 int main() {
@@ -514,6 +617,13 @@ int main() {
     testCrossTUSuppressionWithSummary();
     testCrossTUSuppressionPreservesProven();
     testCrossTUSuppressionNoTypeName();
+
+    // ThreadRoleSummary
+    testThreadRoleSummaryMerge();
+    testThreadRolePropagation();
+    testThreadRolePatternRoots();
+    testThreadRoleNoWorkers();
+    testThreadRoleCycle();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {

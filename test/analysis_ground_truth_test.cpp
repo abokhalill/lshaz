@@ -9,6 +9,9 @@
 // fail here before reaching production.
 
 #include "lshaz/analysis/CacheLineMap.h"
+#include "lshaz/analysis/CallGraph.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
@@ -570,6 +573,95 @@ void testCacheLineAlignedBucketing() {
     });
 }
 
+// ============================================================
+// Thread-role fact collection: entry detection through
+// pthread_create / std::thread, name-keyed call edges, and
+// field-writer names — the map half of the cross-TU reduce.
+// ============================================================
+void testThreadRoleFactCollection() {
+    std::cerr << "test: thread-role fact collection\n";
+    const std::string src = R"cpp(
+        typedef unsigned long pthread_t;
+        extern "C" int pthread_create(pthread_t*, const void*,
+                                      void *(*)(void*), void*);
+        struct Stats { int mainCount; int ioCount; };
+        Stats g;
+        void helper() { g.mainCount++; }
+        void *ioLoop(void *) { g.ioCount++; return nullptr; }
+        int main() {
+            pthread_t t;
+            pthread_create(&t, nullptr, &ioLoop, nullptr);
+            helper();
+            return 0;
+        }
+    )cpp";
+
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) {
+        std::cerr << "  FAIL: AST parse failed\n";
+        ++failures;
+        return;
+    }
+    auto &Ctx = AST->getASTContext();
+    auto *TU = Ctx.getTranslationUnitDecl();
+
+    lshaz::CallGraph cg(Ctx);
+    cg.buildFromTU(TU);
+    check(cg.threadEntryNames().count("ioLoop") == 1,
+          "pthread_create arg detected as entry through unary &");
+
+    lshaz::ThreadRoleSummary facts;
+    cg.snapshotForThreadRoles(facts);
+    check(facts.threadEntries.count("ioLoop") == 1,
+          "entry survives snapshot");
+    check(facts.callEdges.count("main") == 1 &&
+              facts.callEdges["main"].count("helper") == 1,
+          "direct edge main->helper snapshotted by name");
+
+    lshaz::EscapeAnalysis escape(Ctx);
+    escape.scanTranslationUnit(TU);
+    escape.appendFieldWriterNames(facts);
+    check(facts.fieldWriters.count("Stats::mainCount") == 1 &&
+              facts.fieldWriters["Stats::mainCount"].count("helper") == 1,
+          "field writer attributed by name");
+    check(facts.fieldWriters.count("Stats::ioCount") == 1 &&
+              facts.fieldWriters["Stats::ioCount"].count("ioLoop") == 1,
+          "io-side field writer attributed");
+
+    // The full loop: facts -> verdicts -> disjointness.
+    auto v = lshaz::computeThreadRoles(facts, {}, {});
+    check(v.fieldsHaveDisjointWriterRoles(facts, "Stats::mainCount",
+                                          "Stats::ioCount"),
+          "end-to-end: main vs io writer fields are disjoint");
+}
+
+void testThreadRoleStdThreadEntry() {
+    std::cerr << "test: std::thread constructor entry detection\n";
+    const std::string src = R"cpp(
+        namespace std {
+        class thread {
+        public:
+            template <class F> thread(F f);
+        };
+        }
+        void workerFn() {}
+        void spawn() { std::thread t(workerFn); }
+    )cpp";
+
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) {
+        std::cerr << "  FAIL: AST parse failed\n";
+        ++failures;
+        return;
+    }
+    lshaz::CallGraph cg(AST->getASTContext());
+    cg.buildFromTU(AST->getASTContext().getTranslationUnitDecl());
+    check(cg.threadEntryNames().count("workerFn") == 1,
+          "std::thread ctor arg detected as entry");
+}
+
 } // anonymous namespace
 
 int main() {
@@ -588,6 +680,8 @@ int main() {
     testBucketPopulation();
     testAlignmentAwareBucketing();
     testCacheLineAlignedBucketing();
+    testThreadRoleFactCollection();
+    testThreadRoleStdThreadEntry();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
