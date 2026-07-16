@@ -7,6 +7,7 @@
 #include <clang/AST/Type.h>
 
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <cstdint>
 #include <string>
@@ -117,6 +118,11 @@ public:
     // common writer is the init-pattern signature.
     bool pairHasDistinctWriters(const clang::FieldDecl *A,
                                 const clang::FieldDecl *B) const;
+
+    // Snapshot per-field writer sets as names ("Type::field" -> writer
+    // functions) into the TU's thread-role facts. Same key convention as
+    // buildEscapeSummary: canonical qualified names.
+    void appendFieldWriterNames(ThreadRoleSummary &out) const;
 
     // Public so the TU-scan visitor (anonymous namespace) can populate it.
     struct FieldWriteRecord {

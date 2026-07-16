@@ -656,6 +656,24 @@ bool EscapeAnalysis::pairHasDistinctWriters(const clang::FieldDecl *A,
     return !wa.empty() && !wb.empty() && *wa.begin() != *wb.begin();
 }
 
+void EscapeAnalysis::appendFieldWriterNames(ThreadRoleSummary &out) const {
+    for (const auto &[FD, rec] : fieldWrites_) {
+        if (rec.writers.empty())
+            continue;
+        const auto *parent = FD->getParent();
+        if (!parent)
+            continue;
+        std::string typeName =
+            parent->getCanonicalDecl()->getQualifiedNameAsString();
+        if (typeName.empty())
+            continue;
+        auto &writers =
+            out.fieldWriters[typeName + "::" + FD->getNameAsString()];
+        for (const auto *w : rec.writers)
+            writers.insert(w->getQualifiedNameAsString());
+    }
+}
+
 unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {
     if (!VD || !VD->hasGlobalStorage())
         return 0;
