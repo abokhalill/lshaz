@@ -195,9 +195,12 @@ public:
 
         // Flagged pairs by name, so post processing can join them against
         // cross-TU writer attribution at pair granularity; a type-level
-        // join could escalate on a pair this rule never flagged.
+        // join could escalate on a pair this rule never flagged. Bounded
+        // separately from the display cap: the join is for machines, and
+        // large structs put the interesting pair deep in the list.
+        constexpr size_t kMaxPairEvidence = 64;
         std::string pairFields;
-        for (size_t i = 0; i < evPairs.size() && i < kMaxDetailedLines; ++i) {
+        for (size_t i = 0; i < evPairs.size() && i < kMaxPairEvidence; ++i) {
             if (i) pairFields += ';';
             pairFields += evPairs[i].a->name + "|" + evPairs[i].b->name;
         }
