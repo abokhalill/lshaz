@@ -176,6 +176,16 @@ std::vector<std::string> sanitizeForClangIR(
         if (arg == srcPath)
             continue;
 
+        // Strip the TU's own -O flags: the tool's --ir-opt is prepended,
+        // and clang's last-flag-wins meant any release-configured compile
+        // DB silently overrode it; every "O0" emission on such a project
+        // actually ran at the project's level.
+        if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O' &&
+            (arg.size() == 2 || arg == "-O0" || arg == "-O1" ||
+             arg == "-O2" || arg == "-O3" || arg == "-Os" || arg == "-Oz" ||
+             arg == "-Og" || arg == "-Ofast"))
+            continue;
+
         // Strip GCC-only flags
         if (isGCCOnlyFlag(arg))
             continue;
