@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/LshazASTConsumer.h"
+#include "lshaz/analysis/CacheLineMap.h"
 #include "lshaz/analysis/CallGraph.h"
 #include "lshaz/analysis/EscapeAnalysis.h"
 #include "lshaz/analysis/StructLayoutVisitor.h"
@@ -184,6 +185,22 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                 records.push_back(RD);
     }
     escapeSummary_ = escape.buildEscapeSummary(records);
+
+    // Layout-intent annotation for the FL092 precedent join. Alignment
+    // reads Clang's cached record layout; no recomputation.
+    for (const auto *RD : records) {
+        auto it = escapeSummary_.find(
+            RD->getCanonicalDecl()->getQualifiedNameAsString());
+        if (it == escapeSummary_.end())
+            continue;
+        const auto &RL = Ctx.getASTRecordLayout(RD);
+        bool aligned = static_cast<size_t>(
+                           RL.getAlignment().getQuantity()) >=
+                       config_.cacheLineBytes;
+        if (aligned || CacheLineMap::hasTrailingLinePad(
+                           RD, Ctx, config_.cacheLineBytes))
+            it->second.hasDeliberateLayout = true;
+    }
 
     // Thread-role facts for the cross-TU reduce: call edges + entries
     // from the graph already built for hotness, writer names from the

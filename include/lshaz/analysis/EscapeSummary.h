@@ -18,6 +18,10 @@ struct TypeEscapeSignals {
     bool hasSharedOwner  = false;
     bool hasVolatile     = false;
     bool hasPublication  = false;  // TU-local: passed to thread/stored globally
+    // Explicit line alignment or trailing pad-to-line: the author reasons
+    // in cache lines. Feeds the FL092 precedent join; a codebase-level
+    // "the mitigation idiom is known here" index.
+    bool hasDeliberateLayout = false;
     unsigned accessorCount = 0;   // distinct functions touching this type in TU
 
     // Merge another TU's signals into this aggregate.
@@ -27,6 +31,7 @@ struct TypeEscapeSignals {
         hasSharedOwner |= other.hasSharedOwner;
         hasVolatile    |= other.hasVolatile;
         hasPublication |= other.hasPublication;
+        hasDeliberateLayout |= other.hasDeliberateLayout;
         accessorCount  += other.accessorCount;
     }
 
