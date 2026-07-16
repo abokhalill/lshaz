@@ -28,6 +28,7 @@ mechanism and mitigation text the diagnostics carry.
 | FL061 | Centralized dispatch | Single dispatcher routing to many handlers | Function | Yes |
 | FL090 | Hazard amplification | Compound: multi-line footprint + atomics + thread escape on one struct | Struct | No |
 | FL091 | Synthesized interaction | Two or three eligible hazards joined at one entity | Synthesized | No |
+| FL092 | Unapplied in-tree mitigation | Attributed FL002/FL090 on a struct without the line-isolation idiom the codebase applies elsewhere | Synthesized | No |
 
 Hot-path classification is described in
 [configuration.md](configuration.md#hot-path-annotation). Rules with a
@@ -474,6 +475,36 @@ Seven interaction templates:
 | IX-005 | LockContention × HeapAllocation | Allocation under lock |
 | IX-006 | VirtualDispatch × DeepConditional | Compounding branch misprediction |
 | IX-007 | CacheGeometry × AtomicContention × NUMALocality | Full compound: geometry + contention + NUMA |
+
+### FL092 — Unapplied In-Tree Mitigation
+
+**Severity:** inherited from component &nbsp;|&nbsp; **Scope:** synthesized in post-processing
+
+Synthesized when three facts join: (1) an FL002 or FL090 finding carries
+**cross-TU thread-role attribution** (its fields are written from provably
+disjoint thread roles — see the thread-role reduce in
+[architecture.md](architecture.md)); (2) the flagged type does **not** carry
+the deliberate-layout idiom (explicit line alignment or trailing pad-to-line);
+(3) the merged escape summary shows **other** types in the codebase that do.
+The finding names an exemplar and the count — the codebase itself validates
+both the hazard class and the fix idiom; the flagged struct never received
+the treatment.
+
+FL002 components join at pair granularity through their `pair_fields`
+evidence; FL090 components join at struct granularity (its claim is
+struct-wide, and very large structs put the disjoint pair beyond the pair
+evidence bound). One compound per type; severity and confidence inherit
+from the component, so mitigation-adjusted demotions are never outranked.
+
+Thread-role attribution roots come from thread-creation detection
+(`pthread_create`, `thrd_create`, `std::thread`/`std::jthread`,
+`std::async`) plus the `thread_entry_patterns` / `main_function_patterns`
+config globs — required in codebases whose workers dispatch through
+function-pointer tables (see [configuration.md](configuration.md)).
+Attribution is deliberately strict: a function reachable from both roots
+attributes to both roles, and any unknown writer defeats disjointness, so
+mode-dependent dual-path functions (the same read/write helpers called
+inline on main or offloaded to a worker) do not produce escalations.
 
 ---
 

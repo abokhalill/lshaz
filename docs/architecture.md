@@ -100,7 +100,19 @@ glibc (arena lock), tcmalloc/jemalloc (thread-local cache), mimalloc
 main-thread, any-thread, interleaved, explicit-bind, unknown. Feeds FL060.
 
 **CallGraph** — per-TU caller→callee map from `CallExpr` visits. Used by
-HotPathOracle for transitive hotness.
+HotPathOracle for transitive hotness. The same walk detects thread-entry
+arguments (`pthread_create`, `thrd_create`, `std::thread`/`std::jthread`,
+`std::async`) and snapshots name-keyed edges for the thread-role reduce.
+
+**Thread-role attribution** (`ThreadRoleSummary`) — per-TU facts (entries,
+name-keyed call edges, field-writer names) piggyback the CallGraph and
+EscapeAnalysis traversals, merge across TUs beside the escape summary, and
+reduce on the parent to per-function MAIN/WORKER masks by BFS from `main()`
+and the observed entries (config globs seed roots that function-pointer
+dispatch hides). Verdicts exist only post-merge. Consumers: FL002/FL090
+confidence escalation when a flagged pair's writers attribute to provably
+disjoint roles (any unknown or mixed-role writer defeats it), and the FL092
+precedent join.
 
 **DataFlowAnalyzer** — intra-procedural, two passes: bind variables to heap
 allocations and atomic loads, then track uses — alloc-escapes,
@@ -179,7 +191,12 @@ In execution order:
    key: `file:line`, `type:` + type name, or `fn:` + function. Eligible
    pairs/triples per the `InteractionEligibilityMatrix` produce compound
    findings; severity derives from the (post-demotion) parents. One compound
-   per (template, participant set).
+   per (template, participant set). Followed by the **FL092 precedent
+   join** (see [rules.md](rules.md#fl092--unapplied-in-tree-mitigation)).
+   The thread-role reduce and the FL002/FL090 disjoint-writer escalation
+   run earlier, between cross-TU escape suppression and dedup, so every
+   duplicate instance is escalated consistently before the canonical
+   survivor is chosen.
 6. **Precision budget** — per-rule governance: max emissions per TU,
    confidence floors, severity caps.
 7. **Calibration suppression** — with `--calibration-store`, findings whose

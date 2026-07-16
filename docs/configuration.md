@@ -46,6 +46,16 @@ linked_allocator: ""          # tcmalloc | jemalloc | mimalloc
 # Rule control
 disabled_rules: []
 
+# Thread-role attribution roots (fnmatch globs against function names).
+# Thread entries are auto-detected at pthread_create/thrd_create/
+# std::thread/std::async call sites; these patterns add worker roots that
+# function-pointer dispatch hides (job queues, event-loop handler tables),
+# and main patterns extend the main-role seed beyond main(). Feeds the
+# FL002/FL090 cross-thread escalation and the FL092 precedent join.
+# thread_entry_patterns:
+#   - "ioThread*"
+# main_function_patterns: []
+
 # Opaque atomic wrapper type names.
 # Struct/typedef names treated as atomic even without _Atomic or std::atomic.
 # Required for codebases that wrap atomics in plain structs; without this,
