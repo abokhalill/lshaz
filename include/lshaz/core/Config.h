@@ -61,6 +61,13 @@ struct Config {
     // Opaque atomic wrapper type names (e.g. atomic_t, spinlock_t).
     std::vector<std::string> atomicTypeNames;
 
+    // Thread-role attribution roots (fnmatch-style). Entry patterns name
+    // worker-thread roots that thread-creation detection cannot see
+    // (function-pointer dispatch); main patterns extend the ROLE_MAIN
+    // seed beyond main() for callbacks dispatched from its event loop.
+    std::vector<std::string> threadEntryPatterns;
+    std::vector<std::string> mainFunctionPatterns;
+
     static Config loadFromFile(const std::string &path);
     static Config defaults();
 };

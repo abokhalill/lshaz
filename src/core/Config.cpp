@@ -45,6 +45,8 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("linked_allocator",       cfg.linkedAllocator);
         io.mapOptional("target_arch",             cfg.targetArch);
         io.mapOptional("atomic_type_names",      cfg.atomicTypeNames);
+        io.mapOptional("thread_entry_patterns",  cfg.threadEntryPatterns);
+        io.mapOptional("main_function_patterns", cfg.mainFunctionPatterns);
     }
 };
 
