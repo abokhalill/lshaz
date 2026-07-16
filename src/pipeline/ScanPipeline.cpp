@@ -994,6 +994,104 @@ static void applyPMUFeedback(
         feedbackLoop.savePriors(fb.pmuPriorsPath);
 }
 
+// Cross-TU thread-role escalation. FL002 joins at pair granularity via
+// its pair_fields evidence; FL090's claim is struct-wide, so any two
+// attributed fields of the type with disjoint roles evidence its
+// concurrency assumption. Confidence-only by design: severity caps from
+// the deliberate-layout demotion contract stay intact, and a demoted
+// struct whose flagged pair still attributes to disjoint threads is
+// exactly the "mitigation exists but missed this pair" signal.
+static const char *roleMaskName(uint8_t mask) {
+    switch (mask) {
+        case ROLE_MAIN:   return "main-thread";
+        case ROLE_WORKER: return "worker-thread";
+        default:          return "mixed-role";
+    }
+}
+
+static unsigned applyThreadRoleEscalation(
+        std::vector<Diagnostic> &diagnostics,
+        const ThreadRoleSummary &facts,
+        const ThreadRoleVerdicts &verdicts) {
+    if (verdicts.functionRoles.empty())
+        return 0;
+
+    unsigned escalated = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed)
+            continue;
+        if (d.ruleID != "FL002" && d.ruleID != "FL090")
+            continue;
+        auto tit = d.structuralEvidence.find("type_name");
+        if (tit == d.structuralEvidence.end() || tit->second.empty())
+            continue;
+        const std::string &type = tit->second;
+
+        std::string fieldA, fieldB;
+        if (d.ruleID == "FL002") {
+            auto pit = d.structuralEvidence.find("pair_fields");
+            if (pit == d.structuralEvidence.end())
+                continue;
+            // "a|b;c|d" - first disjoint pair in flagged order wins.
+            const std::string &pf = pit->second;
+            size_t pos = 0;
+            while (pos < pf.size() && fieldA.empty()) {
+                size_t semi = pf.find(';', pos);
+                std::string pair = pf.substr(pos, semi == std::string::npos
+                                                      ? std::string::npos
+                                                      : semi - pos);
+                size_t bar = pair.find('|');
+                if (bar != std::string::npos) {
+                    std::string a = pair.substr(0, bar);
+                    std::string b = pair.substr(bar + 1);
+                    if (verdicts.fieldsHaveDisjointWriterRoles(
+                            facts, type + "::" + a, type + "::" + b)) {
+                        fieldA = a;
+                        fieldB = b;
+                    }
+                }
+                if (semi == std::string::npos)
+                    break;
+                pos = semi + 1;
+            }
+        } else {
+            // FL090: first (lexicographic, via ordered map) disjoint pair
+            // among the type's attributed fields.
+            const std::string prefix = type + "::";
+            std::vector<std::pair<std::string, uint8_t>> attributed;
+            for (auto it = facts.fieldWriters.lower_bound(prefix);
+                 it != facts.fieldWriters.end() &&
+                 it->first.compare(0, prefix.size(), prefix) == 0;
+                 ++it) {
+                uint8_t mask = verdicts.fieldWriterRoles(facts, it->first);
+                if (mask != ROLE_NONE)
+                    attributed.emplace_back(
+                        it->first.substr(prefix.size()), mask);
+            }
+            for (size_t i = 0; i < attributed.size() && fieldA.empty(); ++i)
+                for (size_t j = i + 1; j < attributed.size(); ++j)
+                    if ((attributed[i].second & attributed[j].second) == 0) {
+                        fieldA = attributed[i].first;
+                        fieldB = attributed[j].first;
+                        break;
+                    }
+        }
+        if (fieldA.empty())
+            continue;
+
+        uint8_t ra = verdicts.fieldWriterRoles(facts, type + "::" + fieldA);
+        uint8_t rb = verdicts.fieldWriterRoles(facts, type + "::" + fieldB);
+        d.confidence = std::min(d.confidence + 0.08, 0.95);
+        d.escalations.push_back(
+            "cross-TU thread-role attribution: '" + fieldA +
+            "' written only from " + roleMaskName(ra) + " code, '" + fieldB +
+            "' only from " + roleMaskName(rb) +
+            " code — concurrent cross-thread writes evidenced, not assumed");
+        ++escalated;
+    }
+    return escalated;
+}
+
 // Cross-TU escape suppression using aggregated EscapeSummary.
 // For each diagnostic with thread_escape evidence, look up the type in the
 // global summary. If no TU provided structural or publication escape evidence,
@@ -1556,12 +1654,18 @@ ScanResult ScanPipeline::run(
     result.threadRoles = computeThreadRoles(result.threadRoleFacts,
                                             request.config.threadEntryPatterns,
                                             request.config.mainFunctionPatterns);
-    if (!result.threadRoles.functionRoles.empty())
+    if (!result.threadRoles.functionRoles.empty()) {
         report("thread_roles",
                std::to_string(result.threadRoleFacts.threadEntries.size()) +
                " thread entry point(s), " +
                std::to_string(result.threadRoles.functionRoles.size()) +
                " function(s) attributed");
+        unsigned roleEscalated = applyThreadRoleEscalation(
+            result.diagnostics, result.threadRoleFacts, result.threadRoles);
+        if (roleEscalated > 0)
+            report("thread_roles", std::to_string(roleEscalated) +
+                   " finding(s) escalated (disjoint writer roles)");
+    }
 
     // Cross-TU deduplication.
     report("dedup", "");
