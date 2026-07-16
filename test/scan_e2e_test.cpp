@@ -252,6 +252,35 @@ void testMultipleTUs(const std::string &bin, const std::string &fixture) {
     fs::remove_all(tmp);
 }
 
+// Fixture: test/fixtures/thread_roles — SharedStats has its two atomic
+// counters written by main (main.cpp) and a pthread worker (worker.cpp);
+// LocalStats is the same layout with main-only writers. The escalation
+// must attribute the first pair as disjoint and leave the control alone.
+void testThreadRoleEscalation(const std::string &bin) {
+    std::cerr << "test: cross-TU thread-role escalation\n";
+    if (!fs::exists("test/fixtures/thread_roles")) {
+        std::cerr << "  SKIP: fixture missing\n";
+        return;
+    }
+    auto tmp = isolateFixture("test/fixtures/thread_roles", "throles");
+    auto project = (tmp / "project").string();
+
+    auto r = run(bin + " scan " + project + " --no-ir --format json");
+    check(r.exitCode == 1, "exit 1 (findings)");
+    check(contains(r.err, "thread entry point(s)"),
+          "thread-role reduce reported");
+    check(countOccurrences(r.out, "cross-TU thread-role attribution") == 1,
+          "exactly one escalation (SharedStats, not the control)");
+    check(contains(r.out, "'mainOps' written only from main-thread"),
+          "main-side field attributed");
+    check(contains(r.out, "'workerOps' only from worker-thread"),
+          "worker-side field attributed across TUs");
+    check(!contains(r.out, "'ctrlA' written only from"),
+          "main-only control struct not escalated");
+
+    fs::remove_all(tmp);
+}
+
 // ===== Output format tests =====
 
 void testJSONOutput(const std::string &bin, const std::string &fixture) {
@@ -572,6 +601,7 @@ int main() {
     // Hazard detection.
     testHazardDetectionWithConfig(bin, fixture);
     testMultipleTUs(bin, fixture);
+    testThreadRoleEscalation(bin);
 
     // Output formats.
     testJSONOutput(bin, fixture);
