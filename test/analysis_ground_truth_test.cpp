@@ -636,6 +636,35 @@ void testThreadRoleFactCollection() {
           "end-to-end: main vs io writer fields are disjoint");
 }
 
+void testThreadRoleSpawnerWrapper() {
+    std::cerr << "test: spawner-wrapper entry detection\n";
+    const std::string src = R"cpp(
+        typedef unsigned long pthread_t;
+        extern "C" int pthread_create(pthread_t*, const void*,
+                                      void *(*)(void*), void*);
+        static void create_worker(void *(*func)(void *), void *arg) {
+            pthread_t t;
+            pthread_create(&t, nullptr, func, arg);
+        }
+        void *poolWorker(void *) { return nullptr; }
+        void setup() { create_worker(poolWorker, nullptr); }
+    )cpp";
+
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) {
+        std::cerr << "  FAIL: AST parse failed\n";
+        ++failures;
+        return;
+    }
+    lshaz::CallGraph cg(AST->getASTContext());
+    cg.buildFromTU(AST->getASTContext().getTranslationUnitDecl());
+    check(cg.threadEntryNames().count("poolWorker") == 1,
+          "function literal through spawner wrapper detected as entry");
+    check(cg.threadEntryNames().count("create_worker") == 0,
+          "the wrapper itself is not an entry");
+}
+
 void testThreadRoleStdThreadEntry() {
     std::cerr << "test: std::thread constructor entry detection\n";
     const std::string src = R"cpp(
@@ -681,6 +710,7 @@ int main() {
     testAlignmentAwareBucketing();
     testCacheLineAlignedBucketing();
     testThreadRoleFactCollection();
+    testThreadRoleSpawnerWrapper();
     testThreadRoleStdThreadEntry();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
