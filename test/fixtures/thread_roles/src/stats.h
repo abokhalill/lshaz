@@ -17,4 +17,12 @@ struct LocalStats {
 };
 extern LocalStats g_local;
 
+// In-tree mitigation exemplar: this codebase already knows the
+// line-isolation idiom, which is what FL092's precedent join detects.
+struct alignas(64) IsolatedCounter {
+    std::atomic<unsigned long> value;
+    char pad[64 - sizeof(std::atomic<unsigned long>)];
+};
+extern IsolatedCounter g_isolated;
+
 void *workerEntry(void *);

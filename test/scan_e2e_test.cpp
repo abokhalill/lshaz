@@ -278,6 +278,13 @@ void testThreadRoleEscalation(const std::string &bin) {
     check(!contains(r.out, "'ctrlA' written only from"),
           "main-only control struct not escalated");
 
+    // FL092: SharedStats lacks the idiom IsolatedCounter demonstrates.
+    check(countOccurrences(r.out, "Unapplied In-Tree Mitigation") == 1,
+          "exactly one FL092 (attributed struct without the idiom)");
+    check(contains(r.out, "\"mitigated_exemplar\": \"IsolatedCounter\"") ||
+              contains(r.out, "\"mitigated_exemplar\":\"IsolatedCounter\""),
+          "FL092 names the in-tree exemplar");
+
     fs::remove_all(tmp);
 }
 

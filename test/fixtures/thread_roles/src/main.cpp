@@ -3,6 +3,7 @@
 
 SharedStats g_stats;
 LocalStats g_local;
+IsolatedCounter g_isolated;
 
 void mainSide() {
     g_stats.mainOps.fetch_add(1, std::memory_order_relaxed);
