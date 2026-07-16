@@ -47,7 +47,11 @@ struct ScanArgs {
     std::string outputFile;
     std::string minSeverity = "Informational";
     std::string minEvidence = "speculative";
-    std::string irOpt = "O0";
+    // O2 default per the rocksdb A/B: 67% of hot findings refine
+    // differently at O2 (the refiner then judges what actually executes,
+    // post-inlining), and O2 IR is cheaper to emit than O0 on template
+    // C++. --ir-opt O0 remains available for debug-build parity.
+    std::string irOpt = "O2";
     std::string perfProfile;
     std::string allocator;
     std::string calibrationStore;
@@ -96,7 +100,7 @@ void printScanUsage() {
         << "  -a, --target-arch <arch> Target architecture: x86-64, arm64, arm64-apple\n"
         << "  -w, --watch              Watch mode: re-scan on file changes\n"
         << "      --no-ir              Disable LLVM IR analysis pass\n"
-        << "      --ir-opt <O0|O1|O2>  IR optimization level (default: O0)\n"
+        << "      --ir-opt <O0|O1|O2>  IR optimization level (default: O2)\n"
         << "      --ir-jobs <N>        Max parallel IR jobs (default: nproc)\n"
         << "      --ir-batch-size <N>  TUs per IR shard (default: 1)\n"
         << "      --no-ir-cache        Disable incremental IR cache\n"
