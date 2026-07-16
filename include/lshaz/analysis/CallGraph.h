@@ -4,6 +4,10 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
 
+#include "lshaz/analysis/ThreadRoleSummary.h"
+
+#include <set>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -38,6 +42,17 @@ public:
     size_t numFunctions() const { return calleeMap_.size(); }
     size_t numEdges() const { return edgeCount_; }
 
+    // Functions this TU passes to a thread-creation primitive. Collected
+    // during the same CallExpr walk that builds the edges.
+    const std::set<std::string> &threadEntryNames() const {
+        return threadEntries_;
+    }
+
+    // Snapshot edges and entries as qualified names for cross-TU joining.
+    // Name-keyed on purpose: C++ overload sets collapse to one node, which
+    // can only widen a role mask, never fabricate disjointness.
+    void snapshotForThreadRoles(ThreadRoleSummary &out) const;
+
 private:
     void processFunction(const clang::FunctionDecl *FD);
 
@@ -54,6 +69,8 @@ private:
         callerMap_;
 
     size_t edgeCount_ = 0;
+
+    std::set<std::string> threadEntries_;
 
     static const std::unordered_set<const clang::FunctionDecl *> empty_;
 };

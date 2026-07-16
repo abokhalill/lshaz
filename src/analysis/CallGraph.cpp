@@ -16,21 +16,71 @@ const std::unordered_set<const clang::FunctionDecl *> CallGraph::empty_;
 
 namespace {
 
+// Resolve a thread-entry argument to the function it names, through
+// parens, casts, and unary &.
+const clang::FunctionDecl *entryArgToFunction(const clang::Expr *E) {
+    if (!E) return nullptr;
+    E = E->IgnoreParenImpCasts();
+    if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+        if (UO->getOpcode() == clang::UO_AddrOf)
+            E = UO->getSubExpr()->IgnoreParenImpCasts();
+    }
+    if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
+        return llvm::dyn_cast<clang::FunctionDecl>(DRE->getDecl());
+    return nullptr;
+}
+
 class CallEdgeVisitor
     : public clang::RecursiveASTVisitor<CallEdgeVisitor> {
 public:
     std::unordered_set<const clang::FunctionDecl *> callees;
+    std::unordered_set<const clang::FunctionDecl *> threadEntries;
 
     bool VisitCallExpr(clang::CallExpr *CE) {
-        if (const auto *Callee = CE->getDirectCallee())
-            callees.insert(Callee->getCanonicalDecl());
+        const auto *Callee = CE->getDirectCallee();
+        if (!Callee)
+            return true;
+        callees.insert(Callee->getCanonicalDecl());
+
+        // pthread_create(&t, attr, fn, arg) / thrd_create(&t, fn, arg) /
+        // std::async([policy,] fn, ...). Entry position varies per
+        // primitive; std::async's optional launch policy is disambiguated
+        // by which argument resolves to a function.
+        llvm::StringRef name = Callee->getName();
+        if (name == "pthread_create" && CE->getNumArgs() >= 3)
+            addEntry(CE->getArg(2));
+        else if (name == "thrd_create" && CE->getNumArgs() >= 2)
+            addEntry(CE->getArg(1));
+        else if (name == "async" && CE->getNumArgs() >= 1) {
+            if (!addEntry(CE->getArg(0)) && CE->getNumArgs() >= 2)
+                addEntry(CE->getArg(1));
+        }
         return true;
     }
 
     bool VisitCXXConstructExpr(clang::CXXConstructExpr *CE) {
-        if (const auto *CD = CE->getConstructor())
-            callees.insert(CD->getCanonicalDecl());
+        const auto *CD = CE->getConstructor();
+        if (!CD)
+            return true;
+        callees.insert(CD->getCanonicalDecl());
+
+        // std::thread t(fn, args...) / std::jthread.
+        const auto *RD = CD->getParent();
+        if (RD && CE->getNumArgs() >= 1) {
+            llvm::StringRef cls = RD->getName();
+            if (cls == "thread" || cls == "jthread")
+                addEntry(CE->getArg(0));
+        }
         return true;
+    }
+
+private:
+    bool addEntry(const clang::Expr *arg) {
+        if (const auto *FD = entryArgToFunction(arg)) {
+            threadEntries.insert(FD->getCanonicalDecl());
+            return true;
+        }
+        return false;
     }
 };
 
@@ -84,6 +134,19 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         targets.insert(callee);
         callerMap_[callee].insert(canon);
         ++edgeCount_;
+    }
+    for (const auto *entry : visitor.threadEntries)
+        threadEntries_.insert(entry->getQualifiedNameAsString());
+}
+
+void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
+    out.threadEntries.insert(threadEntries_.begin(), threadEntries_.end());
+    for (const auto &[caller, callees] : calleeMap_) {
+        if (callees.empty())
+            continue;
+        auto &names = out.callEdges[caller->getQualifiedNameAsString()];
+        for (const auto *callee : callees)
+            names.insert(callee->getQualifiedNameAsString());
     }
 }
 
