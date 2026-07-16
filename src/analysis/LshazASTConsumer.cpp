@@ -30,9 +30,10 @@ LshazASTConsumer::LshazASTConsumer(
     const Config &cfg,
     std::vector<Diagnostic> &diagnostics,
     EscapeSummary &escapeSummary,
+    ThreadRoleSummary &threadRoles,
     const std::unordered_set<std::string> &profileHotFuncs)
     : config_(cfg), oracle_(cfg), diagnostics_(diagnostics),
-      escapeSummary_(escapeSummary) {
+      escapeSummary_(escapeSummary), threadRoles_(threadRoles) {
     if (!profileHotFuncs.empty())
         oracle_.loadProfileHotFunctions(profileHotFuncs);
 }
@@ -183,6 +184,12 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                 records.push_back(RD);
     }
     escapeSummary_ = escape.buildEscapeSummary(records);
+
+    // Thread-role facts for the cross-TU reduce: call edges + entries
+    // from the graph already built for hotness, writer names from the
+    // escape traversal. No additional TU walks.
+    cg.snapshotForThreadRoles(threadRoles_);
+    escape.appendFieldWriterNames(threadRoles_);
 }
 
 } // namespace lshaz

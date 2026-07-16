@@ -5,6 +5,7 @@
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -20,6 +21,7 @@ public:
     LshazASTConsumer(const Config &cfg,
                          std::vector<Diagnostic> &diagnostics,
                          EscapeSummary &escapeSummary,
+                         ThreadRoleSummary &threadRoles,
                          const std::unordered_set<std::string> &profileHotFuncs = {});
 
     void HandleTranslationUnit(clang::ASTContext &Ctx) override;
@@ -29,6 +31,7 @@ private:
     HotPathOracle oracle_;
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary &escapeSummary_;
+    ThreadRoleSummary &threadRoles_;
 };
 
 } // namespace lshaz

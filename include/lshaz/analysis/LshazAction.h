@@ -4,6 +4,7 @@
 #include "lshaz/core/Config.h"
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/FrontendAction.h>
@@ -26,6 +27,7 @@ public:
     LshazAction(const Config &cfg,
                     std::vector<Diagnostic> &diagnostics,
                     EscapeSummary &escapeSummary,
+                    ThreadRoleSummary &threadRoles,
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<FailedTU> &failedTUs);
 
@@ -41,6 +43,7 @@ private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary &escapeSummary_;
+    ThreadRoleSummary &threadRoles_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
     std::string currentFile_;
@@ -57,11 +60,13 @@ public:
 
     const std::vector<FailedTU> &failedTUs() const { return failedTUs_; }
     const EscapeSummary &escapeSummary() const { return escapeSummary_; }
+    const ThreadRoleSummary &threadRoles() const { return threadRoles_; }
 
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary escapeSummary_;
+    ThreadRoleSummary threadRoles_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<FailedTU> failedTUs_;
 };
