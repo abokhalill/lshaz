@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/EscapeAnalysis.h"
+#include "lshaz/analysis/SymbolNames.h"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
@@ -466,6 +467,26 @@ public:
 
     // write rate, not site count, is what coherence sees: a write under
     // any of these is repeatable per iteration.
+    // Lambda bodies execute on invocation, not in the enclosing frame:
+    // writes attribute to the lambda's own node (a worker lambda's writes
+    // must not read as the spawner's) and enclosing loop depth does not
+    // apply.
+    bool TraverseLambdaExpr(clang::LambdaExpr *LE) {
+        for (auto *init : LE->capture_inits())
+            if (init && !TraverseStmt(init))
+                return false;
+        const auto *prevFn = currentFn;
+        unsigned prevDepth = loopDepth;
+        currentFn = LE->getCallOperator();
+        loopDepth = 0;
+        bool r = true;
+        if (auto *Body = LE->getBody())
+            r = TraverseStmt(Body);
+        currentFn = prevFn;
+        loopDepth = prevDepth;
+        return r;
+    }
+
     bool TraverseForStmt(clang::ForStmt *S) {
         ++loopDepth;
         bool r = RecursiveASTVisitor::TraverseForStmt(S);
@@ -670,7 +691,7 @@ void EscapeAnalysis::appendFieldWriterNames(ThreadRoleSummary &out) const {
         auto &writers =
             out.fieldWriters[typeName + "::" + FD->getNameAsString()];
         for (const auto *w : rec.writers)
-            writers.insert(w->getQualifiedNameAsString());
+            writers.insert(threadRoleNodeName(w, ctx_));
     }
 }
 
