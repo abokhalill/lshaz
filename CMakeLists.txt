@@ -68,6 +68,7 @@ set(LSHAZ_SOURCES
     src/rules/FL010_OverlyStrongOrdering.cpp
     src/rules/FL011_AtomicContention.cpp
     src/rules/FL012_LockHotPath.cpp
+    src/rules/FL013_SpinWaitNoPause.cpp
     src/rules/FL040_CentralizedGlobalState.cpp
     src/rules/FL041_ContendedQueue.cpp
     src/rules/FL050_DeepConditionalTree.cpp
