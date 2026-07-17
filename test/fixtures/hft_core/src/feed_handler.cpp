@@ -54,4 +54,18 @@ void decodeBatch(const char *buffer, size_t len, FeedHandler &handler) {
     }
 }
 
+// FL013 target: tight spin on an atomic with no pause — every
+// invalidation of readyFlag_'s line costs a memory-order machine clear.
+void FeedHandler::spinAwaitReady(const std::atomic<bool> &readyFlag_) {
+    while (!readyFlag_.load(std::memory_order_acquire)) {
+    }
+}
+
+// Control: identical spin with the pause hint — must NOT fire.
+void FeedHandler::spinAwaitReadyPaused(const std::atomic<bool> &readyFlag_) {
+    while (!readyFlag_.load(std::memory_order_acquire)) {
+        __builtin_ia32_pause();
+    }
+}
+
 } // namespace hft
