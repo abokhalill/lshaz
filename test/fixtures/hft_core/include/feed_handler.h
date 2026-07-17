@@ -21,6 +21,7 @@ public:
     void onMessage(const MarketDataMessage &msg);
     uint64_t lastSequence() const;
     void spinAwaitReady(const std::atomic<bool> &readyFlag_);
+    void spinAwaitImplicit(const std::atomic<bool> &readyFlag_);
     void spinAwaitReadyPaused(const std::atomic<bool> &readyFlag_);
 
 private:

@@ -225,10 +225,12 @@ void testHazardDetectionWithConfig(const std::string &bin,
     check(contains(r.out, "FL012") || contains(r.out, "FL010"),
           "FL012/FL010: lock contention or overly strong ordering in hot path");
 
-    // FL013: pauseless spin fires once; the __builtin_ia32_pause twin
-    // must not.
-    check(countOccurrences(r.out, "\"FL013\"") >= 1,
-          "FL013: pauseless spin-wait detected");
+    // FL013: explicit .load() spin and the implicit conversion-operator
+    // form both fire; the __builtin_ia32_pause twin must not.
+    check(countOccurrences(r.out, "\"FL013\"") >= 2,
+          "FL013: explicit and implicit-conversion spins detected");
+    check(contains(r.out, "spinAwaitImplicit"),
+          "FL013: conversion-operator poll detected");
     check(contains(r.out, "spinAwaitReady") &&
               !contains(r.out, "spinAwaitReadyPaused"),
           "FL013: paused twin not flagged");

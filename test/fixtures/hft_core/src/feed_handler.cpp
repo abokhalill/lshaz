@@ -81,6 +81,13 @@ void FeedHandler::spinAwaitReady(const std::atomic<bool> &readyFlag_) {
     }
 }
 
+// FL013 implicit-conversion form: `while (!flag)` desugars to the
+// atomic's conversion operator, not a named .load() — must also fire.
+void FeedHandler::spinAwaitImplicit(const std::atomic<bool> &readyFlag_) {
+    while (!readyFlag_) {
+    }
+}
+
 // Control: identical spin with the pause hint — must NOT fire.
 void FeedHandler::spinAwaitReadyPaused(const std::atomic<bool> &readyFlag_) {
     while (!readyFlag_.load(std::memory_order_acquire)) {
