@@ -1104,6 +1104,50 @@ static unsigned applyThreadRoleEscalation(
     return escalated;
 }
 
+// FL060 first-touch heuristics assume nobody is managing placement. A
+// codebase calling affinity/mempolicy APIs has an author doing exactly
+// that; the same respect contract deliberate layout earns from FL002.
+// Reduce-side only: the merged call edges already carry every direct
+// callee name.
+static std::string detectAffinityManagement(const ThreadRoleSummary &facts) {
+    static const char *kAPIs[] = {
+        "pthread_setaffinity_np", "sched_setaffinity", "mbind",
+        "set_mempolicy",          "numa_bind",         "numa_run_on_node",
+        "numa_set_membind",       "numa_alloc_onnode", "numa_tonode_memory",
+    };
+    // Ordered facts + fixed API order = deterministic first match.
+    for (const char *api : kAPIs)
+        for (const auto &[caller, callees] : facts.callEdges)
+            if (callees.count(api))
+                return api;
+    return {};
+}
+
+static unsigned applyAffinityRespect(std::vector<Diagnostic> &diagnostics,
+                                     const std::string &api) {
+    if (api.empty())
+        return 0;
+    unsigned demoted = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || d.ruleID != "FL060")
+            continue;
+        if (d.severity == Severity::Critical)
+            d.severity = Severity::High;
+        else if (d.severity == Severity::High)
+            d.severity = Severity::Medium;
+        else
+            d.severity = Severity::Informational;
+        d.confidence = std::max(d.confidence - 0.10, 0.05);
+        d.escalations.push_back(
+            "explicit placement management in-tree (" + api +
+            "): first-touch inference demoted — the author is already "
+            "steering affinity; verify against their policy, not the "
+            "default model");
+        ++demoted;
+    }
+    return demoted;
+}
+
 // FL092: unapplied in-tree mitigation. Synthesized when an FL002 with
 // cross-thread writer attribution sits in a codebase that demonstrably
 // applies cache-line isolation to other types. The precedent join is the
@@ -1760,6 +1804,16 @@ ScanResult ScanPipeline::run(
             report("thread_roles", std::to_string(roleEscalated) +
                    " finding(s) escalated (disjoint writer roles)");
     }
+
+    // Affinity respect runs before dedup so all duplicates demote alike.
+    std::string affinityAPI =
+        detectAffinityManagement(result.threadRoleFacts);
+    unsigned affinityDemoted =
+        applyAffinityRespect(result.diagnostics, affinityAPI);
+    if (affinityDemoted > 0)
+        report("numa", std::to_string(affinityDemoted) +
+               " FL060 finding(s) demoted (explicit affinity via " +
+               affinityAPI + ")");
 
     // Cross-TU deduplication.
     report("dedup", "");
