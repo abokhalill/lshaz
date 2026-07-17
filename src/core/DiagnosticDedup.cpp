@@ -11,9 +11,12 @@ namespace {
 
 // Struct-level rules emit diagnostics keyed by declaration location.
 bool isStructLevelRule(const std::string &ruleID) {
+    // FL070's global-array findings anchor to the VarDecl location; the
+    // hot accessor that fired is detail, not identity — N hot readers of
+    // one arena are one finding.
     return ruleID == "FL001" || ruleID == "FL002" || ruleID == "FL040" ||
            ruleID == "FL041" || ruleID == "FL060" || ruleID == "FL061" ||
-           ruleID == "FL090" || ruleID == "FL091";
+           ruleID == "FL070" || ruleID == "FL090" || ruleID == "FL091";
 }
 
 // FL040 diagnostics carry the variable name in structuralEvidence["var"].
