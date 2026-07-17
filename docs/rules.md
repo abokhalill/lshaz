@@ -17,6 +17,7 @@ mechanism and mitigation text the diagnostics carry.
 | FL010 | Atomic ordering | `seq_cst` where a weaker ordering is sufficient on the target architecture | Function | Yes |
 | FL011 | Atomic contention | Atomic write sites generating cross-core RFO traffic | Function | Yes |
 | FL012 | Lock contention | Mutex/spinlock acquisition in a hot function | Function | Yes |
+| FL013 | Spin-wait without pause | Tight atomic/volatile poll loop lacking pause/yield/backoff | Function | Yes |
 | FL020 | Heap allocation | Allocation in a hot function; severity shaped by allocator topology | Function | Yes |
 | FL021 | Stack pressure | Stack frame exceeding threshold (default 2048B) | Function | No |
 | FL030 | Virtual dispatch | Virtual/indirect call in a hot function, not devirtualized in IR | Function | Yes |
@@ -249,6 +250,27 @@ acquisition in a hot function.
 
 **Mitigation:** Single-writer designs, partitioned state, lock-free structures
 where the invariants allow.
+
+### FL013 — Spin-Wait Without Pause
+
+**Severity:** High &nbsp;|&nbsp; **Scope:** function (hot-path gated)
+
+Fires on a tight loop (≤4 body statements — larger bodies are work
+loops, not spins) that polls an atomic or volatile in its condition or
+body (`load`, `compare_exchange_*`, `__atomic_load*`, C11 `_Atomic`
+lvalue, volatile read) with **no de-speculation or descheduling** in the
+loop: `_mm_pause`/`__builtin_ia32_pause`, `std::this_thread::yield`/
+`sleep_*`, `sched_yield`, `nanosleep`, or any inline `asm` (opaque
+semantics — `cpu_relax()` and hand-rolled pause both arrive as asm, so
+the benefit of the doubt goes to the author).
+
+Mechanism: the pauseless spin speculates polled loads far ahead; the
+writer's eventual invalidation triggers a memory-order machine clear
+(full pipeline flush — `machine_clears.memory_ordering`), and the
+spinning logical core monopolizes issue ports its SMT sibling needs.
+Load-spin form is graded 0.75, CAS-retry 0.62 (short retry bursts are
+often acceptable; unbounded ones are not — the distinction needs
+runtime data).
 
 ---
 
