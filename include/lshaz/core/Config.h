@@ -19,6 +19,11 @@ struct Config {
     // Target architecture (affects cache model, ordering cost model, rule text)
     TargetArch targetArch       = TargetArch::X86_64;
 
+    // Deployment runs with SMT/Hyper-Threading enabled. Desks disable it
+    // in BIOS; FL013's sibling-starvation cost is then excluded and its
+    // severity drops a notch.
+    bool smtEnabled             = true;
+
     // Cache model
     size_t cacheLineBytes       = 64;
     size_t cacheLineSpanWarn    = 64;   // FL001 threshold
