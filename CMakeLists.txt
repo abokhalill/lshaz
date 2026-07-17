@@ -74,6 +74,7 @@ set(LSHAZ_SOURCES
     src/rules/FL050_DeepConditionalTree.cpp
     src/rules/FL090_HazardAmplification.cpp
     src/rules/FL060_NUMAUnfriendly.cpp
+    src/rules/FL070_TLBPressure.cpp
     src/rules/FL061_CentralizedDispatcher.cpp
     src/ir/IRAnalyzer.cpp
     src/ir/DiagnosticRefiner.cpp
