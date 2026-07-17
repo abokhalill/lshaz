@@ -1123,6 +1123,35 @@ static std::string detectAffinityManagement(const ThreadRoleSummary &facts) {
     return {};
 }
 
+// Same contract for FL070: in-tree madvise/mallopt means the author
+// already manages paging policy.
+static bool detectPagingManagement(const ThreadRoleSummary &facts) {
+    for (const auto &[caller, callees] : facts.callEdges)
+        if (callees.count("madvise") || callees.count("posix_madvise") ||
+            callees.count("mallopt"))
+            return true;
+    return false;
+}
+
+static unsigned applyPagingRespect(std::vector<Diagnostic> &diagnostics,
+                                   bool managed) {
+    if (!managed)
+        return 0;
+    unsigned demoted = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || d.ruleID != "FL070")
+            continue;
+        d.severity = Severity::Informational;
+        d.confidence = std::max(d.confidence - 0.10, 0.05);
+        d.escalations.push_back(
+            "paging policy managed in-tree (madvise/mallopt observed): "
+            "hugepage inference demoted — verify against the author's "
+            "policy");
+        ++demoted;
+    }
+    return demoted;
+}
+
 static unsigned applyAffinityRespect(std::vector<Diagnostic> &diagnostics,
                                      const std::string &api) {
     if (api.empty())
@@ -1814,6 +1843,13 @@ ScanResult ScanPipeline::run(
         report("numa", std::to_string(affinityDemoted) +
                " FL060 finding(s) demoted (explicit affinity via " +
                affinityAPI + ")");
+
+    unsigned pagingDemoted = applyPagingRespect(
+        result.diagnostics,
+        detectPagingManagement(result.threadRoleFacts));
+    if (pagingDemoted > 0)
+        report("tlb", std::to_string(pagingDemoted) +
+               " FL070 finding(s) demoted (paging policy managed in-tree)");
 
     // Cross-TU deduplication.
     report("dedup", "");
