@@ -27,6 +27,7 @@ mechanism and mitigation text the diagnostics carry.
 | FL050 | Deep conditional | Conditional nesting beyond threshold (default 4) | Function | Yes |
 | FL060 | NUMA locality | Shared mutable structure with unfavorable inferred page placement | Struct | No |
 | FL061 | Centralized dispatch | Single dispatcher routing to many handlers | Function | Yes |
+| FL070 | TLB pressure | ≥2MB hot-referenced global without hugepage alignment; large map/alloc without hugepage provision | Mixed | Partial |
 | FL090 | Hazard amplification | Compound: multi-line footprint + atomics + thread escape on one struct | Struct | No |
 | FL091 | Synthesized interaction | Two or three eligible hazards joined at one entity | Synthesized | No |
 | FL092 | Unapplied in-tree mitigation | Attributed FL002/FL090 on a struct without the line-isolation idiom the codebase applies elsewhere | Synthesized | No |
@@ -443,6 +444,37 @@ explicit binding.
 notch (−0.10 confidence) with the reason stated: the author is already
 steering placement, and the first-touch default model must defer to
 their policy. Same contract deliberate layout earns from FL002/FL090.
+
+### FL070 — TLB Pressure
+
+**Base severity:** Medium &nbsp;|&nbsp; **Scope:** mixed &nbsp;|&nbsp; **Gate:** globals hot-gated, allocation sites ungated
+
+**Hardware mechanism:** a working set spanning more base pages than the
+dTLB covers (~64 L1 / ~1–2K L2 entries at 4KB) turns strided access into
+page walks — 4-level lookups, each a potential cache-miss chain
+(`dtlb_load_misses.walk_completed`). One 2MB hugepage entry covers 512×
+the reach, but khugepaged collapses only 2MB-**aligned** virtual
+extents: a 4MB array misaligned by a page backs 1 huge page instead of
+2; exactly-2MB misaligned backs 0. Base alignment gates the mitigation.
+
+**Detection, graded by what is provable:**
+
+- *Hot-referenced globals* ≥2MB: fired from the hot accessor (statelessly;
+  dedup collapses multiple accessors to the `VarDecl` location). Missing
+  2MB alignment is named as the primary defect (Medium 0.65); a
+  hugepage-aligned definition reports at the mitigation-respect floor
+  (Informational 0.35).
+- *Allocation sites* (`mmap` without `MAP_HUGETLB`, `posix_memalign` /
+  `aligned_alloc` with sub-2MB alignment) with compile-time-provable
+  sizes. When the exonerating argument (mmap flags, memalign alignment)
+  is **not** compile-time evaluable, the site grades Speculative 0.30
+  with the unprovable argument named — it may resolve safe at runtime,
+  and unprovable is a tier, never a Medium assertion.
+- With `--allocator jemalloc|tcmalloc`, allocation-path findings demote:
+  those allocators chunk large allocations 2MB-aligned and THP-aware.
+- In-tree `madvise`/`posix_madvise`/`mallopt` demotes all FL070 findings
+  in post-processing (paging policy is author-managed) — the same
+  respect contract FL060 gives explicit affinity.
 
 ### FL061 — Centralized Dispatcher Bottleneck
 
