@@ -437,6 +437,13 @@ any-thread, interleaved, explicit-bind, unknown).
 **Mitigation:** First-touch-aware initialization; per-socket replication;
 explicit binding.
 
+**Affinity respect:** when any TU calls a placement API
+(`sched_setaffinity`, `pthread_setaffinity_np`, `mbind`,
+`set_mempolicy`, `numa_*`), every FL060 finding demotes one severity
+notch (−0.10 confidence) with the reason stated: the author is already
+steering placement, and the first-touch default model must defer to
+their policy. Same contract deliberate layout earns from FL002/FL090.
+
 ### FL061 — Centralized Dispatcher Bottleneck
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
