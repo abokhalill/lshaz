@@ -32,6 +32,8 @@ uint64_t FeedHandler::lastSequence() const {
 }
 
 // FL021 target: large stack frame from local decode buffers.
+void recordReplayForDecodeBatch(const char *src, size_t off, size_t n);
+
 void decodeBatch(const char *buffer, size_t len, FeedHandler &handler) {
     MarketDataMessage decoded[128];
     char scratchpad[4096];
@@ -51,7 +53,25 @@ void decodeBatch(const char *buffer, size_t len, FeedHandler &handler) {
         std::memcpy(scratchpad, decoded[i].symbol,
                      sizeof(decoded[i].symbol));
         handler.onMessage(decoded[i]);
+        recordReplayForDecodeBatch(scratchpad, i * 64, 64);
     }
+}
+
+// FL070 target: 4MB replay arena, page-aligned but NOT hugepage-aligned
+// — khugepaged cannot collapse the unaligned edges. Referenced from the
+// hot decodeBatch below via recordReplay.
+alignas(4096) static char g_replayArena[4 << 20];
+
+// Control: hugepage-aligned twin — author already thinks in 2MB units;
+// must report at floor (Informational), not Medium.
+alignas(2 * 1024 * 1024) static char g_alignedArena[2 << 20];
+
+char *replayArena() { return g_replayArena; }
+char *alignedArena() { return g_alignedArena; }
+
+void recordReplayForDecodeBatch(const char *src, size_t off, size_t n) {
+    std::memcpy(g_replayArena + (off % ((4u << 20) - 4096)), src, n);
+    std::memcpy(g_alignedArena + (off % ((2u << 20) - 4096)), src, n);
 }
 
 // FL013 target: tight spin on an atomic with no pause — every

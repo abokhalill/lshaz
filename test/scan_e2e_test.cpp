@@ -233,6 +233,14 @@ void testHazardDetectionWithConfig(const std::string &bin,
               !contains(r.out, "spinAwaitReadyPaused"),
           "FL013: paused twin not flagged");
 
+    // FL070: hot-referenced unaligned arena fires with alignment named
+    // as the defect; the 2MB-aligned twin reports at floor.
+    check(contains(r.out, "g_replayArena") &&
+              contains(r.out, "lacks 2MB base alignment"),
+          "FL070: unaligned hot arena flagged on alignment");
+    check(contains(r.out, "hugepage-ready"),
+          "FL070: aligned twin at mitigation-respect floor");
+
     // Validate diagnostic structure completeness.
     check(contains(r.out, "\"ruleID\""), "diagnostics have ruleID");
     check(contains(r.out, "\"severity\""), "diagnostics have severity");
