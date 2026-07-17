@@ -258,20 +258,36 @@ where the invariants allow.
 
 Fires on a tight loop (≤4 body statements — larger bodies are work
 loops, not spins) that polls an atomic or volatile in its condition or
-body (`load`, `compare_exchange_*`, `__atomic_load*`, C11 `_Atomic`
-lvalue, volatile read) with **no de-speculation or descheduling** in the
-loop: `_mm_pause`/`__builtin_ia32_pause`, `std::this_thread::yield`/
-`sleep_*`, `sched_yield`, `nanosleep`, or any inline `asm` (opaque
-semantics — `cpu_relax()` and hand-rolled pause both arrive as asm, so
-the benefit of the doubt goes to the author).
+body with **no de-speculation or descheduling** in the loop. Poll forms
+covered: `load`/`compare_exchange_*`, the **implicit conversion
+operator** (`while (flag)` desugars to a `CXXConversionDecl` call —
+name matching alone misses the most common spin), atomic operator
+overloads (RMW-as-poll), `std::atomic_flag::test`/`test_and_set` (the
+TAS spinlock idiom, C++ and C11 spellings), `__atomic_load*`, C11
+`_Atomic` lvalues, and volatile reads. Compound conditions report
+every polled variable. Relax family: `_mm_pause`/
+`__builtin_ia32_pause`, `umwait`/`tpause`/`monitor`/`mwait` (the
+modern *designed* wait), `std::this_thread::yield`/`sleep_*`,
+`sched_yield`, `nanosleep`, or any inline `asm` (opaque semantics —
+`cpu_relax()` and hand-rolled pause both arrive as asm, so the benefit
+of the doubt goes to the author).
 
 Mechanism: the pauseless spin speculates polled loads far ahead; the
 writer's eventual invalidation triggers a memory-order machine clear
 (full pipeline flush — `machine_clears.memory_ordering`), and the
 spinning logical core monopolizes issue ports its SMT sibling needs.
-Load-spin form is graded 0.75, CAS-retry 0.62 (short retry bursts are
-often acceptable; unbounded ones are not — the distinction needs
-runtime data).
+Grading: TAS spin 0.78 (each iteration is an RFO **write** — contenders
+trade the line in Modified state where a TTAS spins on a Shared copy),
+load-spin 0.75, CAS-retry 0.62 (short retry bursts are often
+acceptable; unbounded ones need runtime data).
+
+`smt_enabled: false` (config) models BIOS-disabled Hyper-Threading:
+the sibling-starvation clause drops from the reasoning and severity
+drops to Medium — one mechanism instead of two, not silence. The
+mitigation states the PAUSE trade honestly (~140 cycles of wake-up
+latency on Skylake+-derived cores); a deliberate bare spin on a
+sub-microsecond signaling path is what `// lshaz-suppress FL013` is
+for, and the diagnostic says so.
 
 ---
 
