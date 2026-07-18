@@ -12,6 +12,8 @@
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <fnmatch.h>
+
 #include <sstream>
 
 namespace lshaz {
@@ -155,6 +157,7 @@ private:
 class RelaxFinder : public clang::RecursiveASTVisitor<RelaxFinder> {
 public:
     bool found = false;
+    const std::vector<std::string> *extraPatterns = nullptr;
 
     bool VisitCallExpr(clang::CallExpr *E) {
         const auto *FD = E->getDirectCallee();
@@ -171,20 +174,43 @@ public:
             return true;
         std::string qn = FD->getQualifiedNameAsString();
         llvm::StringRef n = FD->getName();
-        // umwait/tpause/monitor are the modern deliberate spin
+        // umwait/tpause/monitor are the modern deliberate spin.
+        // wait/wait_for/wait_until match by bare name on purpose:
+        // C++20 atomic::wait, condition_variable, futures, POSIX wait —
+        // a method named wait declares descheduling intent; if a custom
+        // one internally bare-spins, FL013 fires inside its body, once,
+        // instead of at every call site. rte_* is DPDK's relax family;
+        // blocking demultiplexer syscalls make an event loop, not a spin.
         if (n == "_mm_pause" || n == "sched_yield" || n == "pthread_yield" ||
             n == "nanosleep" || n == "usleep" || n == "sleep" ||
             n == "cpu_relax" || n == "futex" || n == "syscall" ||
             n == "_umwait" || n == "_tpause" || n == "_umonitor" ||
             n == "_mm_monitor" || n == "_mm_mwait" ||
+            n == "wait" || n == "wait_for" || n == "wait_until" ||
+            n == "rte_pause" || n == "rte_delay_us" ||
+            n == "rte_delay_us_block" ||
+            n == "epoll_wait" || n == "epoll_pwait" || n == "ppoll" ||
+            n == "poll" || n == "select" || n == "pselect" ||
             n.starts_with("__builtin_ia32_umwait") ||
             n.starts_with("__builtin_ia32_tpause") ||
             n.starts_with("__builtin_ia32_monitor") ||
             n.starts_with("__builtin_ia32_mwait") ||
             qn == "std::this_thread::yield" ||
             qn == "std::this_thread::sleep_for" ||
-            qn == "std::this_thread::sleep_until")
+            qn == "std::this_thread::sleep_until") {
             found = true;
+            return true;
+        }
+        // Bespoke backoff vocabularies (folly Sleeper, absl
+        // SpinLockDelay, in-house Backoff::pause) are declared once in
+        // config rather than chased by name here.
+        if (extraPatterns)
+            for (const auto &p : *extraPatterns)
+                if (fnmatch(p.c_str(), n.str().c_str(), 0) == 0 ||
+                    fnmatch(p.c_str(), qn.c_str(), 0) == 0) {
+                    found = true;
+                    return true;
+                }
         return true;
     }
 
@@ -225,6 +251,7 @@ unsigned countStmts(const clang::Stmt *S) {
 class SpinLoopVisitor : public clang::RecursiveASTVisitor<SpinLoopVisitor> {
 public:
     std::vector<SpinSite> sites;
+    const std::vector<std::string> *relaxPatterns = nullptr;
 
     bool VisitWhileStmt(clang::WhileStmt *S) {
         inspect(S->getCond(), S->getBody(), S->getWhileLoc());
@@ -260,6 +287,7 @@ private:
             return;
 
         RelaxFinder relax;
+        relax.extraPatterns = relaxPatterns;
         if (cond)
             relax.TraverseStmt(const_cast<clang::Expr *>(cond));
         if (body && !relax.found)
@@ -305,6 +333,7 @@ public:
             return;
 
         SpinLoopVisitor visitor;
+        visitor.relaxPatterns = &Cfg.relaxFunctionPatterns;
         visitor.TraverseStmt(FD->getBody());
         if (visitor.sites.empty())
             return;
