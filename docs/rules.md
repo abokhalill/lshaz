@@ -268,9 +268,17 @@ TAS spinlock idiom, C++ and C11 spellings), `__atomic_load*`, C11
 every polled variable. Relax family: `_mm_pause`/
 `__builtin_ia32_pause`, `umwait`/`tpause`/`monitor`/`mwait` (the
 modern *designed* wait), `std::this_thread::yield`/`sleep_*`,
-`sched_yield`, `nanosleep`, or any inline `asm` (opaque semantics —
-`cpu_relax()` and hand-rolled pause both arrive as asm, so the benefit
-of the doubt goes to the author).
+`sched_yield`, `nanosleep`, C++20 blocking waits (`wait`/`wait_for`/
+`wait_until` — matched by bare name deliberately: a method named
+`wait` declares descheduling intent, and a custom one that internally
+bare-spins is flagged once inside its own body, not at every caller),
+DPDK `rte_pause`/`rte_delay_us`, blocking demultiplexers
+(`epoll_wait`, `poll`, `select` — an event loop is not a spin), or any
+inline `asm` (opaque semantics — `cpu_relax()` and hand-rolled pause
+both arrive as asm, so the benefit of the doubt goes to the author).
+Bespoke backoff vocabularies (folly `Sleeper`, in-house
+`Backoff::pause`) are declared once via `relax_function_patterns`
+(fnmatch on plain or qualified names) rather than chased here.
 
 Mechanism: the pauseless spin speculates polled loads far ahead; the
 writer's eventual invalidation triggers a memory-order machine clear

@@ -56,6 +56,19 @@ disabled_rules: []
 #   - "ioThread*"
 # main_function_patterns: []
 
+# FL013 relax immunity for bespoke backoff/wait vocabularies (fnmatch
+# on plain or qualified function names). The standard universe (pause,
+# yield, umwait, C++20 atomic::wait, epoll/poll/select, DPDK rte_*) is
+# built in.
+# relax_function_patterns:
+#   - "folly::detail::Sleeper::*"
+#   - "*::backoff"
+
+# SMT/Hyper-Threading enabled on the deployment target (default true).
+# Desks disabling it in BIOS set false: FL013 drops the
+# sibling-starvation clause and one severity notch.
+# smt_enabled: true
+
 # Opaque atomic wrapper type names.
 # Struct/typedef names treated as atomic even without _Atomic or std::atomic.
 # Required for codebases that wrap atomics in plain structs; without this,
