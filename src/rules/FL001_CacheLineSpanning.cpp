@@ -55,11 +55,18 @@ public:
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
-        if (lines >= 3) {
+        // Critical footprint is a property of SIZE, not placement: a
+        // 104B object misaligned across boundaries touches 3 lines but
+        // is fundamentally a 2-line object. minLines is what the object
+        // occupies at any alignment; the worst case stays in the text.
+        uint64_t minLines =
+            (sizeBytes + Cfg.cacheLineBytes - 1) / Cfg.cacheLineBytes;
+        if (minLines >= 3) {
             sev = Severity::Critical;
             escalations.push_back(
-                "spans " + std::to_string(lines) +
-                " cache lines: elevated L1D eviction pressure");
+                "occupies " + std::to_string(minLines) +
+                " cache lines at any alignment (worst case " +
+                std::to_string(lines) + "): elevated L1D eviction pressure");
         }
 
         auto straddlers = map.straddlingFields();
@@ -73,11 +80,16 @@ public:
         }
 
         if (map.totalAtomicFields() > 0) {
-            sev = Severity::Critical;
             unsigned atomicLines = 0;
             for (const auto &b : map.buckets()) {
                 if (b.atomicCount > 0) ++atomicLines;
             }
+            // Critical needs the multi-line RFO mechanism to be
+            // realizable: >=2 atomics AND >=2 lines carrying them. One
+            // atomic occupies one line at runtime no matter how many
+            // buckets alignment uncertainty smears it across.
+            if (map.totalAtomicFields() >= 2 && atomicLines >= 2)
+                sev = Severity::Critical;
             escalations.push_back(
                 std::to_string(map.totalAtomicFields()) +
                 " atomic field(s) across " + std::to_string(atomicLines) +
@@ -90,12 +102,25 @@ public:
                 sev = Severity::Medium;
         }
 
-        // No escape evidence and no atomics → speculative.
+        // A sub-line object spans lines only under adverse placement;
+        // single-line residency is the common runtime case. Whatever the
+        // signals above said, the spanning mechanism cannot exceed Medium
+        // here.
+        if (sizeBytes <= Cfg.cacheLineBytes &&
+            (sev == Severity::Critical || sev == Severity::High)) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "sub-line object (" + std::to_string(sizeBytes) +
+                "B <= " + std::to_string(Cfg.cacheLineBytes) +
+                "B): spanning occurs only under adverse base placement");
+        }
+
+        // No escape evidence and no atomics -> speculative.
         if (!ev.escapes && map.totalAtomicFields() == 0) {
             sev = Severity::Medium;
         }
         // Escapes but low contention (shared_ptr/publication only,
-        // no atomics/volatile/sync) → demote. Coherence pressure is
+        // no atomics/volatile/sync) -> demote. Coherence pressure is
         // theoretically possible but unlikely to be a hot path.
         else if (ev.escapes && ev.contention < 0.30 &&
                  map.totalAtomicFields() == 0) {
