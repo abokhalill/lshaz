@@ -2038,6 +2038,65 @@ static unsigned emitAggregationSweepFindings(
     return emitted;
 }
 
+// A store in a function reached once from main runs once, and no per-TU view
+// can tell that from one reached per command. FL005 ships its repetition
+// claim unestablished for exactly that reason; this settles it against the
+// merged graph and drops the finding where the store provably runs once.
+// Without it the rule reported redis's initServer, which runs at startup.
+static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
+                                      const ThreadRoleSummary &facts) {
+    // Callers per callee, and whether any of those edges sits in a loop.
+    std::map<std::string, unsigned> callers;
+    std::set<std::string> loopReached;
+    for (const auto &[caller, callees] : facts.callEdges)
+        for (const auto &callee : callees)
+            ++callers[callee];
+    for (const auto &[caller, edges] : facts.edgeLoopDepth)
+        for (const auto &[callee, depth] : edges)
+            if (depth > 0)
+                loopReached.insert(callee);
+
+    unsigned settled = 0, dropped = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || d.ruleID != "FL005")
+            continue;
+        auto it = d.structuralEvidence.find("store_function");
+        if (it == d.structuralEvidence.end())
+            continue;
+        const std::string &fn = it->second;
+        auto c = callers.find(fn);
+        const unsigned nCallers = c == callers.end() ? 0 : c->second;
+        const bool repeats = loopReached.count(fn) || nCallers >= 2;
+        // Absent from the graph means unanalysed, not proven single-shot: an
+        // entry point or a function only reached through a pointer table has
+        // no recorded caller and may well run per operation.
+        // main is the one function whose absence from the callee map means
+        // it runs once rather than that nothing recorded a caller.
+        const bool provablyOnce =
+            !loopReached.count(fn) && (nCallers == 1 || fn == "main");
+        if (provablyOnce) {
+            d.suppressed = true;
+            ++dropped;
+            continue;
+        }
+        for (auto &claim : d.mechanismClaims)
+            if (claim.gating && claim.effect == "the store runs more than once")
+                claim.established = repeats;
+        if (repeats) {
+            d.escalations.push_back(
+                "the store repeats: '" + fn + "' is reached from " +
+                std::to_string(nCallers) + " call site(s)" +
+                (loopReached.count(fn) ? ", at least one inside a loop" : ""));
+            ++settled;
+        } else {
+            d.escalations.push_back(
+                "no call edge to '" + fn + "' was recorded, so how often the "
+                "store runs is unknown rather than established");
+        }
+    }
+    return dropped * 1000u + settled;
+}
+
 // A store to one field invalidates the whole line, so a core reading a
 // different field on it re-fetches and pays the miss a second writer would.
 // FL002 sees that only where both halves compile together: redis stores
@@ -3818,6 +3877,12 @@ ScanResult ScanPipeline::run(
     if (sweepEmitted > 0)
         report("aggregation_sweeps", std::to_string(sweepEmitted) +
                " aggregation sweep finding(s)");
+
+    if (unsigned r = settleStoreRepetition(result.diagnostics,
+                                           result.threadRoleFacts))
+        report("store_repetition", std::to_string(r / 1000) +
+               " redundant-store finding(s) dropped as single-shot, " +
+               std::to_string(r % 1000) + " confirmed repeating");
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,

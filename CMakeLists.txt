@@ -111,6 +111,7 @@ set(LSHAZ_SOURCES
     src/analysis/numa.cpp
     src/rules/fl001.cpp
     src/rules/fl002.cpp
+    src/rules/fl005.cpp
     src/rules/fl020.cpp
     src/rules/fl021.cpp
     src/rules/fl030.cpp

@@ -300,6 +300,16 @@ void testStripeIndexIdentity(const std::string &bin,
           "in the reduce phase");
     check(contains(r.out, "\"cross_tu_line_sharing\": \"true\""),
           "the cross-TU line-sharing finding is labelled as such");
+
+    // refresh_time stores a microsecond count divided down to seconds into a
+    // shared global, from a function two callers reach. Both halves matter:
+    // the map phase finds the shape, and only the merged call graph can say
+    // the store runs more than once.
+    check(contains(r.out, "\"FL005\""),
+          "an unconditional store of a coarsened value into a shared global "
+          "is reported");
+    check(contains(r.out, "the store repeats"),
+          "the reduce phase settles how often the store runs");
 }
 
 // The channel rides the IR pass, so every other canary run here misses it:

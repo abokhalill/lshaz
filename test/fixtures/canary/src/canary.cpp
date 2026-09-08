@@ -212,6 +212,26 @@ static void *produce_thread(void *) {
 
 void consume_on_main() { g_role_split.consumed++; }
 
+// FL005. A value coarsened by a literal divisor, stored unconditionally into
+// a shared global from a function that runs more than once. This is redis's
+// updateCachedTimeWithUs: server.unixtime is microseconds divided down to
+// seconds, stored about once per command, and 52,304,853 of 52,304,853
+// stores in a 20s run wrote a value that was already there.
+struct TimeCache {
+    unsigned long usec;
+    unsigned long sec;
+};
+static TimeCache g_time_cache;
+
+__attribute__((hot))
+void refresh_time(unsigned long us) {
+    g_time_cache.usec = us;
+    g_time_cache.sec = us / 1000000;
+}
+
+void tick_a(unsigned long us) { refresh_time(us); }
+void tick_b(unsigned long us) { refresh_time(us + 1); }
+
 void spawn_producer() {
     pthread_t t;
     pthread_create(&t, nullptr, produce_thread, nullptr);
@@ -223,6 +243,8 @@ int main() {
     canary::run();
     canary::spawn_producer();
     canary::consume_on_main();
+    canary::tick_a(1);
+    canary::tick_b(2);
     return static_cast<int>(canary::total_accounted() & 1);
 }
 
