@@ -16,6 +16,12 @@ struct FieldExtent {
     uint64_t offsetBytes = 0;
     uint64_t sizeBytes   = 0;   // 0 means two TUs disagreed, see merge
     bool isAtomic = false;
+    // A plain scalar: no write of it can happen except through an assignment
+    // the field-write tracker sees. A mutex, an array or a nested aggregate
+    // is routinely mutated through its address (pthread_mutex_lock(&m),
+    // memcpy) with no assignment anywhere, so "no writer in the program" is
+    // a statement about the tracker rather than about the program.
+    bool plainScalar = false;
 };
 
 // Per-type escape signals collected from a single TU.

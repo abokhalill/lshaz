@@ -305,8 +305,10 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
             // line, but they share a word, and no padding reaches that.
             if (f.decl && f.decl->isBitField())
                 continue;
-            sig.fieldExtents[f.name] =
-                FieldExtent{f.offsetBytes, f.sizeBytes, f.isAtomic};
+            const bool scalar = f.decl && f.decl->getType()->isScalarType() &&
+                                !f.isAtomic && !f.decl->getType()->isPointerType();
+            sig.fieldExtents[f.name] = FieldExtent{f.offsetBytes, f.sizeBytes,
+                                                   f.isAtomic, scalar};
         }
         if (!sig.fieldExtents.empty()) {
             auto loc = resolveSourceLocation(RD->getLocation(), SM);

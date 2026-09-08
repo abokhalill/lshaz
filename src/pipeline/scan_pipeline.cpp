@@ -428,7 +428,8 @@ std::string serializeShardResult(int exitCode,
                     buf += '"'; buf += esc(fname); buf += "\":[";
                     buf += std::to_string(e.offsetBytes) + ',' +
                            std::to_string(e.sizeBytes) + ',' +
-                           std::to_string(e.isAtomic ? 1 : 0);
+                           std::to_string(e.isAtomic ? 1 : 0) + ',' +
+                           std::to_string(e.plainScalar ? 1 : 0);
                     buf += ']';
                     firstField = false;
                 }
@@ -931,6 +932,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                                 static_cast<uint64_t>(ipc::parseNum(json, i));
                             ipc::expect(json, i, ',');
                             e.isAtomic = ipc::parseNum(json, i) != 0;
+                            if (ipc::expect(json, i, ','))
+                                e.plainScalar = ipc::parseNum(json, i) != 0;
                             ipc::expect(json, i, ']');
                             sig.fieldExtents[fname] = e;
                             ipc::expect(json, i, ',');
@@ -2046,6 +2049,7 @@ static unsigned emitCrossTUSharedLineFindings(
         const EscapeSummary &escape,
         const ThreadRoleSummary &facts,
         const ThreadRoleVerdicts &roles,
+        const std::map<std::string, HotnessSource> &globalHot,
         uint64_t lineBytes) {
     if (lineBytes == 0)
         return 0;
@@ -2066,6 +2070,11 @@ static unsigned emitCrossTUSharedLineFindings(
             reported[it->second].push_back(&d);
     }
 
+    auto anyHot = [&globalHot](const std::set<std::string> &fns) {
+        for (const auto &f : fns)
+            if (globalHot.count(f)) return true;
+        return false;
+    };
     auto namesFor = [](const std::map<std::string, std::set<std::string>> &m,
                        const std::string &key) -> const std::set<std::string> * {
         auto it = m.find(key);
@@ -2109,6 +2118,16 @@ static unsigned emitCrossTUSharedLineFindings(
             std::string writer, other;
             unsigned others;      // distinct readers, or distinct co-writers
             bool bothWritten;
+            // The neighbour is read somewhere and written nowhere in the
+            // merged program. It can only ever lose the line, never take it,
+            // so every store to the writer costs each reading core a
+            // re-fetch and nothing comes back the other way.
+            bool otherNeverWritten;
+            // Some writer of the stored field is confirmed hot over the
+            // merged graph. Co-location with a field written twice at startup
+            // costs nothing however widely the neighbour is read, which is
+            // the same trap as grading coherence structure without a rate.
+            bool hotWriter;
         };
         std::vector<Hit> hits;
         bool disjointRoles = false;
@@ -2116,7 +2135,8 @@ static unsigned emitCrossTUSharedLineFindings(
         // Which field stores and which one only reads is not decided by the
         // order the names sort in, so both directions of every co-resident
         // pair are asked.
-        auto consider = [&](const std::string &w, const std::string &o) {
+        auto consider = [&](const std::string &w, const std::string &o,
+                            bool otherIsScalar) {
             const auto *writers = namesFor(facts.fieldWriters, typeName + "::" + w);
             if (!writers)
                 return;
@@ -2132,7 +2152,8 @@ static unsigned emitCrossTUSharedLineFindings(
                     if (a != ROLE_NONE && b != ROLE_NONE && (a & b) == 0)
                         disjointRoles = true;
                     anyMultiWriter = true;
-                    hits.push_back({w, o, distinct, true});
+                    hits.push_back({w, o, distinct, true, false,
+                                    anyHot(*writers) || anyHot(*coWriters)});
                     return;
                 }
             }
@@ -2150,7 +2171,9 @@ static unsigned emitCrossTUSharedLineFindings(
             uint8_t a = roles.rolesOf(*writers), b = roles.rolesOf(*readers);
             if (a != ROLE_NONE && b != ROLE_NONE && (a & b) == 0)
                 disjointRoles = true;
-            hits.push_back({w, o, distinct, false});
+            hits.push_back({w, o, distinct, false,
+                            coWriters == nullptr && otherIsScalar,
+                            anyHot(*writers)});
         };
 
         for (auto a = sig.fieldExtents.begin();
@@ -2169,9 +2192,9 @@ static unsigned emitCrossTUSharedLineFindings(
                                         sig.recordAlignBytes, lineBytes))
                     continue;
                 const size_t before = hits.size();
-                consider(a->first, b->first);
+                consider(a->first, b->first, b->second.plainScalar);
                 if (hits.size() == before)
-                    consider(b->first, a->first);
+                    consider(b->first, a->first, a->second.plainScalar);
             }
         }
         if (hits.empty())
@@ -2180,6 +2203,16 @@ static unsigned emitCrossTUSharedLineFindings(
         // pairs found say nothing. Rank by mechanism, then by how many
         // functions carry it; the name tail only keeps the order total.
         std::sort(hits.begin(), hits.end(), [](const Hit &x, const Hit &y) {
+            // A never-written neighbour outranks a second writer. Two writers
+            // trade the line and each pays once per alternation; one writer
+            // against N reading cores costs N re-fetches per store, and the
+            // fix is unambiguous because moving a field nothing writes can
+            // break nothing.
+            const bool xtop = x.otherNeverWritten && x.hotWriter;
+            const bool ytop = y.otherNeverWritten && y.hotWriter;
+            if (xtop != ytop) return xtop;
+            if (x.otherNeverWritten != y.otherNeverWritten)
+                return x.otherNeverWritten;
             if (x.bothWritten != y.bothWritten) return x.bothWritten;
             if (x.others != y.others) return x.others > y.others;
             if (x.writer != y.writer) return x.writer < y.writer;
@@ -2196,6 +2229,17 @@ static unsigned emitCrossTUSharedLineFindings(
                           "' on one line are written from " +
                           std::to_string(hits[i].others) +
                           " function(s) that do not overlap";
+            else if (hits[i].otherNeverWritten)
+                detail += "'" + hits[i].writer + "' is stored while '" +
+                          hits[i].other + "' on the same line is read from " +
+                          std::to_string(hits[i].others) +
+                          " function(s), with no write to it anywhere in the "
+                          "scan" +
+                          (hits[i].hotWriter
+                               ? std::string(", and the store is on a "
+                                             "confirmed-hot path")
+                               : std::string(", though the store's own "
+                                             "frequency is not established"));
             else
                 detail += "'" + hits[i].writer + "' is stored while '" +
                           hits[i].other + "' on the same line is read from " +
@@ -2230,6 +2274,13 @@ static unsigned emitCrossTUSharedLineFindings(
                << "' share a cache line and are written from disjoint sets of "
                << "functions, so each write pulls the line back in Modified "
                << "from the other core. ";
+        else if (hits[0].otherNeverWritten)
+            hw << "'" << hits[0].other << "' is read across the program and "
+               << "written nowhere in it, and it shares a cache line with '"
+               << hits[0].writer << "', which is stored. Every store takes "
+               << "the line Exclusive and invalidates it in each core holding "
+               << "the read-only field, so the cost scales with the number of "
+               << "reading cores and nothing travels back the other way. ";
         else
             hw << "a store to '" << hits[0].writer << "' invalidates the cache "
                << "line holding '" << hits[0].other << "', which is read by "
@@ -2268,10 +2319,16 @@ static unsigned emitCrossTUSharedLineFindings(
              Severity::Medium},
             {anyMultiWriter
                  ? "MESI invalidation ping-pong between the two writers"
-                 : "a store to one downgrades the line under the other's reader",
+                 : hits[0].otherNeverWritten
+                       ? "each store invalidates a read-only field in every "
+                         "core holding it"
+                       : "a store to one downgrades the line under the other's reader",
              anyMultiWriter
                  ? "disjoint writer sets reaching both fields"
-                 : "a writer of one field and a non-writing reader of the other",
+                 : hits[0].otherNeverWritten
+                       ? "the neighbour has readers and no writer anywhere in "
+                         "the merged program"
+                       : "a writer of one field and a non-writing reader of the other",
              true, d.severity},
             // The gate the map phase cannot answer: the record lives in a
             // header and its global lives in one .c.
@@ -2280,10 +2337,18 @@ static unsigned emitCrossTUSharedLineFindings(
              d.severity, /*gating=*/true},
         };
         d.mitigation =
-            "Move the stored field off the line the readers touch, with "
-            "alignas(64) or by grouping read-mostly fields together. Padding "
-            "the readers apart from each other does nothing here: the cost is "
-            "one store landing on a line that other cores hold.";
+            hits[0].otherNeverWritten
+                ? "Move '" + hits[0].other + "' off this line. Nothing in the "
+                  "program writes it, so relocating it into a read-only block "
+                  "beside the other never-written fields cannot change "
+                  "behaviour, and it removes the invalidation for every "
+                  "reading core at once. Aligning the record does not help "
+                  "when both fields sit inside one element."
+                : "Move the stored field off the line the readers touch, with "
+                  "alignas(64) or by grouping read-mostly fields together. "
+                  "Padding the readers apart from each other does nothing "
+                  "here: the cost is one store landing on a line that other "
+                  "cores hold.";
 
         diagnostics.push_back(std::move(d));
         ++emitted;
@@ -3648,9 +3713,12 @@ ScanResult ScanPipeline::run(
     // for any function in a TU holding no entry point, so it deferred rather
     // than answering "cold" from facts it did not have. This is the only
     // place the whole call graph exists.
+    // Hoisted out of the block below: the cross-TU line-sharing join also
+    // needs it, to tell a store on a hot path from one that runs twice at
+    // startup.
+    const auto globalHot = inferGlobalHotness(
+        result.threadRoleFacts, request.config.mainFunctionPatterns);
     {
-        const auto globalHot = inferGlobalHotness(
-            result.threadRoleFacts, request.config.mainFunctionPatterns);
         std::set<std::string> withdrawnFns;
         std::set<std::string> withdrawable;
         for (const auto &r : RuleRegistry::instance().rules())
@@ -3753,7 +3821,7 @@ ScanResult ScanPipeline::run(
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
-        result.threadRoles, request.config.cacheLineBytes);
+        result.threadRoles, globalHot, request.config.cacheLineBytes);
     if (crossLine > 0)
         report("shared_lines", std::to_string(crossLine) +
                " cross-TU read/write line-sharing finding(s)");
