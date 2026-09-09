@@ -1,6 +1,6 @@
 # Rules Reference
 
-lshaz ships 21 rules. Each targets one microarchitectural hazard class, and
+lshaz ships 23 rules. Each targets one microarchitectural hazard class, and
 each must map to a concrete hardware mechanism, cache, coherence, store
 buffer, TLB, branch predictor, NUMA, or allocator.
 
@@ -15,6 +15,8 @@ mechanism and mitigation text the diagnostics carry.
 | FL001 | Cache geometry | Struct spanning multiple cache lines; wide fields straddling line boundaries | Struct | No |
 | FL002 | False sharing | Independently writable fields co-resident on one cache line, in a thread-escaping type | Struct | No |
 | FL003 | Per-thread array false sharing | Array slots written under a thread-identity index, packed multiple per cache line | Array | No |
+| FL004 | Aggregation sweep | Loop reading every per-thread slot of an array other cores own | Array | No |
+| FL005 | Redundant shared store | Unconditional store of a coarsened value into a file-scope object | Store site | Yes |
 | FL010 | Atomic ordering | `seq_cst` where a weaker ordering is sufficient on the target architecture | Function | Yes |
 | FL011 | Atomic contention | Atomic write sites generating cross-core RFO traffic | Function | Yes |
 | FL012 | Lock contention | Mutex/spinlock acquisition in a hot function | Function | Yes |
@@ -242,8 +244,24 @@ evidence on the existing finding, or emitting one where no TU held both halves.
 The pair must clear the sharing-route verdict first, so a type nothing shows a
 thread reaching is not reported on this path.
 
-Ranked by mechanism, not by field order: a write/write pair outranks a
-read/write one, then the count of non-overlapping functions. On a 572-field
+Ranked by mechanism, not by field order. A neighbour that is read somewhere
+and written nowhere in the merged program outranks everything: two writers
+trade the line and each pays once per alternation, while one writer against N
+reading cores costs N re-fetches per store with nothing coming back, and the
+fix is unambiguous because moving a field nothing writes can break nothing.
+Measured as memcached's worst line, `slabclass[3].size` set once in
+`slabs_init` and read by `slabs_clsid` on every allocation, taking 93.6% of
+that line's HITM. Below it, a write/write pair outranks a plain read/write
+one, then the count of non-overlapping functions.
+
+The never-written claim carries two conjuncts. The neighbour must be a plain
+scalar, because a mutex or an array is routinely mutated through its address
+with no assignment anywhere, so "no writer" would be a statement about the
+tracker rather than the program; without it `LIBEVENT_THREAD::ion_lock` was
+reported with a mitigation telling the reader to relocate a live
+`pthread_mutex_t`. And some writer of the stored field must be confirmed hot
+over the merged graph, since co-location with a field written twice at startup
+costs nothing however widely the neighbour is read. On a 572-field
 record the alphabetically first pairs say nothing. Bitfields are excluded, a
 bitfield's exported extent is its declared type's rather than the bits it owns,
 so every bitfield in a storage unit would pair with its neighbours, and no
@@ -392,6 +410,48 @@ at a configured thread count touches proportionally fewer.
 
 **Fix:** keep a running total the writers update, or cache the aggregate and
 refresh it off the hot path.
+
+### FL005, Redundant Store to a Shared Line
+
+**Base severity:** Medium &nbsp;|&nbsp; **Scope:** store site &nbsp;|&nbsp; **Gate:** hot path
+
+**Hardware mechanism:** A store to a line other cores hold is a
+Request-For-Ownership whatever value it writes. The line is taken Exclusive
+and invalidated in every sharer, and each of them re-fetches on its next read.
+Storing a value that is already there pays that in full and buys nothing.
+
+**Detection:** the destination roots at a file-scope object, its value is a
+contraction (integer division or right shift by a literal, or a predicate), and
+no enclosing condition tests the destination. The contraction is what makes the
+claim provable rather than a guess: a value divided by K changes at most once
+per K executions of the store.
+
+**The repetition conjunct is settled in the reduce phase.** Whether a store
+runs more than once is a property of the merged call graph, and a per-decl
+`analyze` cannot see it. The rule ships the claim unestablished; the reduce
+pass confirms it when the function is reached from a loop or from two call
+sites, drops the finding when the function is reached once from `main`, and
+leaves it unknown when no call edge was recorded, since a function reached
+only through a pointer table has no caller in the graph. Without this the rule
+reported redis `initServer`, which runs at startup, and was deleted once for it.
+
+**Any early exit ahead of the store counts as a rate bound.** nginx returns on
+`tp->sec == sec` and then stores `cached_gmtoff` derived from that same second,
+so the store is already once-per-second while nothing tests `cached_gmtoff`
+itself. Requiring the guard to name the destination reported it. A guarded
+predecessor is treated as a bound instead, which costs findings where the exit
+is unrelated and is the direction that does not invent them.
+
+**Measured, including the part that did not work.** redis stores
+`server.unixtime` as microseconds divided down to seconds about once per
+command: 52,304,853 stores in one 20s run, 22 of which changed the value, on
+the line carrying 12.3% of the process's HITM. Guarding the store removed that
+line from the profile entirely and moved throughput by nothing measurable, and
+regressed it at `io-threads` 1 and 2 when the guard read the shared location
+back. The wasted traffic is certain; its endpoint value is not. Plain stores
+therefore grade Informational and atomic ones Medium, and the mitigation
+suggests keeping the compared value in a thread-local so the guard does not
+touch the shared line either.
 
 ### FL010, Overly Strong Atomic Ordering
 
