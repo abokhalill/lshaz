@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "lshaz/core/cost.h"
 #include "lshaz/core/severity.h"
 
 #include <cstdint>
@@ -94,6 +95,14 @@ struct Diagnostic {
     // has not been migrated, which the invariant gate counts and reports
     // rather than silently passing.
     std::vector<MechanismClaim> mechanismClaims;
+
+    // What the finding costs per unit of the target's work, as a product of
+    // named terms. Empty for rules that cannot yet express their cost, which
+    // then grade on structure exactly as before. A settled estimate enters
+    // the ledger above as a gating claim, so it can retire a finding the
+    // structure alone would have graded Critical, and cannot promote one on
+    // terms that were guessed.
+    CostEstimate cost;
 
     // Highest severity the established claims justify. Informational when
     // nothing is established; Critical when the rule declares nothing, so

@@ -7,6 +7,8 @@
 
 #include "lshaz/analysis/action.h"
 #include "lshaz/analysis/cache_line.h"
+#include "lshaz/analysis/rate_model.h"
+#include "lshaz/core/cost.h"
 #include "lshaz/analysis/vocabulary.h"
 #include "lshaz/core/dedup.h"
 #include "lshaz/core/hot_path.h"
@@ -2097,6 +2099,50 @@ static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
     return dropped * 1000u + settled;
 }
 
+// The estimate enters the ledger as a gating claim, which is where a
+// conjunct belongs. It can retire a finding the structure graded Critical,
+// because a cost built from cost-maximising stand-ins that still lands below
+// the threshold is a sound dismissal. It cannot promote one: an estimate
+// with any unmeasured term supports no more than the finding already had.
+static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
+                                 const MachineModel &machine) {
+    if (!machine.hasBudget())
+        return 0;
+    unsigned graded = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || d.cost.empty())
+            continue;
+        // Every unestablished term carries its cost-maximising value, so the
+        // product is an upper bound whether or not the estimate is complete.
+        // An upper bound below the threshold is a sound dismissal, which is
+        // the asymmetry the whole model turns on: dismissal is cheap,
+        // promotion is not. As a gating claim this can only lower a grade,
+        // so a high estimate on guessed terms promotes nothing.
+        const Severity supported = severityForCost(d.cost.cyclesPerOp, machine);
+        d.mechanismClaims.push_back(
+            {"the hazard costs enough of an operation to be worth acting on",
+             "estimated cycles per operation above the dismissal threshold",
+             d.cost.complete, supported, /*gating=*/true});
+        std::string terms;
+        for (const auto &t : d.cost.terms) {
+            if (!terms.empty()) terms += " x ";
+            terms += t.name + "=" +
+                     std::to_string(static_cast<double>(t.value) / kMilli);
+            if (!t.established) terms += "?";
+        }
+        d.escalations.push_back(
+            "estimated cost " +
+            std::to_string(static_cast<double>(d.cost.cyclesPerOp) / kMilli) +
+            " cycles per operation against a " +
+            std::to_string(machine.cyclesPerOpBudget) + " cycle budget on " +
+            machine.name + " (" + terms + ")" +
+            (d.cost.complete ? "" : "; terms marked ? are cost-maximising "
+                                    "stand-ins, so this is an upper bound"));
+        ++graded;
+    }
+    return graded;
+}
+
 // A store to one field invalidates the whole line, so a core reading a
 // different field on it re-fetches and pays the miss a second writer would.
 // FL002 sees that only where both halves compile together: redis stores
@@ -2109,9 +2155,83 @@ static unsigned emitCrossTUSharedLineFindings(
         const ThreadRoleSummary &facts,
         const ThreadRoleVerdicts &roles,
         const std::map<std::string, HotnessSource> &globalHot,
+        const RateModel &rates,
+        const MachineModel &machine,
         uint64_t lineBytes) {
     if (lineBytes == 0)
         return 0;
+
+    // What a shared line costs per unit of the target's work.
+    //
+    //   transfers/op = write_rate * sharers * min(1, read_rate/write_rate)
+    //   cycles/op    = transfers * hitm_cost * (1 - overlap)
+    //
+    // The rate ratio is the term that stops this charging every store to
+    // every core: a store only costs a sharer that reads before the next
+    // store lands. The overlap term is the one that explains a coherence
+    // finding measuring zero on a syscall-bound server, where the miss is
+    // hidden behind work already in flight.
+    //
+    // An unestablished term takes its cost-maximising value, never a
+    // middle guess. That is what makes a low estimate a sound dismissal
+    // and a high one merely unproven, and it is why the estimate can
+    // retire a finding but never promote one on terms nobody measured.
+    auto estimateLineCost = [&](const std::set<std::string> &writers,
+                                const std::set<std::string> &readers) {
+        CostEstimate est;
+
+        const bool wKnown = rates.anyKnown(writers);
+        const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
+        est.add("write_rate", wRate, wKnown,
+                wKnown ? "call graph" : "unmeasured, taken as once per op");
+
+        const bool rKnown = rates.anyKnown(readers);
+        const Milli rRate = rKnown ? rates.maxRateOf(readers) : kMilli;
+
+        // Threads that could be holding the line. Bounded by the entries the
+        // program actually spawns, plus the main thread.
+        // Bounded by the entries the program actually spawns, plus main.
+        // With none recorded the count is a stand-in like the others, and
+        // like the others it takes a cost-maximising value rather than the
+        // 1 that would silently zero the whole expression.
+        const bool sharersKnown = !facts.threadEntries.empty();
+        const Milli sharers =
+            toMilli(static_cast<int64_t>(
+                sharersKnown ? std::min<size_t>(facts.threadEntries.size() + 1, 16)
+                             : 4));
+        est.add("sharers", sharers, sharersKnown,
+                sharersKnown ? "thread entries in the merged graph"
+                             : "none recorded, taken as 4");
+
+        // A sharer that reads less often than the writer stores pays on
+        // only some of those stores.
+        Milli ratio = kMilli;
+        if (wRate > 0 && rRate < wRate)
+            ratio = static_cast<Milli>(
+                (static_cast<__int128>(rRate) * kMilli) / wRate);
+        est.add("reads_per_store", ratio, wKnown && rKnown, "call graph");
+
+        est.add("hitm_cycles", toMilli(machine.cyclesHitmLocal
+                                           ? machine.cyclesHitmLocal
+                                           : 100),
+                machine.hasCoherenceCost(),
+                machine.hasCoherenceCost() ? machine.name
+                                           : "unmeasured, taken as 100");
+
+        // Exposed share of the miss. Unmeasured means none of it hides,
+        // which is the expensive assumption.
+        const Milli exposed =
+            machine.hasOverlap()
+                ? toMilli(100 - static_cast<int64_t>(machine.mlpOverlapPct)) /
+                      100
+                : kMilli;
+        est.add("exposed_share", exposed, machine.hasOverlap(),
+                machine.hasOverlap() ? machine.name
+                                     : "unmeasured, taken as fully exposed");
+
+        est.settle();
+        return est;
+    };
 
     // A type already reported takes the pair as added evidence. A second
     // finding would land on the same record location and be collapsed by
@@ -2187,6 +2307,8 @@ static unsigned emitCrossTUSharedLineFindings(
             // costs nothing however widely the neighbour is read, which is
             // the same trap as grading coherence structure without a rate.
             bool hotWriter;
+            const std::set<std::string> *writerSet = nullptr;
+            const std::set<std::string> *otherSet = nullptr;
         };
         std::vector<Hit> hits;
         bool disjointRoles = false;
@@ -2212,7 +2334,8 @@ static unsigned emitCrossTUSharedLineFindings(
                         disjointRoles = true;
                     anyMultiWriter = true;
                     hits.push_back({w, o, distinct, true, false,
-                                    anyHot(*writers) || anyHot(*coWriters)});
+                                    anyHot(*writers) || anyHot(*coWriters),
+                                    writers, coWriters});
                     return;
                 }
             }
@@ -2232,7 +2355,7 @@ static unsigned emitCrossTUSharedLineFindings(
                 disjointRoles = true;
             hits.push_back({w, o, distinct, false,
                             coWriters == nullptr && otherIsScalar,
-                            anyHot(*writers)});
+                            anyHot(*writers), writers, readers});
         };
 
         for (auto a = sig.fieldExtents.begin();
@@ -2308,9 +2431,15 @@ static unsigned emitCrossTUSharedLineFindings(
 
         auto existing = reported.find(typeName);
         if (existing != reported.end()) {
-            for (auto *d : existing->second)
+            CostEstimate est;
+            if (hits[0].writerSet && hits[0].otherSet)
+                est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet);
+            for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
+                if (d->cost.empty() && !est.empty())
+                    d->cost = est;
+            }
             continue;
         }
 
@@ -2361,6 +2490,8 @@ static unsigned emitCrossTUSharedLineFindings(
             {"cross_tu_line_sharing", "true"},
             {"atomics", sig.hasAtomics ? "yes" : "no"},
         };
+        if (hits[0].writerSet && hits[0].otherSet)
+            d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet);
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
         if (disjointRoles)
             d.escalations.push_back(
@@ -3884,12 +4015,40 @@ ScanResult ScanPipeline::run(
                " redundant-store finding(s) dropped as single-shot, " +
                std::to_string(r % 1000) + " confirmed repeating");
 
+    // Cost model inputs. A named machine that is not in the table is a hard
+    // error: scanning under the wrong hardware is worse than not costing at
+    // all, and silently falling back would hide it.
+    const MachineModel *machine =
+        request.config.machineModel.empty()
+            ? &defaultMachine()
+            : machineByName(request.config.machineModel);
+    if (!machine) {
+        llvm::errs() << "lshaz: error: unknown machine_model '"
+                     << request.config.machineModel << "'\n";
+        result.status = ScanStatus::ToolError;
+        return result;
+    }
+    const RateModel rates =
+        computeRateModel(result.threadRoleFacts,
+                         request.config.mainFunctionPatterns);
+    if (!rates.perOp.empty())
+        report("rate_model", std::to_string(rates.perOp.size()) +
+               " function(s) rated relative to the busiest; machine " +
+               machine->name +
+               (machine->hasBudget() ? "" : " (no per-op budget, cost "
+                                            "estimates cannot be graded)"));
+
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
-        result.threadRoles, globalHot, request.config.cacheLineBytes);
+        result.threadRoles, globalHot, rates, *machine,
+        request.config.cacheLineBytes);
     if (crossLine > 0)
         report("shared_lines", std::to_string(crossLine) +
                " cross-TU read/write line-sharing finding(s)");
+
+    if (unsigned costGraded = applyCostVerdict(result.diagnostics, *machine))
+        report("cost_model", std::to_string(costGraded) +
+               " finding(s) carry an estimated cycles-per-operation");
 
     // Affinity respect runs before dedup so all duplicates demote alike.
     std::string affinityAPI =

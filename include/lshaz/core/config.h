@@ -102,6 +102,12 @@ struct Config {
     // L1 data cache size; FL003 weighs padding footprint against it.
     size_t l1dSizeBytes = 32768;
 
+    // Named entry in the machine model. Empty selects the generic one,
+    // whose coherence and overlap figures are unmeasured, so cost terms
+    // consuming them report as estimates rather than asserting a number
+    // from someone else's hardware.
+    std::string machineModel;
+
     // Write-frequency roots for FL003 (fnmatch). Hot comes from the
     // hot-path oracle; these name the slower tiers so a real hazard on a
     // per-connection path is not priced as if it were per-command.

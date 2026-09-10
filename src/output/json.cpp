@@ -8,6 +8,23 @@
 namespace lshaz {
 
 namespace {
+// Milli to decimal by integer arithmetic. Streaming a double runs through
+// LC_NUMERIC and prints a comma under a European locale, which is not JSON
+// and which no consumer would parse.
+std::string milliToText(Milli v) {
+    const bool neg = v < 0;
+    const int64_t a = neg ? -v : v;
+    std::string out = (neg ? "-" : "") + std::to_string(a / 1000) + ".";
+    const int64_t frac = a % 1000;
+    if (frac < 100) out += "0";
+    if (frac < 10) out += "0";
+    out += std::to_string(frac);
+    return out;
+}
+} // namespace
+
+
+namespace {
 
 std::string escape(const std::string &s) {
     std::string out;
@@ -94,6 +111,24 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
             if (j + 1 < d.mechanismClaims.size()) os << ",";
         }
         os << "\n      ]";
+    }
+    if (!d.cost.empty()) {
+        // Milli-units are the internal representation, kept out of the
+        // contract: consumers get cycles. The terms ship alongside the
+        // product because a number nobody can decompose is a verdict again.
+        os << ",\n      \"cost\": {\"cyclesPerOp\": "
+           << milliToText(d.cost.cyclesPerOp)
+           << ", \"complete\": " << (d.cost.complete ? "true" : "false")
+           << ", \"terms\": [";
+        for (size_t j = 0; j < d.cost.terms.size(); ++j) {
+            const auto &t = d.cost.terms[j];
+            os << "\n        {\"name\": \"" << escape(t.name)
+               << "\", \"value\": " << milliToText(t.value)
+               << ", \"established\": " << (t.established ? "true" : "false")
+               << ", \"source\": \"" << escape(t.source) << "\"}";
+            if (j + 1 < d.cost.terms.size()) os << ",";
+        }
+        os << "\n      ]}";
     }
     os << "\n    }";
 }

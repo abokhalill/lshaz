@@ -88,6 +88,7 @@ set(LSHAZ_SOURCES
     src/core/hot_path.cpp
     src/core/config.cpp
     src/core/dedup.cpp
+    src/core/cost.cpp
     src/core/emitters.cpp
     src/core/interaction.cpp
     src/core/perf_profile.cpp
@@ -102,6 +103,7 @@ set(LSHAZ_SOURCES
     src/analysis/struct_layout.cpp
     src/analysis/escape.cpp
     src/analysis/cache_line.cpp
+    src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
@@ -210,6 +212,7 @@ target_include_directories(pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothe
 add_executable(analysis_test
     test/analysis_test.cpp
     src/analysis/cache_line.cpp
+    src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/escape.cpp
     src/analysis/thread_role.cpp
