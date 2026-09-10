@@ -1029,6 +1029,13 @@ void EscapeAnalysis::appendFieldAccessNames(ThreadRoleSummary &out) const {
             for (const auto *r : rec.readers)
                 readers.insert(threadRoleNodeName(r, ctx_));
         }
+
+        auto &fa = out.fieldAccess[key];
+        fa.writeSites += rec.sites;
+        fa.loopWriteSites += rec.loopSites;
+        fa.standingWriteSites += rec.standingSites;
+        fa.handedWriteSites += rec.handedSites;
+        fa.readSites += rec.readSites;
     }
 }
 

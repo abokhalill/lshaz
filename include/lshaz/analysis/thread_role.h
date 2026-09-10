@@ -32,6 +32,44 @@ struct ThreadRoleSummary {
     // and the read are routinely compiled apart.
     std::map<std::string, std::set<std::string>> fieldReaders;
 
+    // How the field is touched, not merely by whom. Counts are per-TU
+    // partials and are summed in reduce; every threshold applies to the
+    // total, because a per-TU verdict on how often a field is written would
+    // depend on which shard happened to compile the writer.
+    //
+    // standing versus handed is the distinction that makes a single-field
+    // contention rule possible at all. A write reaching a fixed object by
+    // name is shared state every thread addresses directly; a write to
+    // whatever the caller passed in moves with the object and contends with
+    // nothing. Writer counts cannot separate them, and the per-TU view
+    // cannot either: one TU seeing one writer has no way to know whether the
+    // other TU's writer reaches the same instance.
+    struct FieldAccessFacts {
+        unsigned writeSites = 0;
+        unsigned loopWriteSites = 0;
+        unsigned standingWriteSites = 0;
+        unsigned handedWriteSites = 0;
+        unsigned readSites = 0;
+
+        void merge(const FieldAccessFacts &o) {
+            writeSites += o.writeSites;
+            loopWriteSites += o.loopWriteSites;
+            standingWriteSites += o.standingWriteSites;
+            handedWriteSites += o.handedWriteSites;
+            readSites += o.readSites;
+        }
+        bool empty() const {
+            return writeSites == 0 && readSites == 0;
+        }
+        // A fixed object the program names, rather than one handed in. Ties
+        // go to handed: an even split is a type used both ways, and calling
+        // that standing would fire on every per-request struct.
+        bool standing() const {
+            return standingWriteSites > handedWriteSites;
+        }
+    };
+    std::map<std::string, FieldAccessFacts> fieldAccess;
+
     // Loop nesting at each call site, and each function's own maximum loop
     // depth. Hotness inference is loop-depth-weighted, so the reduce phase
     // needs both to rerun the per-TU relaxation over the merged graph rather
@@ -140,6 +178,8 @@ struct ThreadRoleSummary {
             fieldWriters[field].insert(writers.begin(), writers.end());
         for (const auto &[field, readers] : other.fieldReaders)
             fieldReaders[field].insert(readers.begin(), readers.end());
+        for (const auto &[field, fa] : other.fieldAccess)
+            fieldAccess[field].merge(fa);
         // Max, not overwrite: an inline body seen in several TUs must not
         // depend on which shard reported it last, or output stops being
         // jobs-invariant.

@@ -144,6 +144,7 @@ set(LSHAZ_SOURCES
     src/hypothesis/interaction.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
     src/pipeline/scan_pipeline.cpp
+    src/pipeline/shard_ipc.cpp
     src/pipeline/abs_path_db.cpp
     src/pipeline/compile_db.cpp
     src/pipeline/repo.cpp
@@ -204,6 +205,7 @@ add_executable(pipeline_test
     src/pipeline/tu_cache.cpp
     src/pipeline/compile_db.cpp
     src/pipeline/repo.cpp
+    src/pipeline/shard_ipc.cpp
     src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp

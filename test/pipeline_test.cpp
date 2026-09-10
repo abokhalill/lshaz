@@ -11,6 +11,8 @@
 #include "lshaz/pipeline/repo.h"
 #include "lshaz/pipeline/filter.h"
 
+#include "../src/pipeline/shard_ipc.h"
+
 #include <unistd.h>
 
 #include <filesystem>
@@ -481,6 +483,67 @@ void testCrossTUSuppressionNoTypeName() {
 
 // ===== ThreadRoleSummary =====
 
+// The real serializer and the real parser, not a reimplementation of the
+// format. A test that reimplements the parser passes while the production
+// path drops a field, which is exactly the failure this boundary produces:
+// correct at --jobs 1, silently incomplete in parallel.
+void testShardIPCFieldAccessRoundTrip() {
+    std::cerr << "test: per-field access facts survive the shard boundary\n";
+    using namespace lshaz;
+    ThreadRoleSummary tr;
+    tr.fieldWriters["S::hot"] = {"writer"};
+    tr.fieldReaders["S::hot"] = {"reader_a", "reader_b"};
+    auto &fa = tr.fieldAccess["S::hot"];
+    fa.writeSites = 7;
+    fa.loopWriteSites = 3;
+    fa.standingWriteSites = 6;
+    fa.handedWriteSites = 1;
+    fa.readSites = 11;
+    // A field touched only by reads still has to arrive, or a line whose
+    // writer compiled into another shard reads as never written.
+    tr.fieldAccess["S::cold"].readSites = 2;
+
+    const std::string wire = serializeShardResult(
+        0, {}, {}, EscapeSummary{}, tr, StripedArraySummary{}, ScanCoverage{});
+    ShardIPC parsed;
+    check(deserializeShardResult(wire, parsed), "shard record parses");
+
+    const auto &got = parsed.threadRoles.fieldAccess;
+    auto it = got.find("S::hot");
+    check(it != got.end(), "written field crossed the boundary");
+    check(it->second.writeSites == 7, "write sites preserved");
+    check(it->second.loopWriteSites == 3, "loop write sites preserved");
+    check(it->second.standingWriteSites == 6, "standing writes preserved");
+    check(it->second.handedWriteSites == 1, "handed writes preserved");
+    check(it->second.readSites == 11, "read sites preserved");
+    check(it->second.standing(), "standing verdict survives the round trip");
+
+    auto cold = got.find("S::cold");
+    check(cold != got.end(), "read-only field crossed the boundary");
+    check(cold->second.readSites == 2, "read-only counts preserved");
+}
+
+// Counts are per-TU partials. Two shards each seeing part of the writes must
+// sum, or a threshold on recurrence answers differently depending on which
+// shard compiled the writer.
+void testFieldAccessMergesAsPartials() {
+    std::cerr << "test: per-field access counts sum across shards\n";
+    using namespace lshaz;
+    ThreadRoleSummary a, b;
+    a.fieldAccess["S::x"].writeSites = 2;
+    a.fieldAccess["S::x"].standingWriteSites = 2;
+    b.fieldAccess["S::x"].writeSites = 3;
+    b.fieldAccess["S::x"].handedWriteSites = 3;
+    b.fieldAccess["S::x"].loopWriteSites = 1;
+    a.merge(b);
+    const auto &fa = a.fieldAccess["S::x"];
+    check(fa.writeSites == 5, "write sites summed");
+    check(fa.loopWriteSites == 1, "loop writes summed");
+    check(fa.standingWriteSites == 2 && fa.handedWriteSites == 3,
+          "reach counts summed independently");
+    check(!fa.standing(), "an even-ish split does not claim standing access");
+}
+
 void testThreadRoleSummaryMerge() {
     std::cerr << "test: ThreadRoleSummary merge unions facts\n";
     using namespace lshaz;
@@ -743,6 +806,8 @@ int main() {
     testCrossTUSuppressionNoTypeName();
 
     // ThreadRoleSummary
+    testShardIPCFieldAccessRoundTrip();
+    testFieldAccessMergesAsPartials();
     testThreadRoleSummaryMerge();
     testThreadRolePropagation();
     testThreadRolePatternRoots();
