@@ -55,6 +55,13 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("main_function_patterns", cfg.mainFunctionPatterns);
         io.mapOptional("smt_enabled",            cfg.smtEnabled);
         io.mapOptional("l1d_size_bytes",         cfg.l1dSizeBytes);
+        io.mapOptional("machine_name",           cfg.machineName);
+        io.mapOptional("cycles_hitm_local",      cfg.cyclesHitmLocal);
+        io.mapOptional("cycles_hitm_remote",     cfg.cyclesHitmRemote);
+        io.mapOptional("cycles_dram",            cfg.cyclesDram);
+        io.mapOptional("cycles_mispredict",      cfg.cyclesMispredict);
+        io.mapOptional("mlp_overlap_pct",        cfg.mlpOverlapPct);
+        io.mapOptional("workload_cycles_per_op", cfg.workloadCyclesPerOp);
         io.mapOptional("dispatch_path_patterns", cfg.dispatchPathPatterns);
         io.mapOptional("tick_path_patterns",     cfg.tickPathPatterns);
         io.mapOptional("relax_function_patterns", cfg.relaxFunctionPatterns);

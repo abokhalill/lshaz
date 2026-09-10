@@ -2174,6 +2174,16 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     return est;
 }
 
+static std::string milliText(Milli v) {
+    const bool neg = v < 0;
+    const int64_t a = neg ? -v : v;
+    std::string out = (neg ? "-" : "") + std::to_string(a / kMilli) + ".";
+    const int64_t frac = a % kMilli;
+    if (frac < 100) out += "0";
+    if (frac < 10) out += "0";
+    return out + std::to_string(frac);
+}
+
 // The estimate enters the ledger as a gating claim, which is where a
 // conjunct belongs. It can retire a finding the structure graded Critical,
 // because a cost built from cost-maximising stand-ins that still lands below
@@ -2183,9 +2193,8 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                                  const ThreadRoleSummary &facts,
                                  const ThreadRoleVerdicts &roles,
                                  const RateModel &rates,
-                                 const MachineModel &machine) {
-    if (!machine.hasBudget())
-        return 0;
+                                 const MachineModel &machine,
+                                 const WorkloadModel &workload) {
     unsigned graded = 0;
     for (auto &d : diagnostics) {
         if (d.suppressed)
@@ -2225,13 +2234,27 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         }
         if (d.cost.empty())
             continue;
+        // Without a workload budget a cost cannot be read as a share of an
+        // operation, so it is reported and not graded. Grading it anyway
+        // made every costed finding Informational on any target without a
+        // config, which is a silent cap rather than an absent one.
+        if (!workload.known()) {
+            ++graded;
+            d.escalations.push_back(
+                "estimated cost " + milliText(d.cost.cyclesPerOp) +
+                " cycles per operation, ungraded: set workload_cycles_per_op "
+                "to read it as a share of the target's own work");
+            continue;
+        }
+
         // Every unestablished term carries its cost-maximising value, so the
         // product is an upper bound whether or not the estimate is complete.
         // An upper bound below the threshold is a sound dismissal, which is
         // the asymmetry the whole model turns on: dismissal is cheap,
         // promotion is not. As a gating claim this can only lower a grade,
         // so a high estimate on guessed terms promotes nothing.
-        const Severity supported = severityForCost(d.cost.cyclesPerOp, machine);
+        const Severity supported =
+            severityForCost(d.cost.cyclesPerOp, workload);
         d.mechanismClaims.push_back(
             {"the hazard costs enough of an operation to be worth acting on",
              "estimated cycles per operation above the dismissal threshold",
@@ -2239,16 +2262,17 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         std::string terms;
         for (const auto &t : d.cost.terms) {
             if (!terms.empty()) terms += " x ";
-            terms += t.name + "=" +
-                     std::to_string(static_cast<double>(t.value) / kMilli);
+            terms += t.name + "=" + milliText(t.value);
             if (!t.established) terms += "?";
         }
         d.escalations.push_back(
-            "estimated cost " +
-            std::to_string(static_cast<double>(d.cost.cyclesPerOp) / kMilli) +
-            " cycles per operation against a " +
-            std::to_string(machine.cyclesPerOpBudget) + " cycle budget on " +
-            machine.name + " (" + terms + ")" +
+            "estimated cost " + milliText(d.cost.cyclesPerOp) +
+            " cycles per operation" +
+            (workload.known()
+                 ? " against a " + std::to_string(workload.cyclesPerOp) +
+                       " cycle budget"
+                 : ", ungraded with no workload budget configured") +
+            " on " + machine.name + " (" + terms + ")" +
             (d.cost.complete ? "" : "; terms marked ? are cost-maximising "
                                     "stand-ins, so this is an upper bound"));
         ++graded;
@@ -4059,19 +4083,26 @@ ScanResult ScanPipeline::run(
                " redundant-store finding(s) dropped as single-shot, " +
                std::to_string(r % 1000) + " confirmed repeating");
 
-    // Cost model inputs. A named machine that is not in the table is a hard
-    // error: scanning under the wrong hardware is worse than not costing at
-    // all, and silently falling back would hide it.
-    const MachineModel *machine =
-        request.config.machineModel.empty()
-            ? &defaultMachine()
-            : machineByName(request.config.machineModel);
-    if (!machine) {
-        llvm::errs() << "lshaz: error: unknown machine_model '"
-                     << request.config.machineModel << "'\n";
-        result.status = ScanStatus::ToolError;
-        return result;
-    }
+    // Cost model inputs, entirely from configuration. Nothing about any
+    // specific part is compiled in, so a target with no measurements gets
+    // stand-in terms and says so, rather than inheriting numbers measured
+    // on hardware it has nothing to do with.
+    MachineModel machineStorage;
+    machineStorage.name = request.config.machineName.empty()
+                              ? std::string("unspecified")
+                              : request.config.machineName;
+    machineStorage.lineBytes =
+        static_cast<uint32_t>(request.config.cacheLineBytes);
+    machineStorage.l1dBytes =
+        static_cast<uint32_t>(request.config.l1dSizeBytes);
+    machineStorage.cyclesHitmLocal = request.config.cyclesHitmLocal;
+    machineStorage.cyclesHitmRemote = request.config.cyclesHitmRemote;
+    machineStorage.cyclesDram = request.config.cyclesDram;
+    machineStorage.cyclesMispredict = request.config.cyclesMispredict;
+    machineStorage.mlpOverlapPct = request.config.mlpOverlapPct;
+    const MachineModel *machine = &machineStorage;
+    WorkloadModel workload;
+    workload.cyclesPerOp = request.config.workloadCyclesPerOp;
     const RateModel rates =
         computeRateModel(result.threadRoleFacts,
                          request.config.mainFunctionPatterns);
@@ -4079,8 +4110,10 @@ ScanResult ScanPipeline::run(
         report("rate_model", std::to_string(rates.perOp.size()) +
                " function(s) rated relative to the busiest; machine " +
                machine->name +
-               (machine->hasBudget() ? "" : " (no per-op budget, cost "
-                                            "estimates cannot be graded)"));
+               (workload.known()
+                    ? ""
+                    : " (workload_cycles_per_op unset, so cost estimates "
+                      "are reported but not graded)"));
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
@@ -4092,7 +4125,7 @@ ScanResult ScanPipeline::run(
 
     if (unsigned costGraded = applyCostVerdict(
             result.diagnostics, result.threadRoleFacts, result.threadRoles,
-            rates, *machine))
+            rates, *machine, workload))
         report("cost_model", std::to_string(costGraded) +
                " finding(s) carry an estimated cycles-per-operation");
 

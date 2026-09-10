@@ -76,14 +76,16 @@ struct CostEstimate {
     }
 };
 
-// Hardware the cost model reads. Values come from reports/measured-constants
-// and are keyed to a named machine, rather than living inside rule prose
-// where nothing can compose them.
+// Hardware the cost model reads. Every field is supplied by configuration,
+// measured on the machine being scanned for. No part is named in this
+// source and none is built in: a table of one vendor's numbers compiled
+// into the analyzer makes every other target wrong by default, and makes
+// adding a second machine a code change.
 //
-// A zero field is not a default, it is "unmeasured on this machine". Any
-// term that consumes one reports itself unestablished instead of
-// substituting a plausible number, which is the ran-versus-never-ran
-// property applied to the cost model.
+// A zero field is not a default, it is "unmeasured here". Any term that
+// consumes one reports itself unestablished instead of substituting a
+// plausible number, which is the ran-versus-never-ran property applied to
+// the cost model.
 struct MachineModel {
     std::string name;
 
@@ -106,30 +108,28 @@ struct MachineModel {
     // that from one on the critical path.
     uint32_t mlpOverlapPct = 0;
 
-    // Total cycles the target spends per unit of work, which is what makes
-    // cycles-per-op readable as a percentage without the analyzer knowing
-    // anything about the workload.
-    uint32_t cyclesPerOpBudget = 0;
-
     bool hasCoherenceCost() const { return cyclesHitmLocal != 0; }
     bool hasOverlap() const { return mlpOverlapPct != 0; }
-    bool hasBudget() const { return cyclesPerOpBudget != 0; }
 };
 
-// The default is deliberately thin. Line size and the cache latencies are
-// architectural and hold across x86-64 parts; the coherence and overlap
-// figures are not, and are left unmeasured so a scan on an unknown machine
-// reports its cost terms as estimates rather than inventing them.
-const MachineModel &defaultMachine();
+// Cycles the target spends per unit of its own work. This is a property of
+// the workload, not of the hardware: redis at 2.4M operations per second
+// across four 3.6GHz cores spends about 6000, and the same silicon running
+// something else spends something else entirely. Keeping it in the machine
+// struct conflated the two and would have shipped one benchmark's number as
+// a hardware constant.
+//
+// Zero means unknown, and then no cost can be expressed as a share of an
+// operation, so the ladder below declines to grade rather than borrowing a
+// figure from elsewhere.
+struct WorkloadModel {
+    uint32_t cyclesPerOp = 0;
+    bool known() const { return cyclesPerOp != 0; }
+};
 
-// Named model, or nullptr. Callers report the miss rather than falling back,
-// since silently scanning under the wrong machine is worse than not
-// costing at all.
-const MachineModel *machineByName(const std::string &name);
-
-// Severity a cost supports. Anchored to the per-op budget: on redis at 2.4M
-// ops/s over four 3.6GHz cores the budget is about 6000 cycles, so 60
-// cycles per operation is one percent of it.
-Severity severityForCost(Milli cyclesPerOp, const MachineModel &m);
+// Severity a cost supports, as a share of the workload's own per-operation
+// budget. Fractions rather than absolute cycles, so the ladder holds on a
+// target whose operations are ten times heavier.
+Severity severityForCost(Milli cyclesPerOp, const WorkloadModel &w);
 
 } // namespace lshaz

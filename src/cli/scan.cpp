@@ -78,7 +78,8 @@ struct ScanArgs {
     bool includeVendored = false;
     std::string changedFilesPath;
     std::string targetArch;
-    std::string machineModel;
+    std::string machineName;
+    std::string workloadCyclesPerOp;
     std::vector<std::string> enabledRules;  // --rule FL001 (repeatable)
     bool help = false;
     std::vector<std::string> compilerFlags;
@@ -209,7 +210,8 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
         if (consumeArg(i, argc, argv, "--target-arch", args.targetArch, "-a")) continue;
-        if (consumeArg(i, argc, argv, "--machine-model", args.machineModel)) continue;
+        if (consumeArg(i, argc, argv, "--machine-name", args.machineName)) continue;
+        if (consumeArg(i, argc, argv, "--workload-cycles-per-op", args.workloadCyclesPerOp)) continue;
         { std::string v; if (consumeArg(i, argc, argv, "--rule", v, "-r")) { args.enabledRules.push_back(v); continue; } }
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
@@ -342,7 +344,7 @@ int runScanCommand(int argc, const char **argv) {
             request.config.linkedAllocator = args.allocator;
         request.config.cacheDir = args.noCache ? std::string() : args.cacheDir;
         request.config.cacheMaxMB = args.cacheMaxMB;
-        request.config.machineModel = args.machineModel;
+
         if (!applyTargetArch(request.config, args.targetArch))
             return 3;
         request.config.minSeverity = parseSeverity(args.minSeverity);
@@ -435,7 +437,12 @@ int runScanCommand(int argc, const char **argv) {
     // asked for and nobody can see is the shape a stale result hides in.
     cfg.cacheDir = args.noCache ? std::string() : args.cacheDir;
     cfg.cacheMaxMB = args.cacheMaxMB;
-    cfg.machineModel = args.machineModel;
+    // Command line overrides the config file, so a one-off scan against a
+    // different machine does not need its own file.
+    if (!args.machineName.empty()) cfg.machineName = args.machineName;
+    if (!args.workloadCyclesPerOp.empty())
+        cfg.workloadCyclesPerOp =
+            static_cast<unsigned>(std::stoul(args.workloadCyclesPerOp));
     cfg.minSeverity = parseSeverity(args.minSeverity);
     applyRuleFilter(cfg, args.enabledRules);
 

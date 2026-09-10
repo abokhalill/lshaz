@@ -102,11 +102,19 @@ struct Config {
     // L1 data cache size; FL003 weighs padding footprint against it.
     size_t l1dSizeBytes = 32768;
 
-    // Named entry in the machine model. Empty selects the generic one,
-    // whose coherence and overlap figures are unmeasured, so cost terms
-    // consuming them report as estimates rather than asserting a number
-    // from someone else's hardware.
-    std::string machineModel;
+    // Cost model inputs, all measured on the target being scanned for and
+    // supplied here rather than compiled in. Zero means unmeasured, and any
+    // term consuming a zero reports itself as a stand-in.
+    std::string machineName;
+    unsigned cyclesHitmLocal = 0;
+    unsigned cyclesHitmRemote = 0;
+    unsigned cyclesDram = 0;
+    unsigned cyclesMispredict = 0;
+    unsigned mlpOverlapPct = 0;
+
+    // A property of the workload, not the hardware. Without it a cost cannot
+    // be read as a share of an operation and nothing is graded on it.
+    unsigned workloadCyclesPerOp = 0;
 
     // Write-frequency roots for FL003 (fnmatch). Hot comes from the
     // hot-path oracle; these name the slower tiers so a real hazard on a
