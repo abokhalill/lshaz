@@ -116,6 +116,15 @@ struct Config {
     // be read as a share of an operation and nothing is graded on it.
     unsigned workloadCyclesPerOp = 0;
 
+    // Names the workload the figures above were measured under, so a
+    // residual learned on one shape is not applied to another.
+    std::string workloadName;
+
+    // Observations of predicted against measured cost. Each one corrects the
+    // mechanism rather than the finding it came from, so a measurement taken
+    // on one target improves every scan that composes the same terms.
+    std::string costCalibrationPath;
+
     // Write-frequency roots for FL003 (fnmatch). Hot comes from the
     // hot-path oracle; these name the slower tiers so a real hazard on a
     // per-connection path is not priced as if it were per-command.

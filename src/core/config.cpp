@@ -62,6 +62,8 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("cycles_mispredict",      cfg.cyclesMispredict);
         io.mapOptional("mlp_overlap_pct",        cfg.mlpOverlapPct);
         io.mapOptional("workload_cycles_per_op", cfg.workloadCyclesPerOp);
+        io.mapOptional("workload_name",          cfg.workloadName);
+        io.mapOptional("cost_calibration_path",  cfg.costCalibrationPath);
         io.mapOptional("dispatch_path_patterns", cfg.dispatchPathPatterns);
         io.mapOptional("tick_path_patterns",     cfg.tickPathPatterns);
         io.mapOptional("relax_function_patterns", cfg.relaxFunctionPatterns);

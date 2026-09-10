@@ -89,6 +89,7 @@ set(LSHAZ_SOURCES
     src/core/config.cpp
     src/core/dedup.cpp
     src/core/cost.cpp
+    src/core/cost_calibration.cpp
     src/core/emitters.cpp
     src/core/interaction.cpp
     src/core/perf_profile.cpp

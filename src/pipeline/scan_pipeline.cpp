@@ -9,6 +9,7 @@
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/rate_model.h"
 #include "lshaz/core/cost.h"
+#include "lshaz/core/cost_calibration.h"
 #include "lshaz/analysis/vocabulary.h"
 #include "lshaz/core/dedup.h"
 #include "lshaz/core/hot_path.h"
@@ -2127,11 +2128,15 @@ static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
 // Every unestablished term takes its cost-maximising value, never a middle
 // guess. That is what makes a low product a sound dismissal and a high one
 // merely unproven.
+static constexpr const char *kCoherenceMechanism = "coherence_line_sharing";
+
 static CostEstimate estimateLineCost(const std::set<std::string> &writers,
                                      const std::set<std::string> &readers,
                                      bool disjointRoles,
                                      const RateModel &rates,
-                                     const MachineModel &machine) {
+                                     const MachineModel &machine,
+                                     const CostCalibration &calib,
+                                     const std::string &workloadName) {
     CostEstimate est;
 
     const bool wKnown = rates.anyKnown(writers);
@@ -2170,6 +2175,19 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
             machine.hasOverlap() ? machine.name
                                  : "unmeasured, taken as fully exposed");
 
+    // What measurement has said about this mechanism on this machine under
+    // this workload. Absent means nobody has checked, and no term is added:
+    // a neutral factor of one that looked established would claim the model
+    // had been verified here when it has not.
+    if (auto f = calib.factorFor(kCoherenceMechanism, machine.name,
+                                 workloadName)) {
+        const bool trusted = f->samples >= CostCalibration::kTrustedSamples;
+        est.add("calibration", f->value, trusted,
+                std::to_string(f->samples) + " observation(s) on " +
+                    machine.name + "/" + workloadName +
+                    (trusted ? "" : ", below the trusted sample count"));
+    }
+
     est.settle();
     return est;
 }
@@ -2194,7 +2212,9 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                                  const ThreadRoleVerdicts &roles,
                                  const RateModel &rates,
                                  const MachineModel &machine,
-                                 const WorkloadModel &workload) {
+                                 const WorkloadModel &workload,
+                                 const CostCalibration &calib,
+                                 const std::string &workloadName) {
     unsigned graded = 0;
     for (auto &d : diagnostics) {
         if (d.suppressed)
@@ -2227,7 +2247,9 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                         const uint8_t wr = roles.rolesOf(W), rr = roles.rolesOf(R);
                         const bool disjoint = wr != ROLE_NONE && rr != ROLE_NONE &&
                                               (wr & rr) == 0;
-                        d.cost = estimateLineCost(W, R, disjoint, rates, machine);
+                        d.cost = estimateLineCost(W, R, disjoint, rates,
+                                                  machine, calib,
+                                                  workloadName);
                     }
                 }
             }
@@ -2294,6 +2316,8 @@ static unsigned emitCrossTUSharedLineFindings(
         const std::map<std::string, HotnessSource> &globalHot,
         const RateModel &rates,
         const MachineModel &machine,
+        const CostCalibration &calib,
+        const std::string &workloadName,
         uint64_t lineBytes) {
     if (lineBytes == 0)
         return 0;
@@ -2500,7 +2524,8 @@ static unsigned emitCrossTUSharedLineFindings(
             CostEstimate est;
             if (hits[0].writerSet && hits[0].otherSet)
                 est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
-                                       disjointRoles, rates, machine);
+                                       disjointRoles, rates, machine, calib,
+                                       workloadName);
             for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
@@ -2559,7 +2584,8 @@ static unsigned emitCrossTUSharedLineFindings(
         };
         if (hits[0].writerSet && hits[0].otherSet)
             d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
-                                      disjointRoles, rates, machine);
+                                      disjointRoles, rates, machine, calib,
+                                      workloadName);
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
         if (disjointRoles)
             d.escalations.push_back(
@@ -4103,6 +4129,27 @@ ScanResult ScanPipeline::run(
     const MachineModel *machine = &machineStorage;
     WorkloadModel workload;
     workload.cyclesPerOp = request.config.workloadCyclesPerOp;
+    const std::string workloadName = request.config.workloadName.empty()
+                                         ? std::string("unspecified")
+                                         : request.config.workloadName;
+
+    // A store that exists and cannot be read is a hard error. Scanning on
+    // through it would apply no correction while the operator believes one
+    // is in effect, which is the quietest way to be wrong.
+    CostCalibration costCalib;
+    if (!request.config.costCalibrationPath.empty()) {
+        std::string calErr;
+        if (!costCalib.load(request.config.costCalibrationPath, calErr)) {
+            llvm::errs() << "lshaz: error: " << calErr << "\n";
+            result.status = ScanStatus::ToolError;
+            return result;
+        }
+        if (costCalib.size())
+            report("cost_calibration",
+                   std::to_string(costCalib.size()) +
+                   " measured observation(s) correcting the cost model for " +
+                   machineStorage.name + "/" + workloadName);
+    }
     const RateModel rates =
         computeRateModel(result.threadRoleFacts,
                          request.config.mainFunctionPatterns);
@@ -4117,15 +4164,15 @@ ScanResult ScanPipeline::run(
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
-        result.threadRoles, globalHot, rates, *machine,
-        request.config.cacheLineBytes);
+        result.threadRoles, globalHot, rates, *machine, costCalib,
+        workloadName, request.config.cacheLineBytes);
     if (crossLine > 0)
         report("shared_lines", std::to_string(crossLine) +
                " cross-TU read/write line-sharing finding(s)");
 
     if (unsigned costGraded = applyCostVerdict(
             result.diagnostics, result.threadRoleFacts, result.threadRoles,
-            rates, *machine, workload))
+            rates, *machine, workload, costCalib, workloadName))
         report("cost_model", std::to_string(costGraded) +
                " finding(s) carry an estimated cycles-per-operation");
 
