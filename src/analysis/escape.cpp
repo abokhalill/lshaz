@@ -716,6 +716,10 @@ public:
         auto &rec =
             fieldWrites[llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl())];
         ++rec.readSites;
+        if (rootsAtGlobal(ME->getBase()))
+            ++rec.standingReadSites;
+        else
+            ++rec.handedReadSites;
         if (currentFn)
             rec.readers.insert(currentFn->getCanonicalDecl());
         return true;
@@ -1057,6 +1061,8 @@ void EscapeAnalysis::appendFieldAccessNames(ThreadRoleSummary &out) const {
         fa.standingWriteSites += rec.standingSites;
         fa.handedWriteSites += rec.handedSites;
         fa.readSites += rec.readSites;
+        fa.standingReadSites += rec.standingReadSites;
+        fa.handedReadSites += rec.handedReadSites;
     }
 }
 

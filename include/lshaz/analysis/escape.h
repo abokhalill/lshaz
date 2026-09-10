@@ -236,6 +236,13 @@ public:
         // perf reports as `call`; the line, server.c:1380, is exact.
         std::set<std::string> writeSiteLocs;
         unsigned readSites = 0;
+        // Reach on the read side, which the write side cannot always see.
+        // redis writes user::flags through a parameter, so every write looks
+        // handed, and reads it as DefaultUser->flags, a global singleton
+        // every thread names. The writer and those readers touch one object;
+        // only the reads say so.
+        unsigned standingReadSites = 0;
+        unsigned handedReadSites = 0;
         std::unordered_set<const clang::FunctionDecl *> readers;
     };
 

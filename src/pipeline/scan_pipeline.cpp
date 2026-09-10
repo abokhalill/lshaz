@@ -1607,6 +1607,41 @@ static constexpr const char *kTrueSharingMechanism = "coherence_true_sharing";
 // Written as a query over the contention graph rather than as another walk
 // of its own. The gates it needs, standing access and write recurrence, are
 // properties of a line that six other places were each deriving separately.
+// Why the graph's lines did not become findings, counted at every gate.
+//
+// A rule that reports nothing is byte-identical to a clean scan, and the
+// registry canary only proves the rule can fire somewhere. On a real target
+// the useful question is which precondition the candidates failed, because
+// that separates a mechanism the program genuinely does not have from a fact
+// the analyzer never managed to establish. The second is a bug in here and
+// the first is not, and without this they look the same.
+struct TrueSharingGates {
+    unsigned residents = 0;
+    unsigned noEscapeRoute = 0;
+    unsigned notBothSides = 0;
+    unsigned writesUnobservable = 0;
+    unsigned handedNotStanding = 0;
+    unsigned writeDoesNotRecur = 0;
+    unsigned everyReaderAlsoWrites = 0;
+    unsigned oneRoleOnly = 0;
+    unsigned emitted = 0;
+
+    std::string summary() const {
+        return std::to_string(emitted) + " finding(s) from " +
+               std::to_string(residents) + " field(s) on modelled lines; "
+               "rejected " + std::to_string(noEscapeRoute) +
+               " no thread route, " + std::to_string(notBothSides) +
+               " not both written and read, " +
+               std::to_string(writesUnobservable) +
+               " writes not fully visible, " +
+               std::to_string(handedNotStanding) + " handed not standing, " +
+               std::to_string(writeDoesNotRecur) + " write does not recur, " +
+               std::to_string(everyReaderAlsoWrites) +
+               " every reader also writes, " + std::to_string(oneRoleOnly) +
+               " single thread role";
+    }
+};
+
 static unsigned emitTrueSharingFindings(
         std::vector<Diagnostic> &diagnostics,
         const ContentionGraph &graph,
@@ -1617,47 +1652,74 @@ static unsigned emitTrueSharingFindings(
         const MachineModel &machine,
         const CostCalibration &calib,
         const std::string &workloadName,
-        const WorkloadModel &workload) {
+        const WorkloadModel &workload,
+        TrueSharingGates &gates) {
     unsigned emitted = 0;
     for (const auto &[key, node] : graph.nodes) {
         (void)key;
+        const unsigned onLine = static_cast<unsigned>(node.residents.size());
+        gates.residents += onLine;
         auto sit = escape.find(node.owner);
-        if (sit == escape.end())
+        if (sit == escape.end()) {
+            gates.noEscapeRoute += onLine;
             continue;
+        }
         // Nothing reaches this type from another thread, so a store on it
         // invalidates nobody. Same gate every sharing rule here uses, and
         // the reason it is concurrency evidence rather than atomicity: a
         // single-writer field is deliberately non-atomic and still traded.
-        if (!sit->second.hasSharingRoute() && !sit->second.hasAnyEscape())
+        if (!sit->second.hasSharingRoute() && !sit->second.hasAnyEscape()) {
+            gates.noEscapeRoute += onLine;
             continue;
+        }
 
         for (const auto &r : node.residents) {
-            if (!r.written() || !r.read())
+            if (!r.written() || !r.read()) {
+                ++gates.notBothSides;
                 continue;
+            }
             // A field whose writes the tracker cannot see in full says
             // nothing about how often the line is invalidated. Concluding
             // from that silence is concluding from a blind spot.
-            if (!r.writesObservable())
+            if (!r.writesObservable()) {
+                ++gates.writesUnobservable;
                 continue;
+            }
             // Writes to whatever the caller handed in move with the object
             // and contend with nothing. Without this the rule fires on every
             // field of every per-request struct in the program.
-            if (!r.access.standing())
+            //
+            // The reads answer the same question and sometimes are the only
+            // side that can. A field written only through a parameter and
+            // read only through a global singleton is shared state, and the
+            // write side cannot see it: redis stores user::flags as
+            // u->flags from a setter and loads it as DefaultUser->flags on
+            // every command. Weaker evidence, so it is carried into the
+            // claim rather than silently treated as equal.
+            const bool standingWrites = r.access.standing();
+            const bool oneObject = standingWrites || r.access.standingReads();
+            if (!standingWrites && !r.access.anyStandingRead()) {
+                ++gates.handedNotStanding;
                 continue;
+            }
             // Invalidation has to recur or the line settles in Shared
             // state after the first read and costs nothing further. A store
             // inside a loop says so directly; otherwise the writing
             // function's rate on the merged call graph does.
             const bool loopWrite = r.loopWritten();
-            if (!loopWrite && !rates.recurrent(r.writers))
+            if (!loopWrite && !rates.recurrent(r.writers)) {
+                ++gates.writeDoesNotRecur;
                 continue;
+            }
 
             std::set<std::string> pureReaders;
             for (const auto &fn : r.readers)
                 if (!r.writers.count(fn))
                     pureReaders.insert(fn);
-            if (pureReaders.empty())
+            if (pureReaders.empty()) {
+                ++gates.everyReaderAlsoWrites;
                 continue;
+            }
 
             // Disjointness is a claim about the whole set, so it takes the
             // strict verdict. Reach is a lower bound, so it takes the
@@ -1673,8 +1735,10 @@ static unsigned emitTrueSharingFindings(
                 ThreadRoleVerdicts::roleCount(knownR) >= 2 ||
                 (knownW != ROLE_NONE && knownR != ROLE_NONE &&
                  (knownW & knownR) == 0);
-            if (!disjoint && !spansRoles)
+            if (!disjoint && !spansRoles) {
+                ++gates.oneRoleOnly;
                 continue;
+            }
 
             bool readerHot = false;
             for (const auto &fn : pureReaders)
@@ -1713,6 +1777,9 @@ static unsigned emitTrueSharingFindings(
                  std::to_string(r.access.standingWriteSites)},
                 {"handed_writes", std::to_string(r.access.handedWriteSites)},
                 {"read_sites", std::to_string(r.access.readSites)},
+                {"standing_reads",
+                 std::to_string(r.access.standingReadSites)},
+                {"handed_reads", std::to_string(r.access.handedReadSites)},
                 {"atomic_field", r.isAtomic ? "yes" : "no"},
                 {"roles_disjoint", disjoint ? "yes" : "no"},
             };
@@ -1737,6 +1804,17 @@ static unsigned emitTrueSharingFindings(
                 {"a store invalidates every core holding the line",
                  "the field is written and separately read, on one line",
                  true, Severity::Medium},
+                {"the writer and the readers reach one object",
+                 standingWrites
+                     ? "the stores reach a fixed object the program names"
+                     : oneObject
+                         ? "the loads mostly reach a fixed object the program "
+                           "names, while the stores arrive through a "
+                           "parameter that may or may not be it"
+                         : "some loads reach a fixed object the program "
+                           "names, but most of the accesses on both sides "
+                           "arrive through a parameter",
+                 standingWrites, Severity::High},
                 {"the reading cores are not the storing core",
                  disjoint ? "writer and reader thread roles are provably "
                             "disjoint"
@@ -1761,6 +1839,7 @@ static unsigned emitTrueSharingFindings(
 
             diagnostics.push_back(std::move(d));
             ++emitted;
+            ++gates.emitted;
         }
     }
     return emitted;
@@ -3636,13 +3715,13 @@ ScanResult ScanPipeline::run(
            std::to_string(contention.linesConsidered) +
            " modelled cache line(s) carry traffic");
 
-    unsigned trueShared = emitTrueSharingFindings(
+    TrueSharingGates tsGates;
+    emitTrueSharingFindings(
         result.diagnostics, contention, result.escapeSummary,
         result.threadRoles, globalHot, rates, *machine, costCalib,
-        workloadName, workload);
-    if (trueShared > 0)
-        report("true_sharing", std::to_string(trueShared) +
-               " single-field cross-thread contention finding(s)");
+        workloadName, workload, tsGates);
+    // Reported whether or not anything fired, which is the point.
+    report("true_sharing", tsGates.summary());
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,

@@ -213,11 +213,17 @@ std::string serializeShardResult(int exitCode,
             if (fa.empty()) continue;
             if (!firstKey) buf += ',';
             buf += '"'; buf += esc(k); buf += "\":[";
-            buf += std::to_string(fa.writeSites); buf += ',';
-            buf += std::to_string(fa.loopWriteSites); buf += ',';
-            buf += std::to_string(fa.standingWriteSites); buf += ',';
-            buf += std::to_string(fa.handedWriteSites); buf += ',';
-            buf += std::to_string(fa.readSites);
+            // Positional and open-ended: the reader consumes as many counts
+            // as the array holds and leaves the rest at zero, so adding a
+            // measure is one line here and none there. Order is the wire
+            // contract and entries are only ever appended.
+            for (unsigned v : {fa.writeSites, fa.loopWriteSites,
+                               fa.standingWriteSites, fa.handedWriteSites,
+                               fa.readSites, fa.standingReadSites,
+                               fa.handedReadSites}) {
+                if (buf.back() != '[') buf += ',';
+                buf += std::to_string(v);
+            }
             buf += ']';
             firstKey = false;
         }
@@ -721,9 +727,12 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                 else if (tk == "fieldWriteSites")
                     parseNameSets(out.threadRoles.fieldWriteSites);
                 else if (tk == "fieldAccess") {
-                    // Fixed-arity count vectors rather than named members:
-                    // the key set is every touched field in the program and
-                    // the tag overhead would dominate the payload.
+                    // Positional count vectors rather than named members: the
+                    // key set is every touched field in the program and the
+                    // tag overhead would dominate the payload. Consumed to
+                    // whatever length arrived, so a shard built from an
+                    // older or newer source contributes what it has instead
+                    // of failing to parse.
                     ipc::expect(json, i, '{');
                     while (true) {
                         ipc::skipWS(json, i);
@@ -734,22 +743,27 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         const std::string k = ipc::parseStr(json, i);
                         ipc::expect(json, i, ':');
                         ipc::expect(json, i, '[');
-                        unsigned v[5] = {0, 0, 0, 0, 0};
-                        for (unsigned n = 0; n < 5; ++n) {
+                        std::vector<unsigned> v;
+                        while (true) {
                             ipc::skipWS(json, i);
-                            if (i < json.size() && json[i] == ']') break;
-                            v[n] = static_cast<unsigned>(ipc::parseNum(json, i));
+                            if (i >= json.size() || json[i] == ']') break;
+                            v.push_back(
+                                static_cast<unsigned>(ipc::parseNum(json, i)));
                             ipc::skipWS(json, i);
                             if (i < json.size() && json[i] == ',') ++i;
                         }
-                        ipc::skipWS(json, i);
                         if (i < json.size() && json[i] == ']') ++i;
+                        const auto at = [&](size_t n) {
+                            return n < v.size() ? v[n] : 0u;
+                        };
                         auto &fa = out.threadRoles.fieldAccess[k];
-                        fa.writeSites += v[0];
-                        fa.loopWriteSites += v[1];
-                        fa.standingWriteSites += v[2];
-                        fa.handedWriteSites += v[3];
-                        fa.readSites += v[4];
+                        fa.writeSites += at(0);
+                        fa.loopWriteSites += at(1);
+                        fa.standingWriteSites += at(2);
+                        fa.handedWriteSites += at(3);
+                        fa.readSites += at(4);
+                        fa.standingReadSites += at(5);
+                        fa.handedReadSites += at(6);
                         ipc::skipWS(json, i);
                         if (i < json.size() && json[i] == ',') ++i;
                     }

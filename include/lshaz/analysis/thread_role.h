@@ -50,6 +50,8 @@ struct ThreadRoleSummary {
         unsigned standingWriteSites = 0;
         unsigned handedWriteSites = 0;
         unsigned readSites = 0;
+        unsigned standingReadSites = 0;
+        unsigned handedReadSites = 0;
 
         void merge(const FieldAccessFacts &o) {
             writeSites += o.writeSites;
@@ -57,6 +59,8 @@ struct ThreadRoleSummary {
             standingWriteSites += o.standingWriteSites;
             handedWriteSites += o.handedWriteSites;
             readSites += o.readSites;
+            standingReadSites += o.standingReadSites;
+            handedReadSites += o.handedReadSites;
         }
         bool empty() const {
             return writeSites == 0 && readSites == 0;
@@ -67,6 +71,31 @@ struct ThreadRoleSummary {
         bool standing() const {
             return standingWriteSites > handedWriteSites;
         }
+
+        // The same question asked of the reads, which is a strictly weaker
+        // answer and a necessary one. A field can be written only through a
+        // parameter and read only through a global: redis stores user::flags
+        // as u->flags from a setter and loads it as DefaultUser->flags on
+        // every command. The writer and those readers touch one object, and
+        // the write side alone cannot tell you that.
+        //
+        // Weaker because a parameter that is sometimes the singleton and
+        // sometimes not is indistinguishable here, so a rule leaning on this
+        // reports the conjunct unestablished rather than proven.
+        bool standingReads() const {
+            return standingReadSites > handedReadSites;
+        }
+
+        // Whether any read at all reaches a fixed object.
+        //
+        // Presence, not majority, because the mechanism is not a vote. One
+        // load of DefaultUser->flags on the command path costs a transfer
+        // per store however many other sites read a user handed in as a
+        // parameter, and those other sites do not make this one cheaper.
+        // Majority still decides how strong the evidence is, so a field that
+        // is mostly handed reports the conjunct unestablished and cannot
+        // carry the top grade on it.
+        bool anyStandingRead() const { return standingReadSites > 0; }
     };
     std::map<std::string, FieldAccessFacts> fieldAccess;
 
