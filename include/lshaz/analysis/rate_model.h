@@ -46,6 +46,17 @@ struct RateModel {
         for (const auto &f : fns) best = std::max(best, rateOf(f));
         return best;
     }
+    // Reached without passing through a single loop, so as far as the merged
+    // call graph can see it runs once per program. Startup code sits here.
+    // A rule whose mechanism needs an effect to recur asks about this, not
+    // about how many times the effect appears in the source: one store in an
+    // event loop is one site and runs forever.
+    static constexpr Milli kOnceRate = 1;
+
+    bool recurrent(const std::set<std::string> &fns) const {
+        return maxRateOf(fns) > kOnceRate;
+    }
+
     bool anyKnown(const std::set<std::string> &fns) const {
         for (const auto &f : fns)
             if (known(f)) return true;

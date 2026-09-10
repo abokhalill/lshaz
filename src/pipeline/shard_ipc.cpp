@@ -152,7 +152,8 @@ std::string serializeShardResult(int exitCode,
                     buf += std::to_string(e.offsetBytes) + ',' +
                            std::to_string(e.sizeBytes) + ',' +
                            std::to_string(e.isAtomic ? 1 : 0) + ',' +
-                           std::to_string(e.plainScalar ? 1 : 0);
+                           std::to_string(e.plainScalar ? 1 : 0) + ',' +
+                           std::to_string(e.declLine);
                     buf += ']';
                     firstField = false;
                 }
@@ -636,6 +637,9 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                             e.isAtomic = ipc::parseNum(json, i) != 0;
                             if (ipc::expect(json, i, ','))
                                 e.plainScalar = ipc::parseNum(json, i) != 0;
+                            if (ipc::expect(json, i, ','))
+                                e.declLine = static_cast<unsigned>(
+                                    ipc::parseNum(json, i));
                             ipc::expect(json, i, ']');
                             sig.fieldExtents[fname] = e;
                             ipc::expect(json, i, ',');

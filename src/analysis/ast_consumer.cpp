@@ -307,8 +307,10 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                 continue;
             const bool scalar = f.decl && f.decl->getType()->isScalarType() &&
                                 !f.isAtomic && !f.decl->getType()->isPointerType();
-            sig.fieldExtents[f.name] = FieldExtent{f.offsetBytes, f.sizeBytes,
-                                                   f.isAtomic, scalar};
+            FieldExtent fx{f.offsetBytes, f.sizeBytes, f.isAtomic, scalar};
+            if (f.decl)
+                fx.declLine = resolveSourceLocation(f.decl->getLocation(), SM).line;
+            sig.fieldExtents[f.name] = fx;
         }
         if (!sig.fieldExtents.empty()) {
             auto loc = resolveSourceLocation(RD->getLocation(), SM);

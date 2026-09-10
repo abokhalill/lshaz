@@ -20,6 +20,19 @@ const std::vector<EmitterDoc> &nonRuleEmitters() {
          "makes it worse: separating writers from each other does nothing "
          "about a reader that touches every line, and padding raises the "
          "line count."},
+        {"FL006", "Cross-Thread Read of a Recurrently Written Field",
+         Severity::High,
+         "One field, stored by one thread role and read by another. Each "
+         "store takes the line in Modified state and invalidates every core "
+         "holding it Shared, so each of those cores pays a cross-core "
+         "transfer on its next read instead of an L1 hit: one transfer per "
+         "reading core per store. Distinct from false sharing in the fix as "
+         "well as the shape. Padding relocates the cost and does not remove "
+         "it, because the readers want the value the writer stores; only "
+         "cutting the store rate or the reader count does. Emitted in the "
+         "reduce phase because it needs the merged access set and the "
+         "standing-versus-handed reach of the writes, neither of which a "
+         "single TU can settle."},
         {"FL091", "Hazard Interaction", Severity::Critical,
          "Two hazards on one object whose costs compound rather than add: a "
          "contended line inside a hot allocation path pays the allocator's "

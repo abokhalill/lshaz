@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/pipeline/scan_pipeline.h"
 #include "shard_ipc.h"
+
+#include "lshaz/analysis/contention.h"
 #include "lshaz/pipeline/abs_path_db.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/filter.h"
@@ -1586,6 +1588,176 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
 // redisCommand::calls in server.c while db.c reads the key specs on the same
 // line, and no single TU can join them. The layout is a program fact and the
 // two access sets merge, so the join belongs here.
+static constexpr const char *kTrueSharingMechanism = "coherence_true_sharing";
+
+// One field, written recurrently by one role and read by another.
+//
+// FL002 models a pair of distinct fields colliding on a line, and padding
+// fixes it because the fields did not need to be adjacent. This is the other
+// shape and it is not a layout bug: the readers want the value the writer
+// stores. Padding moves the cost, it does not remove it, so the mitigation
+// is a different sentence.
+//
+// The measurement that this rule exists for: on redis at io-threads 4,
+// server.unixtime carried 372 of 2026 sampled HITM events, 18.4% of all
+// coherence traffic in the run and the largest contended line in the
+// program. Every access landed on one byte offset, so no pair of fields was
+// involved and no rule in the tool could express it.
+//
+// Written as a query over the contention graph rather than as another walk
+// of its own. The gates it needs, standing access and write recurrence, are
+// properties of a line that six other places were each deriving separately.
+static unsigned emitTrueSharingFindings(
+        std::vector<Diagnostic> &diagnostics,
+        const ContentionGraph &graph,
+        const EscapeSummary &escape,
+        const ThreadRoleVerdicts &roles,
+        const std::map<std::string, HotnessSource> &globalHot,
+        const RateModel &rates,
+        const MachineModel &machine,
+        const CostCalibration &calib,
+        const std::string &workloadName,
+        const WorkloadModel &workload) {
+    unsigned emitted = 0;
+    for (const auto &[key, node] : graph.nodes) {
+        (void)key;
+        auto sit = escape.find(node.owner);
+        if (sit == escape.end())
+            continue;
+        // Nothing reaches this type from another thread, so a store on it
+        // invalidates nobody. Same gate every sharing rule here uses, and
+        // the reason it is concurrency evidence rather than atomicity: a
+        // single-writer field is deliberately non-atomic and still traded.
+        if (!sit->second.hasSharingRoute() && !sit->second.hasAnyEscape())
+            continue;
+
+        for (const auto &r : node.residents) {
+            if (!r.written() || !r.read())
+                continue;
+            // A field whose writes the tracker cannot see in full says
+            // nothing about how often the line is invalidated. Concluding
+            // from that silence is concluding from a blind spot.
+            if (!r.writesObservable())
+                continue;
+            // Writes to whatever the caller handed in move with the object
+            // and contend with nothing. Without this the rule fires on every
+            // field of every per-request struct in the program.
+            if (!r.access.standing())
+                continue;
+            // Invalidation has to recur or the line settles in Shared
+            // state after the first read and costs nothing further. A store
+            // inside a loop says so directly; otherwise the writing
+            // function's rate on the merged call graph does.
+            const bool loopWrite = r.loopWritten();
+            if (!loopWrite && !rates.recurrent(r.writers))
+                continue;
+
+            std::set<std::string> pureReaders;
+            for (const auto &fn : r.readers)
+                if (!r.writers.count(fn))
+                    pureReaders.insert(fn);
+            if (pureReaders.empty())
+                continue;
+
+            // Disjointness is a claim about the whole set, so it takes the
+            // strict verdict. Reach is a lower bound, so it takes the
+            // attributed subset: an unattributed reader can only add a role.
+            const uint8_t wr = roles.rolesOf(r.writers);
+            const uint8_t rr = roles.rolesOf(pureReaders);
+            const bool disjoint =
+                wr != ROLE_NONE && rr != ROLE_NONE && (wr & rr) == 0;
+
+            const uint8_t knownW = roles.knownRolesOf(r.writers);
+            const uint8_t knownR = roles.knownRolesOf(pureReaders);
+            const bool spansRoles =
+                ThreadRoleVerdicts::roleCount(knownR) >= 2 ||
+                (knownW != ROLE_NONE && knownR != ROLE_NONE &&
+                 (knownW & knownR) == 0);
+            if (!disjoint && !spansRoles)
+                continue;
+
+            bool readerHot = false;
+            for (const auto &fn : pureReaders)
+                if (globalHot.count(fn)) { readerHot = true; break; }
+
+            Diagnostic d;
+            d.ruleID = "FL006";
+            d.title = "Cross-Thread Read of a Recurrently Written Field";
+            d.severity = Severity::High;
+            d.confidence = 0.75;
+            d.evidenceTier = EvidenceTier::Likely;
+            d.location.file = node.declFile;
+            // The field's own line, so two fields of one record are two
+            // findings rather than one after dedup.
+            d.location.line = r.declLine ? r.declLine : node.declLine;
+            d.functionName = *r.writers.begin();
+            d.hardwareReasoning =
+                "'" + node.owner + "::" + r.field +
+                "' is stored from " + std::to_string(r.writers.size()) +
+                " function(s) and read, without being written, from " +
+                std::to_string(pureReaders.size()) +
+                " more on a different thread role. Each store takes the line "
+                "in Modified state and invalidates every core holding it "
+                "Shared, so the next read on each of those cores pays a "
+                "cross-core transfer rather than an L1 hit. The cost is one "
+                "transfer per reading core per store, and it does not depend "
+                "on the fields being distinct: this is the same field on "
+                "both sides.";
+            d.structuralEvidence = {
+                {"type_name", node.owner},
+                {"field", r.field},
+                {"line_index", std::to_string(node.lineIndex)},
+                {"write_sites", std::to_string(r.access.writeSites)},
+                {"loop_write_sites", std::to_string(r.access.loopWriteSites)},
+                {"standing_writes",
+                 std::to_string(r.access.standingWriteSites)},
+                {"handed_writes", std::to_string(r.access.handedWriteSites)},
+                {"read_sites", std::to_string(r.access.readSites)},
+                {"atomic_field", r.isAtomic ? "yes" : "no"},
+                {"roles_disjoint", disjoint ? "yes" : "no"},
+            };
+            d.mitigation =
+                "Padding does not help here: the readers want the value, so "
+                "moving it to its own line keeps every transfer and only "
+                "stops it dragging neighbours along. Cut the store rate or "
+                "the reader count instead. Publish '" + r.field +
+                "' once per outer iteration into a per-thread copy and read "
+                "the copy, or hand it to each reader with the work it "
+                "already receives.";
+
+            d.mechanismClaims = {
+                {"a store invalidates every core holding the line",
+                 "the field is written and separately read, on one line",
+                 true, Severity::Medium},
+                {"the reading cores are not the storing core",
+                 disjoint ? "writer and reader thread roles are provably "
+                            "disjoint"
+                          : "readers span more than one thread role",
+                 disjoint || spansRoles, Severity::High},
+                {"the invalidation recurs rather than settling",
+                 loopWrite ? "stores issued from inside a loop"
+                           : "the storing function is reached through a loop "
+                             "on the merged call graph",
+                 loopWrite, Severity::Critical},
+                {"the readers run often enough to pay it",
+                 "a reading function confirmed hot on the merged call graph",
+                 readerHot, Severity::Critical},
+            };
+
+            CostEstimate est = estimateLineCost(r.writers, pureReaders,
+                                                disjoint, rates, machine,
+                                                calib, workloadName, workload);
+            est.mechanism = kTrueSharingMechanism;
+            d.cost = std::move(est);
+            recordCostSites(d, r.writers, pureReaders);
+
+            diagnostics.push_back(std::move(d));
+            ++emitted;
+        }
+    }
+    return emitted;
+}
+
 static unsigned emitCrossTUSharedLineFindings(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &escape,
@@ -3447,6 +3619,22 @@ ScanResult ScanPipeline::run(
     // specific part is compiled in, so a target with no measurements gets
     // stand-in terms and says so, rather than inheriting numbers measured
     // on hardware it has nothing to do with.
+
+    const ContentionGraph contention = buildContentionGraph(
+        result.escapeSummary, result.threadRoleFacts,
+        request.config.cacheLineBytes);
+    report("contention_graph",
+           std::to_string(contention.linesWithTraffic) + " of " +
+           std::to_string(contention.linesConsidered) +
+           " modelled cache line(s) carry traffic");
+
+    unsigned trueShared = emitTrueSharingFindings(
+        result.diagnostics, contention, result.escapeSummary,
+        result.threadRoles, globalHot, rates, *machine, costCalib,
+        workloadName, workload);
+    if (trueShared > 0)
+        report("true_sharing", std::to_string(trueShared) +
+               " single-field cross-thread contention finding(s)");
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,

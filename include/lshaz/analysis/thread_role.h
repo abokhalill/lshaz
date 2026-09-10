@@ -288,6 +288,34 @@ struct ThreadRoleVerdicts {
         return mask;
     }
 
+    // Union of roles over the attributed members, ignoring the rest.
+    //
+    // rolesOf answers "can this set be proven disjoint from another", and
+    // there one unattributed member has to poison the answer. "Does this set
+    // reach more than one role" is the opposite question: an unattributed
+    // member can only add a role, never remove one, so the attributed subset
+    // is a sound lower bound and refusing to answer from it discards
+    // evidence rather than being careful with it.
+    //
+    // The difference is not academic. A field read from a hundred functions
+    // has essentially no chance of every one being attributed, so the strict
+    // form reports ROLE_NONE for exactly the widely-shared fields a
+    // contention rule exists to find. server.unixtime, the largest measured
+    // contended line in redis, failed on this and on nothing else.
+    uint8_t knownRolesOf(const std::set<std::string> &fns) const {
+        uint8_t mask = ROLE_NONE;
+        for (const auto &f : fns)
+            mask |= roleOf(f);
+        return mask;
+    }
+
+    // How many distinct roles the attributed members reach.
+    static unsigned roleCount(uint8_t mask) {
+        unsigned n = 0;
+        for (; mask; mask &= mask - 1) ++n;
+        return n;
+    }
+
     // Every allocation of this type on one thread role, every free on the
     // other. The measured 25x is a property of that split, not of allocation
     // volume, so this is what FL020's conjunct gates on.

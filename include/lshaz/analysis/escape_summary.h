@@ -22,6 +22,14 @@ struct FieldExtent {
     // memcpy) with no assignment anywhere, so "no writer in the program" is
     // a statement about the tracker rather than about the program.
     bool plainScalar = false;
+
+    // Where the field was declared. Without it every finding about any field
+    // of a record reports at the record's own line, and the dedup key
+    // (rule, file, line, column, function) collapses them into one. On redis
+    // that turned 141 single-field contention findings into 65 and lost
+    // server.unixtime, the line the machine measured as the most contended
+    // in the program.
+    unsigned declLine = 0;
 };
 
 // Per-type escape signals collected from a single TU.

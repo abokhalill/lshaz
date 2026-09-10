@@ -205,8 +205,22 @@ struct RoleSplitCounters {
 };
 static RoleSplitCounters g_role_split;
 
+unsigned long observed_seconds();
+
+// Sink for the FL006 read. Deliberately not one of the role-split counters:
+// accumulating into those would give the producer thread a write to both
+// fields, which removes their distinct-role writers and takes FL002's
+// role attribution on this type with it.
+static unsigned long g_time_observations;
+
 static void *produce_thread(void *) {
-    for (int i = 0; i < 1000; i++) g_role_split.produced++;
+    for (int i = 0; i < 1000; i++) {
+        g_role_split.produced++;
+        // FL006. Reads the time cache the main thread republishes and never
+        // writes it. One field, two roles, so no pair of fields is involved
+        // and padding cannot help: this thread wants the value.
+        g_time_observations += observed_seconds();
+    }
     return nullptr;
 }
 
@@ -223,6 +237,8 @@ struct TimeCache {
 };
 static TimeCache g_time_cache;
 
+unsigned long observed_seconds() { return g_time_cache.sec; }
+
 __attribute__((hot))
 void refresh_time(unsigned long us) {
     g_time_cache.usec = us;
@@ -231,6 +247,14 @@ void refresh_time(unsigned long us) {
 
 void tick_a(unsigned long us) { refresh_time(us); }
 void tick_b(unsigned long us) { refresh_time(us + 1); }
+
+// Republished from the main loop, which is what makes the invalidation
+// recur. A field written once at startup settles in Shared state and costs
+// nothing, so the rule asks about the writer's rate rather than about how
+// many store statements the source contains.
+void tick_loop(int n) {
+    for (int i = 0; i < n; i++) refresh_time(static_cast<unsigned long>(i));
+}
 
 void spawn_producer() {
     pthread_t t;
@@ -245,6 +269,7 @@ int main() {
     canary::consume_on_main();
     canary::tick_a(1);
     canary::tick_b(2);
+    canary::tick_loop(16);
     return static_cast<int>(canary::total_accounted() & 1);
 }
 
