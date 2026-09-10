@@ -2323,29 +2323,67 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
             auto pf = d.structuralEvidence.find("pair_fields");
             if (tn != d.structuralEvidence.end() &&
                 pf != d.structuralEvidence.end() && !pf->second.empty()) {
-                const std::string first = pf->second.substr(
-                    0, pf->second.find(';'));
-                const size_t bar = first.find('|');
-                if (bar != std::string::npos) {
-                    const std::string a = tn->second + "::" + first.substr(0, bar);
-                    const std::string b = tn->second + "::" + first.substr(bar + 1);
-                    static const std::set<std::string> kNone;
-                    auto wit = facts.fieldWriters.find(a);
-                    auto rit = facts.fieldReaders.find(b);
-                    auto w2 = facts.fieldWriters.find(b);
-                    const auto &W = wit != facts.fieldWriters.end() ? wit->second : kNone;
-                    const auto &R = rit != facts.fieldReaders.end()
-                                        ? rit->second
-                                        : (w2 != facts.fieldWriters.end() ? w2->second : kNone);
-                    if (!W.empty() && !R.empty()) {
+                // Every pair on the list, not the first one. A finding
+                // describes as many lines as it lists pairs, and its cost is
+                // the worst of them. Pricing only the head made redis report
+                // redisServer at 0.081 cycles per operation from
+                // shutdown_asap|crashing, a pair that runs at shutdown,
+                // while unixtime|daylight_active sat at position 27 of 28
+                // and carried 18.6% of the machine's measured coherence
+                // traffic. The order of that list is a rule's enumeration
+                // order and means nothing about cost.
+                static const std::set<std::string> kNone;
+                const auto setFor =
+                    [&](const std::map<std::string, std::set<std::string>> &m,
+                        const std::string &k) -> const std::set<std::string> & {
+                    auto it = m.find(k);
+                    return it != m.end() ? it->second : kNone;
+                };
+                const std::set<std::string> *bestW = nullptr, *bestR = nullptr;
+                CostEstimate best;
+                const std::string &pairs = pf->second;
+                size_t start = 0;
+                while (start < pairs.size()) {
+                    const auto semi = pairs.find(';', start);
+                    const auto end =
+                        semi == std::string::npos ? pairs.size() : semi;
+                    const std::string pair = pairs.substr(start, end - start);
+                    start = end + 1;
+                    const size_t bar = pair.find('|');
+                    if (bar == std::string::npos) continue;
+                    const std::string a = tn->second + "::" + pair.substr(0, bar);
+                    const std::string b = tn->second + "::" + pair.substr(bar + 1);
+
+                    // Either field may be the stored one, so both
+                    // orientations are priced. Taking only a-writes-b-reads
+                    // silently drops the pair whenever the rule happened to
+                    // list the reader first.
+                    for (int flip = 0; flip < 2; ++flip) {
+                        const auto &W =
+                            setFor(facts.fieldWriters, flip ? b : a);
+                        if (W.empty()) continue;
+                        const std::string &other = flip ? a : b;
+                        const auto &Rr = setFor(facts.fieldReaders, other);
+                        const auto &R =
+                            Rr.empty() ? setFor(facts.fieldWriters, other) : Rr;
+                        if (R.empty()) continue;
                         const uint8_t wr = roles.rolesOf(W), rr = roles.rolesOf(R);
-                        const bool disjoint = wr != ROLE_NONE && rr != ROLE_NONE &&
-                                              (wr & rr) == 0;
-                        d.cost = estimateLineCost(W, R, disjoint, rates,
-                                                  machine, calib,
-                                                  workloadName, workload);
-                        recordCostSites(d, W, R);
+                        const bool disjoint = wr != ROLE_NONE &&
+                                              rr != ROLE_NONE && (wr & rr) == 0;
+                        CostEstimate est =
+                            estimateLineCost(W, R, disjoint, rates, machine,
+                                             calib, workloadName, workload);
+                        if (best.empty() ||
+                            est.cyclesPerOp > best.cyclesPerOp) {
+                            best = std::move(est);
+                            bestW = &W;
+                            bestR = &R;
+                        }
                     }
+                }
+                if (!best.empty() && bestW && bestR) {
+                    d.cost = std::move(best);
+                    recordCostSites(d, *bestW, *bestR);
                 }
             }
         }
