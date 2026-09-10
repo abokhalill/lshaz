@@ -23,6 +23,19 @@ namespace lshaz {
 // a property of all three. A coherence miss hidden behind a syscall on a
 // pipelined server is not the same event as the same miss in a compute loop,
 // and averaging them produces a number describing neither.
+// Invariant on the pair, and the one thing that lets two instruments share a
+// key: predicted must be the quantity that this instrument's measured value
+// is directly comparable to, so that the ratio is always a correction to the
+// whole product.
+//
+// A throughput A/B removes the access and reads the difference, which is the
+// full product including how much of the transfer the machine hid, so its
+// predicted is the full product. A profiler counts transfers and reports
+// their latency and says nothing about exposure, so its predicted is the
+// product with the exposure term divided back out. Both ratios then multiply
+// the same thing, because exposure multiplies through either way. Recording
+// a measured occupancy against a predicted exposed cost does not, and the
+// median would sit between two numbers describing different events.
 struct CostObservation {
     std::string mechanism;
     std::string machine;

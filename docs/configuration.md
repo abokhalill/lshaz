@@ -415,6 +415,64 @@ lshaz scan . --calibration-store calibration.json
 
 ---
 
+## `lshaz observe`
+
+Corrects the cost model from a hardware profile. Where `feedback` labels the
+finding it was measured on, `observe` corrects the mechanism, so one
+measurement moves every future scan composing the same terms.
+
+```bash
+lshaz observe --profile <c2c.txt> --findings <scan.json> [options]
+```
+
+| Flag | Description |
+|---|---|
+| `--profile <path>` | Text of `perf c2c report --stdio --full-symbols` |
+| `--findings <path>` | A scan's JSON output |
+| `--ops <n>` | Operations the target completed in the profiled window |
+| `--hitm-events <n>` | Counted coherence transfers in the same window |
+| `--sample-period <n>` | The record's fixed sample period, if it used one |
+| `--config <path>` | Reads machine, workload and store path from a config |
+| `--machine <name>`, `--workload <name>` | Override the config's keys |
+| `--store <path>` | Calibration store to read and write |
+| `--write` | Append the observation. Default is report only. |
+| `--top <n>` | Unexplained lines to list (default 10) |
+
+Findings join to measured traffic at cache-line granularity: a finding
+matches a line when both of its role sets are represented on it. That tests
+the claim the finding makes. Matching on either name alone matched 178 call
+sites for one redis finding and measured the program rather than the hazard.
+
+`perf c2c` records at a frequency, so its sample counts carry no absolute
+scale. Without `--hitm-events` from a counted run or `--sample-period` from a
+fixed-period one, the command reports the ranking and stores nothing rather
+than scaling a sampled total by a guess. A counted total comes from any
+coherence-transfer event the target machine's PMU exposes, read with
+`perf stat` over the same window.
+
+Two terms are divided back out before a residual is taken. `exposed_share` is
+the model's estimate of how much of a transfer the machine hides behind other
+outstanding misses, and a profiler counts the transfer without saying whether
+its latency reached the critical path. `calibration` is the previous round's
+own correction, and measuring against an already-corrected prediction applies
+it twice.
+
+The reverse direction is reported too: measured lines that join to no
+finding, ranked by traffic. That is the tool's own recall gap, addressed.
+
+Full loop:
+
+```bash
+lshaz scan . -f json -o scan.json --config lshaz.config.yaml
+perf c2c record --all-user --ldlat=5 -p $PID -- sleep 20
+perf c2c report --stdio --full-symbols > profile.txt
+lshaz observe --profile profile.txt --findings scan.json \
+    --config lshaz.config.yaml --ops $OPS --hitm-events $HITM --write
+lshaz scan . -f json -o scan.json --config lshaz.config.yaml
+```
+
+---
+
 ## `lshaz explain`
 
 ```
