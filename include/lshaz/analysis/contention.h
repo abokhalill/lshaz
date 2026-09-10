@@ -42,6 +42,9 @@ struct ContentionNode {
 
         std::set<std::string> writers;
         std::set<std::string> readers;
+        // basename:line of the stores. Survives inlining, where the writer's
+        // symbol does not.
+        std::set<std::string> writeSites;
         ThreadRoleSummary::FieldAccessFacts access;
 
         // A field the tracker can see every write of. A mutex, an array or a

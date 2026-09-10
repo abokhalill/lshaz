@@ -227,6 +227,14 @@ public:
         // 125ns. Field-level twin of globalLoopWriteCounts_ (FL040).
         unsigned loopSites     = 0;
         std::unordered_set<const clang::FunctionDecl *> writers;
+        // Where the stores are, as basename:line.
+        //
+        // A profiler reports the DWARF line of an inlined store and the
+        // symbol of whatever it was inlined into, so a name-based join to a
+        // hardware profile silently misses every static inline writer.
+        // redis stores server.unixtime from updateCachedTimeWithUs, which
+        // perf reports as `call`; the line, server.c:1380, is exact.
+        std::set<std::string> writeSiteLocs;
         unsigned readSites = 0;
         std::unordered_set<const clang::FunctionDecl *> readers;
     };

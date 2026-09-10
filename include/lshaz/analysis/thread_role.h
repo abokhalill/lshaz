@@ -70,6 +70,10 @@ struct ThreadRoleSummary {
     };
     std::map<std::string, FieldAccessFacts> fieldAccess;
 
+    // Same key, the source locations of the stores as basename:line. The
+    // only join key to a hardware profile that survives inlining.
+    std::map<std::string, std::set<std::string>> fieldWriteSites;
+
     // Loop nesting at each call site, and each function's own maximum loop
     // depth. Hotness inference is loop-depth-weighted, so the reduce phase
     // needs both to rerun the per-TU relaxation over the merged graph rather
@@ -180,6 +184,8 @@ struct ThreadRoleSummary {
             fieldReaders[field].insert(readers.begin(), readers.end());
         for (const auto &[field, fa] : other.fieldAccess)
             fieldAccess[field].merge(fa);
+        for (const auto &[field, locs] : other.fieldWriteSites)
+            fieldWriteSites[field].insert(locs.begin(), locs.end());
         // Max, not overwrite: an inline body seen in several TUs must not
         // depend on which shard reported it last, or output stops being
         // jobs-invariant.

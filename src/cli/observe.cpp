@@ -71,6 +71,14 @@ struct CostedFinding {
     // hazard.
     std::set<std::string> writers, readers;
 
+    // basename:line of the stores. A profiler reports the DWARF line of an
+    // inlined store and the symbol of whatever it was inlined into, so this
+    // is the only writer-side key that survives inlining. redis stores
+    // server.unixtime from a static inline the compiler folds into `call`;
+    // matching on the symbol finds nothing and matching on server.c:1380 is
+    // exact.
+    std::set<std::string> writeSites;
+
     // The model already disowned this number, so no residual may be learned
     // from it.
     bool implausible = false;
@@ -119,6 +127,10 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
         }
         if (const auto *se = d->getObject("structuralEvidence")) {
             if (auto s = se->getString("type_name")) f.entity = s->str();
+            // A record has many fields and several may sit on one line, so
+            // the type alone names two different claims identically.
+            if (auto s = se->getString("field"))
+                f.entity += "::" + s->str();
             if (auto s = se->getString("cost_implausible"))
                 f.implausible = s->str() == "yes";
             const auto split = [](const std::string &names,
@@ -136,6 +148,8 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
             };
             if (auto s = se->getString("cost_writers")) split(s->str(), f.writers);
             if (auto s = se->getString("cost_readers")) split(s->str(), f.readers);
+            if (auto s = se->getString("cost_write_sites"))
+                split(s->str(), f.writeSites);
         }
         if (f.entity.empty()) f.entity = f.file + ":" + std::to_string(f.line);
 
@@ -278,6 +292,7 @@ int runObserveCommand(int argc, const char **argv) {
     for (auto &f : findings) {
         for (const auto &s : f.writers) byName[s].push_back(&f);
         for (const auto &s : f.readers) byName[s].push_back(&f);
+        for (const auto &s : f.writeSites) byName[s].push_back(&f);
         byName[f.file + ":" + std::to_string(f.line)].push_back(&f);
     }
 
@@ -307,15 +322,22 @@ int runObserveCommand(int argc, const char **argv) {
         const CoherenceAccess *worst = nullptr;
         std::set<std::string> names;
         for (const auto &acc : line.accesses) {
+            // Every access names the line, whether or not it took a HITM.
+            // The storing side of a contended line does not appear as a
+            // load-HITM at all: it appears as a store, and the transfers it
+            // causes are booked against the readers. Restricting the name
+            // set to HITM-carrying rows hid every writer on every line,
+            // which is precisely the half a sharing finding needs matched.
+            names.insert(baseSymbol(acc.symbol));
+            if (!acc.file.empty())
+                names.insert(acc.file + ":" + std::to_string(acc.line));
+
             if (!acc.hitmSamples) continue;
             lineHitm += acc.hitmSamples;
             lineCycleWeight += acc.hitmSamples * acc.hitmCycles;
             measuredSamples += acc.hitmSamples;
             if (!worst || acc.hitmSamples > worst->hitmSamples) worst = &acc;
             if (acc.file.empty()) unattributed += acc.hitmSamples;
-            names.insert(baseSymbol(acc.symbol));
-            if (!acc.file.empty())
-                names.insert(acc.file + ":" + std::to_string(acc.line));
         }
         if (!lineHitm) continue;
 
@@ -336,7 +358,8 @@ int runObserveCommand(int argc, const char **argv) {
                     if (names.count(r)) return true;
                 return false;
             };
-            const bool w = present(f->writers), r = present(f->readers);
+            const bool w = present(f->writers) || present(f->writeSites);
+            const bool r = present(f->readers);
             const bool both = f->writers.empty()   ? r
                               : f->readers.empty() ? w
                                                    : (w && r);
@@ -468,16 +491,28 @@ int runObserveCommand(int argc, const char **argv) {
                   if (a.hitm != b.hitm) return a.hitm > b.hitm;
                   return a.address < b.address;
               });
+    uint64_t unexplainedHitm = 0;
+    for (const auto &u : unexplained) unexplainedHitm += u.hitm;
+
+    // The number this whole path exists to produce. A static analyzer's
+    // recall against the hardware, on a named machine under a named
+    // workload, is measurable rather than arguable, and it is the only
+    // honest way to say whether the next rule is worth having.
+    llvm::outs() << "\nCoherence recall on " << machineName << "/"
+                 << workloadName << ": "
+                 << (measuredSamples
+                         ? (measuredSamples - unexplainedHitm) * 100 /
+                               measuredSamples
+                         : 0)
+                 << "% of measured transfers landed on a line some finding "
+                    "claims\n"
+                 << "  " << (measuredSamples - unexplainedHitm) << " of "
+                 << measuredSamples << " attributed HITM samples\n";
+
     if (!unexplained.empty()) {
-        uint64_t unexplainedHitm = 0;
-        for (const auto &u : unexplained) unexplainedHitm += u.hitm;
         llvm::outs() << "\nMeasured, unexplained by any finding ("
                      << unexplained.size() << " lines, " << unexplainedHitm
-                     << " HITM samples, "
-                     << (measuredSamples
-                             ? unexplainedHitm * 100 / measuredSamples
-                             : 0)
-                     << "% of measured traffic):\n";
+                     << " HITM samples):\n";
         for (unsigned i = 0; i < unexplained.size() && i < top; ++i) {
             const auto &u = unexplained[i];
             llvm::outs() << "  " << u.hitm << " HITM  " << u.offsets

@@ -229,6 +229,7 @@ add_executable(analysis_test
     src/analysis/striped_array.cpp
     src/core/hot_path.cpp
     src/core/config.cpp
+    src/core/source_location.cpp
 )
 target_link_libraries(analysis_test PRIVATE
     clangTooling

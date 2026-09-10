@@ -1716,6 +1716,14 @@ static unsigned emitTrueSharingFindings(
                 {"atomic_field", r.isAtomic ? "yes" : "no"},
                 {"roles_disjoint", disjoint ? "yes" : "no"},
             };
+            if (!r.writeSites.empty()) {
+                std::string sites;
+                for (const auto &loc : r.writeSites) {
+                    if (!sites.empty()) sites += ',';
+                    sites += loc;
+                }
+                d.structuralEvidence["cost_write_sites"] = sites;
+            }
             d.mitigation =
                 "Padding does not help here: the readers want the value, so "
                 "moving it to its own line keeps every transfer and only "

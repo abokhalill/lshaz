@@ -204,6 +204,8 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.fieldWriters);
     buf += "},\"fieldReaders\":{";
     emitNameSets(threadRoles.fieldReaders);
+    buf += "},\"fieldWriteSites\":{";
+    emitNameSets(threadRoles.fieldWriteSites);
     buf += "},\"fieldAccess\":{";
     {
         bool firstKey = true;
@@ -716,6 +718,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.fieldWriters);
                 else if (tk == "fieldReaders")
                     parseNameSets(out.threadRoles.fieldReaders);
+                else if (tk == "fieldWriteSites")
+                    parseNameSets(out.threadRoles.fieldWriteSites);
                 else if (tk == "fieldAccess") {
                     // Fixed-arity count vectors rather than named members:
                     // the key set is every touched field in the program and

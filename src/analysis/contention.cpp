@@ -77,6 +77,9 @@ ContentionGraph buildContentionGraph(const EscapeSummary &escape,
             if (auto rd = facts.fieldReaders.find(key);
                 rd != facts.fieldReaders.end())
                 r.readers = rd->second;
+            if (auto ws = facts.fieldWriteSites.find(key);
+                ws != facts.fieldWriteSites.end())
+                r.writeSites = ws->second;
             if (auto a = facts.fieldAccess.find(key);
                 a != facts.fieldAccess.end())
                 r.access = a->second;

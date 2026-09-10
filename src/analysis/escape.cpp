@@ -5,6 +5,7 @@
 #include "lshaz/analysis/atomics.h"
 #include "lshaz/analysis/types.h"
 #include "lshaz/analysis/symbols.h"
+#include "lshaz/core/diagnostic.h"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
@@ -822,6 +823,22 @@ private:
                     ++rec.loopSites;
                 if (currentFn)
                     rec.writers.insert(currentFn->getCanonicalDecl());
+                // Bounded, because a field stored from hundreds of places
+                // needs no more than a handful to be joinable and the set
+                // crosses the shard boundary. Ordered, so which ones survive
+                // the cap is a property of the source.
+                if (rec.writeSiteLocs.size() < 8) {
+                    const auto &SM = ctx.getSourceManager();
+                    auto loc = resolveSourceLocation(ME->getBeginLoc(), SM);
+                    if (loc.line) {
+                        const auto slash = loc.file.find_last_of('/');
+                        rec.writeSiteLocs.insert(
+                            (slash == std::string::npos
+                                 ? loc.file
+                                 : loc.file.substr(slash + 1)) +
+                            ":" + std::to_string(loc.line));
+                    }
+                }
                 // Reach separates sharing from handoff: `g_stats.hits++` names
                 // a fixed object, `io->len = n` touches whatever was handed
                 // in, and a queue hands each request to one owner. A writer
@@ -1029,6 +1046,10 @@ void EscapeAnalysis::appendFieldAccessNames(ThreadRoleSummary &out) const {
             for (const auto *r : rec.readers)
                 readers.insert(threadRoleNodeName(r, ctx_));
         }
+
+        if (!rec.writeSiteLocs.empty())
+            out.fieldWriteSites[key].insert(rec.writeSiteLocs.begin(),
+                                            rec.writeSiteLocs.end());
 
         auto &fa = out.fieldAccess[key];
         fa.writeSites += rec.sites;
