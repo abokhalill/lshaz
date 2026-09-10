@@ -737,7 +737,7 @@ coherence sees:
 | Evidence (global aggregate) | Verdict |
 |---|---|
 | Atomic + any in-loop write, or ≥4 flat sites | Critical |
-| Atomic + 2–3 flat sites (start/stop lifecycle signature) | High |
+| Atomic + 2-3 flat sites (start/stop lifecycle signature) | High |
 | Plain type, multiple sites | High |
 | Plain type, single in-loop site (one write path; concurrent writers would be a data race) | Informational |
 | At most one flat write total (write-once: configuration, not contention) | Informational |
@@ -843,7 +843,7 @@ their policy. Same contract deliberate layout earns from FL002/FL090.
 **Base severity:** Medium &nbsp;|&nbsp; **Scope:** mixed &nbsp;|&nbsp; **Gate:** globals hot-gated, allocation sites ungated
 
 **Hardware mechanism:** a working set spanning more base pages than the
-dTLB covers (~64 L1 / ~1–2K L2 entries at 4KB) turns strided access into
+dTLB covers (~64 L1 / ~1-2K L2 entries at 4KB) turns strided access into
 page walks. 4-level lookups, each a potential cache-miss chain
 (`dtlb_load_misses.walk_completed`). One 2MB hugepage entry covers 512×
 the reach, but khugepaged collapses only 2MB-**aligned** virtual

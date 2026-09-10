@@ -127,8 +127,7 @@ NUMAPlacement NUMATopology::classifyStruct(const clang::RecordDecl *RD,
                 foundGlobal = true;
         }
 
-        // Pointer/reference to type.
-        if (const auto *PT = varType->getAs<clang::PointerType>()) {
+            if (const auto *PT = varType->getAs<clang::PointerType>()) {
             if (PT->getPointeeType().getCanonicalType() == structType)
                 foundGlobal = true;
         }

@@ -17,27 +17,6 @@ std::set<std::string> ContentionNode::readers() const {
     return out;
 }
 
-std::vector<const ContentionNode::Resident *> ContentionNode::active() const {
-    std::vector<const Resident *> out;
-    for (const auto &r : residents)
-        if (r.written() || r.read())
-            out.push_back(&r);
-    return out;
-}
-
-unsigned ContentionNode::writtenFields() const {
-    unsigned n = 0;
-    for (const auto &r : residents)
-        if (r.written()) ++n;
-    return n;
-}
-
-bool ContentionNode::anyAtomic() const {
-    for (const auto &r : residents)
-        if (r.isAtomic) return true;
-    return false;
-}
-
 const ContentionNode *ContentionGraph::find(const std::string &owner,
                                             uint64_t lineIndex) const {
     auto it = nodes.find({owner, lineIndex});

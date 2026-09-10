@@ -47,7 +47,6 @@ class DataFlowAnalyzer {
 public:
     explicit DataFlowAnalyzer(clang::ASTContext &Ctx) : ctx_(Ctx) {}
 
-    // Analyze a function body and produce data-flow facts.
     DataFlowFacts analyze(const clang::FunctionDecl *FD);
 
 private:

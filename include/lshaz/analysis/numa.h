@@ -66,7 +66,6 @@ public:
     static NUMAPlacement classifyStruct(const clang::RecordDecl *RD,
                                          clang::ASTContext &Ctx);
 
-    // Check if a function is a main-thread-only initializer.
     static bool isMainThreadInitializer(const clang::FunctionDecl *FD);
 
     // Check if a declaration has NUMA-aware allocation hints

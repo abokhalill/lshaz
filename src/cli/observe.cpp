@@ -2,7 +2,9 @@
 #include "observe.h"
 
 #include "lshaz/analysis/coherence_profile.h"
+#include "lshaz/analysis/event_profile.h"
 #include "lshaz/core/config.h"
+#include "lshaz/core/evidence.h"
 #include "lshaz/core/cost.h"
 #include "lshaz/core/cost_calibration.h"
 
@@ -22,26 +24,21 @@ namespace lshaz {
 
 namespace {
 
-// Terms the profile did not measure, divided back out before a residual is
-// taken.
+// Two terms have to come back out before we take a residual.
 //
-// exposed_share is the model's guess at how much of a transfer the machine
-// hides behind other outstanding misses. A profiler counts the transfer and
-// reports its load latency; it says nothing about whether that latency was
-// on the critical path. Leaving the term in would make the residual absorb
-// an exposure error into a term about transfer cost.
+// exposed_share guesses how much of a transfer the machine hides behind other
+// misses; a profiler counts the transfer and never says whether the latency
+// reached the critical path. Leave it in and the residual quietly absorbs an
+// exposure error into a term about transfer cost.
 //
-// calibration is the correction a previous round already applied. Comparing
-// a measurement against an already-corrected prediction and storing the
-// ratio applies the correction twice, and the store would converge on
-// whatever the second application happened to produce.
+// calibration is last round's correction. Measure against it and we apply it
+// twice, and the store converges on whatever that produced.
 bool measuredByProfile(const std::string &term) {
     return term != "exposed_share" && term != "calibration";
 }
 
-// perf decorates symbols the linker specialised: dictPrefetcherRun becomes
-// dictPrefetcherRun.lto_priv.0. Demangled C++ carries its parameter list.
-// Neither is part of the name the analyzer knows the function by.
+// dictPrefetcherRun arrives as dictPrefetcherRun.lto_priv.0, and demangled
+// C++ drags its parameter list along. Neither is the name we know it by.
 std::string baseSymbol(const std::string &s) {
     std::string out = s;
     const auto paren = out.find('(');
@@ -61,27 +58,20 @@ struct CostedFinding {
     unsigned line = 0;
     Milli reported = 0;
 
-    // The product with only the terms a profile can see, which is what a
-    // residual may be taken against.
+    // Only the terms a profile can see. Residuals go against this.
     Milli base = 0;
 
-    // Kept apart rather than merged into one set of names, because the claim
-    // is that these two groups meet on one line. Merging them tests only
-    // that some named function touched something, which on redis matched 178
-    // sites for a single finding and measured the program rather than the
-    // hazard.
+    // Two sets, not one. The claim is that these groups meet on a line;
+    // merged, it only tests that some named function touched something, which
+    // on redis matched 178 sites for one finding and measured the program.
     std::set<std::string> writers, readers;
 
-    // basename:line of the stores. A profiler reports the DWARF line of an
-    // inlined store and the symbol of whatever it was inlined into, so this
-    // is the only writer-side key that survives inlining. redis stores
-    // server.unixtime from a static inline the compiler folds into `call`;
-    // matching on the symbol finds nothing and matching on server.c:1380 is
-    // exact.
+    // basename:line of the stores, the only writer-side key that survives
+    // inlining. perf folds redis's static-inline writer of server.unixtime
+    // into `call`, so the symbol matches nothing and server.c:1380 is exact.
     std::set<std::string> writeSites;
 
-    // The model already disowned this number, so no residual may be learned
-    // from it.
+    // The model disowned this number, so we can't learn from it.
     bool implausible = false;
 
     uint64_t hitmSamples = 0;
@@ -89,8 +79,20 @@ struct CostedFinding {
     unsigned matchedLines = 0;
 };
 
+// Every finding with the symbols it accuses, costed or not.
+//
+// The cost model only reaches coherence, so a branch or TLB rule produces no
+// estimate and was invisible to every measurement we take. That is how seven
+// of eight families went unchecked.
+struct RuleSite {
+    std::string ruleID;
+    std::string entity;
+    std::set<std::string> symbols;
+};
+
 bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
-                  unsigned &uncosted, std::string &err) {
+                  std::vector<RuleSite> &sites, unsigned &uncosted,
+                  std::string &err) {
     auto buf = llvm::MemoryBuffer::getFile(path);
     if (!buf) {
         err = "cannot read " + path + ": " + buf.getError().message();
@@ -112,9 +114,45 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
         return false;
     }
 
+    const auto splitInto = [](const std::string &names,
+                              std::set<std::string> &into) {
+        size_t start = 0;
+        while (start <= names.size()) {
+            const auto comma = names.find(',', start);
+            const auto end = comma == std::string::npos ? names.size() : comma;
+            if (end > start) into.insert(names.substr(start, end - start));
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+    };
+
     for (const auto &entry : *diags) {
         const auto *d = entry.getAsObject();
         if (!d) continue;
+
+        // The symbol view, taken for every finding whether or not the cost
+        // model reached it.
+        RuleSite rs;
+        if (auto s = d->getString("ruleID")) rs.ruleID = s->str();
+        if (auto s = d->getString("functionName"))
+            if (!s->empty()) rs.symbols.insert(s->str());
+        if (const auto *se = d->getObject("structuralEvidence")) {
+            if (auto s = se->getString("type_name")) rs.entity = s->str();
+            if (auto s = se->getString("field")) rs.entity += "::" + s->str();
+            if (auto s = se->getString("cost_writers"))
+                splitInto(s->str(), rs.symbols);
+            if (auto s = se->getString("cost_readers"))
+                splitInto(s->str(), rs.symbols);
+            if (auto s = se->getString("access_symbols"))
+                splitInto(s->str(), rs.symbols);
+        }
+        if (const auto *loc = d->getObject("location"))
+            if (rs.entity.empty())
+                if (auto s = loc->getString("file"))
+                    rs.entity = basename(s->str());
+        if (!rs.ruleID.empty() && !rs.symbols.empty())
+            sites.push_back(std::move(rs));
+
         const auto *cost = d->getObject("cost");
         if (!cost) { ++uncosted; continue; }
 
@@ -180,13 +218,11 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
     return true;
 }
 
-// Symbols the machine actually executed, from `perf report --stdio`.
+// What the machine actually ran, from `perf report --stdio`.
 //
-// Recall alone is a metric you can win by reporting everything, so it has to
-// come with the other half. The denominator for precision is not every
-// finding: a hazard on a path the workload never took is not a false
-// positive, it is untested. It is the findings whose code demonstrably ran
-// and whose predicted transfer did not happen.
+// Recall is a metric you win by reporting more, so it needs the other half.
+// The precision denominator isn't every finding: a hazard on a path the
+// workload never took is untested, not wrong.
 std::set<std::string> parseExecutedSymbols(const std::string &text) {
     std::set<std::string> out;
     std::istringstream in(text);
@@ -247,6 +283,7 @@ void usage() {
 int runObserveCommand(int argc, const char **argv) {
     std::string profilePath, findingsPath, configPath, storePath, executedPath,
         targetObject;
+    std::vector<std::pair<std::string, std::string>> evidenceArgs;
     std::string machineName, workloadName;
     uint64_t ops = 0, hitmEvents = 0, samplePeriod = 0;
     unsigned top = 10;
@@ -267,6 +304,16 @@ int runObserveCommand(int argc, const char **argv) {
         else if (a == "--store") storePath = next("--store");
         else if (a == "--executed") executedPath = next("--executed");
         else if (a == "--object") targetObject = next("--object");
+        else if (a == "--evidence") {
+            const std::string spec = next("--evidence");
+            const auto eq = spec.find('=');
+            if (eq == std::string::npos) {
+                llvm::errs() << "lshaz: error: --evidence wants "
+                                "family=path, got " << spec << "\n";
+                return 2;
+            }
+            evidenceArgs.emplace_back(spec.substr(0, eq), spec.substr(eq + 1));
+        }
         else if (a == "--machine") machineName = next("--machine");
         else if (a == "--workload") workloadName = next("--workload");
         else if (a == "--ops") ops = std::strtoull(next("--ops"), nullptr, 10);
@@ -311,21 +358,19 @@ int runObserveCommand(int argc, const char **argv) {
 
     std::vector<CostedFinding> findings;
     unsigned uncosted = 0;
-    if (!readFindings(findingsPath, findings, uncosted, err)) {
+    std::vector<RuleSite> sites;
+    if (!readFindings(findingsPath, findings, sites, uncosted, err)) {
         llvm::errs() << "lshaz: error: " << err << "\n";
         return 3;
     }
 
-    // The join is at line granularity because the claim is at line
-    // granularity. A line-sharing finding says a writing role and a reading
-    // role meet on one cache line, and a shared line in the profile is the
-    // set of call sites that met on one. So a finding matches a line when
-    // both of its role sets are represented there, not when either name
-    // appears anywhere.
+    // Join at line granularity, because the claim is at line granularity: a
+    // sharing finding says a writing role and a reading role meet on one
+    // line, and a shared line in the profile is exactly the sites that met.
+    // So both role sets have to show up there, not just either name.
     //
-    // A finding that reports at the access site rather than at a
-    // declaration matches on its own file and line instead, which is the
-    // route the store-rate rule takes.
+    // Rules that report at the access site instead of a declaration match on
+    // their own file and line. FL005 takes that route.
     std::map<std::string, std::vector<CostedFinding *>> byName;
     for (auto &f : findings) {
         for (const auto &s : f.writers) byName[s].push_back(&f);
@@ -334,19 +379,14 @@ int runObserveCommand(int argc, const char **argv) {
         byName[f.file + ":" + std::to_string(f.line)].push_back(&f);
     }
 
-    // Which binary the analyzer was pointed at. Traffic inside a dependency
-    // is not a recall failure: a scan of valkey's sources cannot name a lock
-    // inside glibc, and counting it against the analyzer makes the metric a
-    // statement about how much of a program's coherence cost happens to live
-    // in libc rather than about the analyzer.
+    // Which binary we were pointed at. Traffic inside a dependency is not our
+    // miss: scanning valkey's sources will never name a lock in glibc, and
+    // scoring it against us measures how much of the program's contention
+    // happens to live in libc. One glibc line on valkey carried 1953 of 4120
+    // transfers and dragged recall from 91% to 43%.
     //
-    // On valkey one glibc line carried 1953 of 4120 sampled transfers, 47% of
-    // the whole run, and dragged measured recall from 91% to 43%.
-    //
-    // Inferred by how many distinct lines each object appears on rather than
-    // by sample count, so a single enormous line in a dependency cannot win
-    // the vote. Reported, and overridable, because an inference that decides
-    // a headline number has to be visible.
+    // Vote by distinct lines, not samples, so one enormous dependency line
+    // can't win. Printed and overridable, since it decides a headline number.
     std::map<std::string, unsigned> objectLines;
     for (const auto &line : prof.lines) {
         std::set<std::string> here;
@@ -599,6 +639,10 @@ int runObserveCommand(int argc, const char **argv) {
                         " landed on a line some finding claims\n"
                  << "  " << (measuredSamples - unexplainedHitm) << " of "
                  << measuredSamples << " attributed HITM samples\n";
+    if (dependencySamples)
+        llvm::outs() << "  " << dependencySamples
+                     << " more landed in a dependency, not counted either "
+                        "way\n";
 
     // The other half. Recall is a metric you can win by reporting
     // everything, so on its own it flatters whoever built it.
@@ -648,14 +692,11 @@ int runObserveCommand(int argc, const char **argv) {
                      << " costed findings, from " << executed.size()
                      << " executed symbol(s)\n"
                      << "  " << (findings.size() - ran)
-                     << " finding(s) excluded: their code did not run in this "
-                        "window, so the\n  workload did not test them and a "
-                        "silent line proves nothing about them\n";
+                     << " excluded, their code never ran here\n";
 
         if (!silent.empty()) {
-            llvm::outs() << "\nRan and stayed silent, which is what a false "
-                            "positive looks like ("
-                         << silent.size() << "):\n";
+            llvm::outs() << "\nRan, stayed silent (" << silent.size()
+                         << "):\n";
             std::sort(silent.begin(), silent.end(),
                       [](const CostedFinding *a, const CostedFinding *b) {
                           if (a->reported != b->reported)
@@ -670,12 +711,99 @@ int runObserveCommand(int argc, const char **argv) {
         }
     }
 
-    if (dependencySamples)
-        llvm::outs() << "  " << dependencySamples
-                     << " further sample(s) landed outside " << target
-                     << " and are excluded: a scan of this source cannot "
-                        "name a line\n  inside a dependency, and charging it "
-                        "here would measure the dependency\n";
+    // Every other mechanism the rule set claims. Coherence has the c2c path
+    // above, which locates a line as well as a symbol; the rest have only a
+    // per-symbol event count, which is enough to ask the one question that
+    // matters: the code ran, so did the effect it was accused of happen
+    // there or not.
+    if (!evidenceArgs.empty()) {
+        if (executedPath.empty()) {
+            llvm::errs() << "lshaz: error: --evidence needs --executed. "
+                            "A symbol carrying no branch misses proves "
+                            "nothing\n  unless something else says it ran.\n";
+            return 2;
+        }
+        auto execBuf = llvm::MemoryBuffer::getFile(executedPath);
+        EventProfile ranProfile;
+        if (!execBuf ||
+            !parsePerfReport(execBuf.get()->getBuffer().str(), ranProfile,
+                             err)) {
+            llvm::errs() << "lshaz: error: " << executedPath << ": "
+                         << (execBuf ? err : execBuf.getError().message())
+                         << "\n";
+            return 3;
+        }
+
+        llvm::outs() << "\nPer-mechanism confirmation, against what the "
+                        "machine counted:\n";
+        for (const auto &[familyName, path] : evidenceArgs) {
+            const auto family = evidenceFamilyFromName(familyName);
+            if (family == EvidenceFamily::None) {
+                llvm::errs() << "lshaz: error: unknown evidence family '"
+                             << familyName << "'\n";
+                return 2;
+            }
+            auto buf = llvm::MemoryBuffer::getFile(path);
+            EventProfile ev;
+            ev.event = familyName;
+            if (!buf ||
+                !parsePerfReport(buf.get()->getBuffer().str(), ev, err)) {
+                llvm::errs() << "lshaz: error: " << path << ": "
+                             << (buf ? err : buf.getError().message()) << "\n";
+                return 3;
+            }
+
+            std::map<std::string, std::pair<unsigned, unsigned>> perRule;
+            std::vector<const RuleSite *> refuted;
+            unsigned ran = 0, confirmed = 0, unlocalised = 0;
+            for (const auto &s : sites) {
+                const auto *rule = evidenceForRule(s.ruleID);
+                if (!rule || rule->family != family) continue;
+                bool executedHere = false, sawEvent = false;
+                for (const auto &sym : s.symbols) {
+                    if (ranProfile.ran(sym)) executedHere = true;
+                    if (ev.ran(sym)) sawEvent = true;
+                }
+                if (!executedHere) continue;
+                // The cost of an allocation is paid inside the allocator,
+                // not in the function that called it, so a silent caller is
+                // not a refutation and must not be counted as one.
+                if (!rule->localised) { ++unlocalised; continue; }
+                ++ran;
+                auto &tally = perRule[s.ruleID];
+                ++tally.second;
+                if (sawEvent) { ++confirmed; ++tally.first; }
+                else refuted.push_back(&s);
+            }
+
+            llvm::outs() << "  " << familyName << ": ";
+            if (!ran && !unlocalised) {
+                llvm::outs() << "no finding of this family had code that ran "
+                                "in this window\n";
+                continue;
+            }
+            if (ran)
+                llvm::outs() << confirmed * 100 / ran << "% confirmed, "
+                             << confirmed << " of " << ran
+                             << " finding(s) whose code ran\n";
+            else
+                llvm::outs() << "nothing to confirm\n";
+            for (const auto &[rule, tally] : perRule)
+                llvm::outs() << "      " << rule << "  " << tally.first
+                             << "/" << tally.second << "\n";
+            if (unlocalised)
+                llvm::outs()
+                    << "      " << unlocalised
+                    << " finding(s) not judged: their cost is paid somewhere "
+                       "other than\n      the code that caused it, so a "
+                       "silent symbol refutes nothing\n";
+            for (unsigned i = 0; i < refuted.size() && i < top; ++i)
+                llvm::outs() << "      ran without the effect: "
+                             << refuted[i]->ruleID << "  "
+                             << refuted[i]->entity << "\n";
+        }
+    }
+
 
     if (!unexplained.empty()) {
         llvm::outs() << "\nMeasured, unexplained by any finding ("
@@ -689,30 +817,25 @@ int runObserveCommand(int argc, const char **argv) {
     }
 
     if (!scaleFrom) {
-        llvm::outs()
-            << "\nNo observation stored: the profile is sampled at a scale "
-               "nothing reported.\n"
-               "Supply --hitm-events from a counted run, or --sample-period "
-               "if the record\n"
-               "used a fixed one. A sampled total scaled by a guess is not a "
-               "measurement.\n";
+        llvm::outs() << "\nNothing stored: the profile is sampled and nothing "
+                        "gave the scale.\n"
+                        "Pass --hitm-events from a counted run, or "
+                        "--sample-period if the record used one.\n";
         return 0;
     }
     if (!ops) {
-        llvm::outs() << "\nNo observation stored: --ops is the operation "
-                        "count the cost is per, and\nnothing supplied it.\n";
+        llvm::outs() << "\nNothing stored: --ops is what the cost is per.\n";
         return 0;
     }
     if (machineName.empty() || workloadName.empty()) {
-        llvm::outs()
-            << "\nNo observation stored: a residual is a property of the "
-               "mechanism on a\nnamed machine under a named workload. Supply "
-               "--machine and --workload, or\na config carrying them.\n";
+        llvm::outs() << "\nNothing stored: a residual needs a named machine "
+                        "and workload.\nPass --machine and --workload, or a "
+                        "config carrying them.\n";
         return 0;
     }
 
     if (byMechanism.empty()) {
-        llvm::outs() << "\nNo observation stored: no costed finding joined to "
+        llvm::outs() << "\nNothing stored: no costed finding joined to "
                         "measured traffic.\n";
         return 0;
     }
@@ -785,11 +908,11 @@ int runObserveCommand(int argc, const char **argv) {
             (static_cast<__int128>(total) * ops));
         store.observe(o);
         if (sited++ < top)
-            llvm::outs() << "  " << f.site << " on " << machineName << "/"
-                         << workloadName << ": predicted "
-                         << milliToText(f.base) << ", measured "
-                         << milliToText(o.measured) << " cycles/op from "
-                         << f.hitmSamples << " sample(s)\n";
+            llvm::outs() << "  " << f.site << " (" << f.mechanism
+                         << "): predicted " << milliToText(f.base)
+                         << ", measured " << milliToText(o.measured)
+                         << " cycles/op from " << f.hitmSamples
+                         << " sample(s)\n";
     }
     // Zero is a measurement. Without these the store only ever learns about
     // lines that turned out to cost something, so every scan repeats the
@@ -808,15 +931,13 @@ int runObserveCommand(int argc, const char **argv) {
         ++zeroed;
     }
     if (sited || zeroed)
-        llvm::outs() << "  " << sited << " line(s) measured individually and "
-                     << zeroed
-                     << " observed silent while running, which is what ranks "
-                        "them\n";
+        llvm::outs() << "  " << sited << " line(s) measured, " << zeroed
+                     << " ran silent\n";
 
     if (!write) {
-        llvm::outs() << "\nNot written. Rerun with --write to store, which "
-                        "changes what every\nfuture scan on "
-                     << machineName << "/" << workloadName << " reports.\n";
+        llvm::outs() << "\nNot written. --write stores these, which changes "
+                        "what every future scan\non " << machineName << "/"
+                     << workloadName << " reports.\n";
         return 0;
     }
     if (storePath.empty()) {

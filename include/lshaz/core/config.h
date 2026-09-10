@@ -30,7 +30,6 @@ struct Config {
     size_t cacheLineSpanWarn    = 64;   // FL001 threshold
     size_t cacheLineSpanCrit    = 128;  // FL001 escalation
 
-    // Stack frame
     size_t stackFrameWarnBytes  = 2048; // FL021 threshold
 
     // FL020 escalation, set at glibc's tcache_max. At or below it a request is
@@ -39,10 +38,8 @@ struct Config {
     // from 32B to 1032B. tcmalloc and jemalloc draw the line elsewhere.
     size_t allocSizeEscalation  = 1032;
 
-    // Branch depth
     unsigned branchDepthWarn    = 4;    // FL050 threshold
 
-    // Minimum severity to emit
     Severity minSeverity        = Severity::Informational;
 
     // Output

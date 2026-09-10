@@ -1609,39 +1609,55 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
     return graded;
 }
 
-// A store to one field invalidates the whole line, so a core reading a
-// different field on it re-fetches and pays the miss a second writer would.
-// FL002 sees that only where both halves compile together: redis stores
-// redisCommand::calls in server.c while db.c reads the key specs on the same
-// line, and no single TU can join them. The layout is a program fact and the
-// two access sets merge, so the join belongs here.
+// Give type-level findings the symbols that touch them.
+//
+// A layout finding reports at a struct declaration and names no function, so
+// there is no key to look it up under in a per-symbol profile. That left 499
+// FL001 findings on redis unjudgeable and the whole cache-miss family
+// unmeasured, not for want of a machine but for want of a name.
+//
+// Capped: a popular record has hundreds of accessors and all we ask of the
+// set is whether any of them ran and whether the event landed on any. Ordered
+// so the cap cuts the same ones every time.
+static unsigned attachAccessSymbols(std::vector<Diagnostic> &diagnostics,
+                                    const ContentionGraph &graph) {
+    constexpr size_t kMaxSymbols = 64;
+    std::map<std::string, std::string> byOwner;
+    for (const auto &[key, node] : graph.nodes) {
+        auto &joined = byOwner[key.first];
+        if (!joined.empty()) continue;
+        std::set<std::string> all = node.writers();
+        const auto readers = node.readers();
+        all.insert(readers.begin(), readers.end());
+        size_t n = 0;
+        for (const auto &s : all) {
+            if (n++ >= kMaxSymbols) break;
+            if (!joined.empty()) joined += ',';
+            joined += s;
+        }
+    }
+
+    unsigned attached = 0;
+    for (auto &d : diagnostics) {
+        if (!d.functionName.empty()) continue;
+        auto tn = d.structuralEvidence.find("type_name");
+        if (tn == d.structuralEvidence.end()) continue;
+        auto it = byOwner.find(tn->second);
+        if (it == byOwner.end() || it->second.empty()) continue;
+        d.structuralEvidence["access_symbols"] = it->second;
+        ++attached;
+    }
+    return attached;
+}
+
 static constexpr const char *kTrueSharingMechanism = "coherence_true_sharing";
 
-// One field, written recurrently by one role and read by another.
+// Where FL006's candidates died, per gate.
 //
-// FL002 models a pair of distinct fields colliding on a line, and padding
-// fixes it because the fields did not need to be adjacent. This is the other
-// shape and it is not a layout bug: the readers want the value the writer
-// stores. Padding moves the cost, it does not remove it, so the mitigation
-// is a different sentence.
-//
-// The measurement that this rule exists for: on redis at io-threads 4,
-// server.unixtime carried 372 of 2026 sampled HITM events, 18.4% of all
-// coherence traffic in the run and the largest contended line in the
-// program. Every access landed on one byte offset, so no pair of fields was
-// involved and no rule in the tool could express it.
-//
-// Written as a query over the contention graph rather than as another walk
-// of its own. The gates it needs, standing access and write recurrence, are
-// properties of a line that six other places were each deriving separately.
-// Why the graph's lines did not become findings, counted at every gate.
-//
-// A rule that reports nothing is byte-identical to a clean scan, and the
-// registry canary only proves the rule can fire somewhere. On a real target
-// the useful question is which precondition the candidates failed, because
-// that separates a mechanism the program genuinely does not have from a fact
-// the analyzer never managed to establish. The second is a bug in here and
-// the first is not, and without this they look the same.
+// A rule that reports nothing looks exactly like a clean scan, and the canary
+// only proves it can fire somewhere. On a real target you want to know which
+// precondition failed, because "this program doesn't do that" and "we never
+// established it" are the same silence and only one is our bug.
 struct TrueSharingGates {
     unsigned residents = 0;
     unsigned noEscapeRoute = 0;
@@ -1672,6 +1688,16 @@ struct TrueSharingGates {
     }
 };
 
+// FL006: one field, stored by one role and read by another.
+//
+// FL002 covers two distinct fields colliding on a line, where padding fixes
+// it because they never needed to be neighbours. Here the readers want the
+// value, so padding just relocates the transfer. Different fix, different
+// sentence.
+//
+// server.unixtime is why this exists: 372 of 2026 sampled HITM events on
+// redis, every one at the same byte offset, so no pair of fields and nothing
+// in the rule set that could say it.
 static unsigned emitTrueSharingFindings(
         std::vector<Diagnostic> &diagnostics,
         const ContentionGraph &graph,
@@ -1716,66 +1742,40 @@ static unsigned emitTrueSharingFindings(
                 ++gates.notBothSides;
                 continue;
             }
-            // A field whose writes the tracker cannot see in full says
-            // nothing about how often the line is invalidated. Concluding
-            // from that silence is concluding from a blind spot.
+            // If we can't see all the writes, silence tells us nothing about
+            // how often the line gets invalidated.
             if (!r.writesObservable()) {
                 ++gates.writesUnobservable;
                 continue;
             }
-            // Writes to whatever the caller handed in move with the object
-            // and contend with nothing. Without this the rule fires on every
-            // field of every per-request struct in the program.
-            //
-            // The reads answer the same question and sometimes are the only
-            // side that can. A field written only through a parameter and
-            // read only through a global singleton is shared state, and the
-            // write side cannot see it: redis stores user::flags as
-            // u->flags from a setter and loads it as DefaultUser->flags on
-            // every command. Weaker evidence, so it is carried into the
-            // claim rather than silently treated as equal.
+
+            // Writes through a handed-in pointer move with the object and
+            // contend with nothing; without this we fire on every field of
+            // every per-request struct. The reads answer the same question
+            // and sometimes they're the only side that can: redis writes
+            // user::flags as u->flags and reads it as DefaultUser->flags.
+            // Weaker, so it lands in the claim rather than passing silently.
             const bool standingWrites = r.access.standing();
             const bool oneObject = standingWrites || r.access.standingReads();
-            // Freshness of the object was tried here as a gate and
-            // measurement refused it. The reasoning was that a type
-            // allocated on the hot path is per-request, so reads through a
-            // pointer to it concentrate on nothing; on redis that dropped
-            // client::flags, which the machine measured at 874 samples, the
-            // largest contended line in the run. A per-request object handed
-            // between two threads is contended precisely on the fields they
-            // hand it over with. The freshness signal survives as evidence
-            // below, not as a gate.
             if (!standingWrites && !r.access.anyStandingRead()) {
                 ++gates.handedNotStanding;
                 continue;
             }
-            // Invalidation has to recur or the line settles in Shared
-            // state after the first read and costs nothing further. A store
-            // inside a loop says so directly; otherwise the writing
-            // function's rate on the merged call graph does.
+
+            // Tried and refused, twice, so don't reach for either again.
+            // Gating on object freshness dropped client::flags (874 samples,
+            // the biggest line in the run): an object handed between threads
+            // is contended on exactly the fields they hand it with. Gating on
+            // writer hotness moved precision 17 to 12 to 17 and silenced the
+            // canary, because FL006 inherited the hotness verdict's own
+            // thresholds. Both survive below as evidence.
             //
-            // Reachable through some loop is far too weak a test in an
-            // event-driven program, where essentially every function is
-            // reached through the event loop. Measurement made that
-            // concrete: at 17% precision the silent findings were
-            // redisServer::verbosity, ::dbnum, ::hz, ::repl_state and a
-            // dozen slowlog and peak-memory counters, every one a field
-            // written at startup or on a rare path and read often. A line
-            // whose writer runs once per ten thousand operations carries no
-            // sustained traffic however many cores read it, because after
-            // the first read it sits in Shared state and stays there.
+            // What's left: the store has to recur, or the line settles into
+            // Shared after the first read and stops costing anything.
             const bool loopWrite = r.loopWritten();
             bool writerHot = false;
             for (const auto &fn : r.writers)
                 if (globalHot.count(fn)) { writerHot = true; break; }
-            // Requiring the writer to be hot as well was tried here and
-            // measured: precision went 17% to 12% and back to 17% while the
-            // canary stopped firing, because the hotness verdict carries its
-            // own depth and spreading thresholds and FL006 inherited them.
-            // Structure proposes, the cost model grades, and measurement
-            // retires. A third gate in front of all of that only decides
-            // which findings never reach the grade that would have dismissed
-            // them anyway. Hotness stays as a claim below.
             if (!loopWrite && !rates.recurrent(r.writers)) {
                 ++gates.writeDoesNotRecur;
                 continue;
@@ -1918,6 +1918,12 @@ static unsigned emitTrueSharingFindings(
     return emitted;
 }
 
+// A store to one field invalidates the whole line, so a core reading a
+// neighbouring field re-fetches and pays what a second writer would. FL002
+// only sees that when both halves compile together, and they often don't:
+// redis stores redisCommand::calls in server.c while db.c reads the key specs
+// off the same line. Layout is a program fact and the access sets merge, so
+// the join lives here.
 static unsigned emitCrossTUSharedLineFindings(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &escape,
@@ -2450,8 +2456,6 @@ static unsigned synthesizeUnappliedMitigation(
     return static_cast<unsigned>(compounds.size());
 }
 
-// Cross-TU escape suppression using aggregated EscapeSummary.
-// For each diagnostic with thread_escape evidence, look up the type in the
 // Two cores can only fight over a cache line if they reach the same object.
 // A rule cannot decide that: hasGlobalInstance is a per-TU fact, the record
 // lives in a header and its global lives in one .c, so at rule time the
@@ -2499,8 +2503,7 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
     return capped;
 }
 
-// global summary. If no TU provided structural or publication escape evidence,
-// suppress.
+// Drop thread_escape findings on types that no TU ever showed escaping.
 static unsigned applyCrossTUEscapeSuppression(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &globalEscape,
@@ -3796,6 +3799,11 @@ ScanResult ScanPipeline::run(
     // Reported whether or not anything fired, which is the point.
     report("true_sharing", tsGates.summary());
 
+    if (unsigned n = attachAccessSymbols(result.diagnostics, contention))
+        report("access_symbols", std::to_string(n) +
+               " finding(s) about a type given the symbols that touch it, so "
+               "a hardware profile can be joined to them");
+
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
         result.threadRoles, globalHot, rates, *machine, costCalib,
@@ -3842,7 +3850,6 @@ ScanResult ScanPipeline::run(
         report("interactions", std::to_string(unapplied) +
                " FL092 unapplied-mitigation compound(s)");
 
-    // Precision budget.
     PrecisionBudget budget;
     budget.apply(result.diagnostics);
 
@@ -3947,7 +3954,6 @@ ScanResult ScanPipeline::run(
         }
     }
 
-    // Filter and sort.
     filterAndSort(request.filter, result.diagnostics);
 
     // Header fingerprint detection: identify missing header patterns.
@@ -4002,7 +4008,6 @@ ScanResult ScanPipeline::run(
     result.metadata.failedTUs = result.failedTUs;
     result.metadata.failedTUErrors = result.failedTUErrors;
 
-    // Status.
     bool parseError = (toolRet != 0 || result.totalTUsFailed > 0);
     bool hasFindings = !result.diagnostics.empty();
 

@@ -203,16 +203,16 @@ void printMetaDiff(const ScanMeta &a, const ScanMeta &b) {
         int tuDelta = static_cast<int>(b.totalTUs) - static_cast<int>(a.totalTUs);
         int failDelta = static_cast<int>(b.failedTUs) - static_cast<int>(a.failedTUs);
 
-        llvm::outs() << "  TUs analyzed: " << a.totalTUs << " → " << b.totalTUs;
+        llvm::outs() << "  TUs analyzed: " << a.totalTUs << " -> " << b.totalTUs;
         if (tuDelta != 0)
             llvm::outs() << " (" << (tuDelta > 0 ? "+" : "") << tuDelta << ")";
         llvm::outs() << "\n";
 
-        llvm::outs() << "  TUs failed:   " << a.failedTUs << " → " << b.failedTUs;
+        llvm::outs() << "  TUs failed:   " << a.failedTUs << " -> " << b.failedTUs;
         if (failDelta != 0)
             llvm::outs() << " (" << (failDelta > 0 ? "+" : "") << failDelta << ")";
         if (failDelta > 0)
-            llvm::outs() << "  ⚠ regression";
+            llvm::outs() << "  regression";
         llvm::outs() << "\n";
     } else {
         if (a.parsed)

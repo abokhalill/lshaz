@@ -91,6 +91,7 @@ set(LSHAZ_SOURCES
     src/core/cost.cpp
     src/core/cost_calibration.cpp
     src/core/emitters.cpp
+    src/core/evidence.cpp
     src/core/interaction.cpp
     src/core/perf_profile.cpp
     src/core/precision.cpp
@@ -106,6 +107,7 @@ set(LSHAZ_SOURCES
     src/analysis/cache_line.cpp
     src/analysis/coherence_profile.cpp
     src/analysis/contention.cpp
+    src/analysis/event_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/thread_role.cpp
@@ -208,6 +210,7 @@ add_executable(pipeline_test
     src/pipeline/repo.cpp
     src/pipeline/shard_ipc.cpp
     src/analysis/contention.cpp
+    src/analysis/event_profile.cpp
     src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
@@ -219,8 +222,10 @@ target_include_directories(pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothe
 add_executable(analysis_test
     test/analysis_test.cpp
     src/analysis/cache_line.cpp
+    src/analysis/event_profile.cpp
     src/analysis/coherence_profile.cpp
     src/analysis/contention.cpp
+    src/analysis/event_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/escape.cpp

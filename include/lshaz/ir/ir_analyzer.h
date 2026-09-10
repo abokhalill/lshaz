@@ -22,7 +22,6 @@ public:
 
     const ProfileMap &profiles() const { return profiles_; }
 
-    // Lookup by mangled name.
     const IRFunctionProfile *lookup(const std::string &mangledName) const;
 
     // Merge profiles from another analyzer (shard-level reduction).

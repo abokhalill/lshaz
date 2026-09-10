@@ -11,8 +11,7 @@ AllocatorTopology::AllocatorTopology() {
         "std::pmr::monotonic_buffer_resource",
         "std::pmr::unsynchronized_pool_resource",
         "std::pmr::synchronized_pool_resource",
-        // Boost.Pool.
-        "boost::pool_allocator",
+            "boost::pool_allocator",
         "boost::fast_pool_allocator",
         "boost::object_pool",
         "boost::singleton_pool",

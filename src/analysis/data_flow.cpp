@@ -24,7 +24,6 @@ bool isHeapAllocCall(const clang::CallExpr *CE) {
            name == "std::make_unique_for_overwrite";
 }
 
-// Check if a call expression is an atomic load (member call).
 bool isAtomicLoadCall(const clang::CXXMemberCallExpr *CE) {
     const auto *MD = CE->getMethodDecl();
     if (!MD) return false;

@@ -7,6 +7,8 @@
 #include "lshaz/analysis/call_graph.h"
 #include "lshaz/analysis/escape.h"
 #include "lshaz/analysis/thread_role.h"
+#include "lshaz/analysis/event_profile.h"
+#include "lshaz/analysis/loop_shape.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
@@ -846,7 +848,84 @@ void testThreadRoleLambdaEntry() {
 
 } // anonymous namespace
 
+// The parser behind every non-coherence measurement the tool takes. A silent
+// failure here reads as a machine that did nothing, which is the one thing
+// the rest of this codebase spends its effort making impossible.
+void testPerfReportParsing() {
+    using namespace lshaz;
+    const std::string report =
+        "# To display the perf.data header info, please use --header\n"
+        "#\n"
+        "# Samples: 56K of event 'branch-misses'\n"
+        "#\n"
+        "# Overhead  Symbol\n"
+        "# ........  ......\n"
+        "#\n"
+        "    19.61%  [.] dictPrefetcherRun.lto_priv.0\n"
+        "     8.44%  [.] processCommand\n"
+        "     0.01%  [k] __softirqentry_text_start\n"
+        "     0.00%  [.] neverRuns\n";
+    EventProfile ev;
+    std::string err;
+    check(parsePerfReport(report, ev, err), "perf report parses");
+    // Linker specialisation suffixes are not part of the name a finding
+    // knows the function by.
+    check(ev.ran("dictPrefetcherRun"), "linker suffix stripped from symbol");
+    check(ev.samplesFor("dictPrefetcherRun") == 196100, "share read as ppm");
+    check(ev.samplesFor("processCommand") == 84400, "second share read");
+    // Present at zero is not absent: the symbol ran, the event did not
+    // happen there, and those are different answers.
+    check(ev.ran("neverRuns"), "present at zero is not absent");
+    check(ev.samplesFor("neverRuns") == 0, "a zero share reads as zero");
+    check(!ev.ran("notInTheProfile"), "absent symbol is absent");
+    check(ev.samplesFor("notInTheProfile") == 0, "absent symbol has no share");
+
+    EventProfile empty;
+    std::string err2;
+    check(!parsePerfReport("nothing here at all\n", empty, err2),
+          "a file naming no symbol is an error, not an empty profile");
+    check(!err2.empty(), "the error says what was expected");
+}
+
+// Loop bounds the source states, which is what separates a sixteen-iteration
+// loop from one over a runtime bound. Zero means not derivable, and the
+// caller substitutes its own default rather than this guessing.
+void testConstantTripCounts() {
+    using namespace lshaz;
+    struct Case { const char *code; uint64_t want; };
+    const Case cases[] = {
+        {"void f(){ for (int i = 0; i < 16; i++) g(); }", 16},
+        {"void f(){ for (int i = 0; i <= 15; i++) g(); }", 16},
+        {"void f(){ for (int i = 0; i < 32; i += 4) g(); }", 8},
+        {"void f(){ for (int i = 10; i > 0; i--) g(); }", 10},
+        {"enum { N = 24 }; void f(){ for (int i = 0; i < N; i++) g(); }", 24},
+        {"void f(int n){ for (int i = 0; i < n; i++) g(); }", 0},
+        {"void f(){ for (int i = 0; i > 8; i++) g(); }", 0},
+        {"void f(){ int i; for (i = 0; i < 7; ++i) g(); }", 7},
+    };
+    for (const auto &c : cases) {
+        const std::string src = std::string("void g();\n") + c.code;
+        auto unit = clang::tooling::buildASTFromCode(src, "t.cpp");
+        check(unit != nullptr, "fragment parses");
+        const clang::ForStmt *loop = nullptr;
+        struct V : clang::RecursiveASTVisitor<V> {
+            const clang::ForStmt **out;
+            bool VisitForStmt(clang::ForStmt *S) { *out = S; return false; }
+        } v{};
+        v.out = &loop;
+        v.TraverseDecl(unit->getASTContext().getTranslationUnitDecl());
+        check(loop != nullptr, "loop found");
+        const uint64_t got = constantTripCount(loop, unit->getASTContext());
+        if (got != c.want)
+            std::cerr << "    trip count for [" << c.code << "] got " << got
+                      << " want " << c.want << "\n";
+        check(got == c.want, "trip count matches what the source states");
+    }
+}
+
 int main() {
+    testPerfReportParsing();
+    testConstantTripCounts();
     testSimplePOD();
     testPaddedStruct();
     testCacheLineSpanning();

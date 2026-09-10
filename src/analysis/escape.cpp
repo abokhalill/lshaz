@@ -493,7 +493,6 @@ bool EscapeAnalysis::isFieldMutable(const clang::FieldDecl *FD) const {
     if (FD->isMutable())
         return true;
 
-    // Non-const qualified type.
     if (!FD->getType().isConstQualified())
         return true;
 

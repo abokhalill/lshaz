@@ -34,18 +34,14 @@ struct ThreadRoleSummary {
     // and the read are routinely compiled apart.
     std::map<std::string, std::set<std::string>> fieldReaders;
 
-    // How the field is touched, not merely by whom. Counts are per-TU
-    // partials and are summed in reduce; every threshold applies to the
-    // total, because a per-TU verdict on how often a field is written would
-    // depend on which shard happened to compile the writer.
+    // How a field is touched, not just by whom. Per-TU partials that sum in
+    // reduce, so thresholds land on the program total instead of on whatever
+    // one shard happened to compile.
     //
-    // standing versus handed is the distinction that makes a single-field
-    // contention rule possible at all. A write reaching a fixed object by
-    // name is shared state every thread addresses directly; a write to
-    // whatever the caller passed in moves with the object and contends with
-    // nothing. Writer counts cannot separate them, and the per-TU view
-    // cannot either: one TU seeing one writer has no way to know whether the
-    // other TU's writer reaches the same instance.
+    // Standing versus handed is what makes single-field contention detectable
+    // at all: `g_stats.hits++` names a fixed object every thread shares,
+    // `io->len = n` writes whatever the caller passed in and contends with
+    // nothing. Writer counts can't tell them apart.
     struct FieldAccessFacts {
         unsigned writeSites = 0;
         unsigned loopWriteSites = 0;
@@ -67,57 +63,42 @@ struct ThreadRoleSummary {
         bool empty() const {
             return writeSites == 0 && readSites == 0;
         }
-        // A fixed object the program names, rather than one handed in. Ties
-        // go to handed: an even split is a type used both ways, and calling
-        // that standing would fire on every per-request struct.
+        // Ties go to handed. An even split is a type used both ways, and
+        // calling that standing fires on every per-request struct there is.
         bool standing() const {
             return standingWriteSites > handedWriteSites;
         }
 
-        // The same question asked of the reads, which is a strictly weaker
-        // answer and a necessary one. A field can be written only through a
-        // parameter and read only through a global: redis stores user::flags
-        // as u->flags from a setter and loads it as DefaultUser->flags on
-        // every command. The writer and those readers touch one object, and
-        // the write side alone cannot tell you that.
-        //
-        // Weaker because a parameter that is sometimes the singleton and
-        // sometimes not is indistinguishable here, so a rule leaning on this
-        // reports the conjunct unestablished rather than proven.
+        // Same question, asked of the reads, because sometimes only the reads
+        // know. redis writes user::flags as u->flags from a setter and reads
+        // it as DefaultUser->flags on every command; the write side has no
+        // idea those touch one object.
         bool standingReads() const {
             return standingReadSites > handedReadSites;
         }
 
-        // Whether any read at all reaches a fixed object.
-        //
-        // Presence, not majority, because the mechanism is not a vote. One
-        // load of DefaultUser->flags on the command path costs a transfer
-        // per store however many other sites read a user handed in as a
-        // parameter, and those other sites do not make this one cheaper.
-        // Majority still decides how strong the evidence is, so a field that
-        // is mostly handed reports the conjunct unestablished and cannot
-        // carry the top grade on it.
+        // Presence, not majority. One load of DefaultUser->flags on the
+        // command path costs a transfer per store no matter how many other
+        // sites read some user handed in as a parameter. Majority still sets
+        // how much we trust it, above.
         bool anyStandingRead() const { return standingReadSites > 0; }
     };
     std::map<std::string, FieldAccessFacts> fieldAccess;
 
-    // Same key, the source locations of the stores as basename:line. The
-    // only join key to a hardware profile that survives inlining.
+    // Store locations as basename:line. The only join key to a hardware
+    // profile that survives inlining, since the symbol does not.
     std::map<std::string, std::set<std::string>> fieldWriteSites;
 
-    // Loop nesting at each call site, and each function's own maximum loop
-    // depth. Hotness inference is loop-depth-weighted, so the reduce phase
-    // needs both to rerun the per-TU relaxation over the merged graph rather
-    // than degrading every cross-TU callee to the weakest grade.
+    // Loop nesting per call site and per function. Hotness relaxation weighs
+    // depth, and reduce reruns it over the merged graph rather than demoting
+    // every cross-TU callee to the weakest grade.
     std::map<std::string, std::map<std::string, unsigned>> edgeLoopDepth;
     std::map<std::string, unsigned> ownLoopDepth;
 
-    // Executions of a call site per entry to its caller, milli-units, using
-    // the source's own trip counts where it states them. Strictly finer than
-    // edgeLoopDepth, which resolves the same quantity into four values and
-    // is kept because hotness relaxation grades on nesting rather than on
-    // rate. Sparse: an edge outside every loop is absent, which is most of
-    // them.
+    // The same quantity in milli, using the trip counts the source states.
+    // Finer than edgeLoopDepth, which buckets it into four values; both stay
+    // because hotness grades on nesting and cost grades on rate. Sparse: an
+    // edge outside every loop just isn't here.
     std::map<std::string, std::map<std::string, Milli>> edgeFrequency;
     std::map<std::string, Milli> ownFrequency;
 
@@ -345,20 +326,17 @@ struct ThreadRoleVerdicts {
         return mask;
     }
 
-    // Union of roles over the attributed members, ignoring the rest.
+    // Roles over the members we did attribute, ignoring the rest.
     //
-    // rolesOf answers "can this set be proven disjoint from another", and
-    // there one unattributed member has to poison the answer. "Does this set
-    // reach more than one role" is the opposite question: an unattributed
-    // member can only add a role, never remove one, so the attributed subset
-    // is a sound lower bound and refusing to answer from it discards
-    // evidence rather than being careful with it.
+    // Use this for "does this set reach two roles", never for disjointness.
+    // An unattributed member can only add a role, so the attributed subset is
+    // a sound lower bound; rolesOf has to bail on it because proving two sets
+    // disjoint needs all of both.
     //
-    // The difference is not academic. A field read from a hundred functions
-    // has essentially no chance of every one being attributed, so the strict
-    // form reports ROLE_NONE for exactly the widely-shared fields a
-    // contention rule exists to find. server.unixtime, the largest measured
-    // contended line in redis, failed on this and on nothing else.
+    // A field read from a hundred functions will never have all hundred
+    // attributed, so the strict form answers ROLE_NONE for exactly the
+    // widely-shared fields we care about. server.unixtime, redis's most
+    // contended line, failed on this and nothing else.
     uint8_t knownRolesOf(const std::set<std::string> &fns) const {
         uint8_t mask = ROLE_NONE;
         for (const auto &f : fns)
