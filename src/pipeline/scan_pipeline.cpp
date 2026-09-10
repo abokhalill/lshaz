@@ -1952,6 +1952,7 @@ static unsigned emitAggregationSweepFindings(
         const MachineModel &machine,
         const CostCalibration &calib,
         const std::string &workloadName,
+        const WorkloadModel &workload,
         uint64_t lineBytes) {
     // Below this the sweep touches a couple of lines and no call rate
     // makes that matter.
@@ -2070,6 +2071,19 @@ static unsigned emitAggregationSweepFindings(
             est.add("sweep_rate", sweepRate, rateKnown,
                     rateKnown ? "call graph"
                               : "unmeasured, taken as once per op");
+            // A deployment with one sharer sweeps its own lines and nothing
+            // is ever held elsewhere, so there is nothing to downgrade.
+            // Same correction as the shared-line expression: a sweep on a
+            // deployment where nothing else holds the lines downgrades
+            // nobody.
+            if (workload.sharersKnown())
+                est.add("sharers",
+                        toMilli(workload.sharers > 1 ? 1 : 0), true,
+                        workload.sharers > 1
+                            ? "workload_sharers shows the lines are held "
+                              "elsewhere"
+                            : "workload_sharers is 1: no line is held "
+                              "elsewhere");
             est.add("transactions",
                     toMilli(static_cast<int64_t>(2 * sweptLines)), true,
                     "two per line swept: Shared on the read, Exclusive on the "
@@ -2186,7 +2200,8 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
                                      const RateModel &rates,
                                      const MachineModel &machine,
                                      const CostCalibration &calib,
-                                     const std::string &workloadName) {
+                                     const std::string &workloadName,
+                                     const WorkloadModel &workload) {
     CostEstimate est;
 
     const bool wKnown = rates.anyKnown(writers);
@@ -2201,9 +2216,24 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     // thread-entry count is how many bodies exist, not how many run at once
     // on this object, and using it charged redis sixteen sharers for a line
     // two roles touch. Disjoint writer and reader roles prove two.
-    est.add("sharers", toMilli(disjointRoles ? 2 : 4), disjointRoles,
-            disjointRoles ? "writer and reader roles are disjoint"
-                          : "not established, taken as 4");
+    // Configured beats inferred. One sharer means no line is ever held
+    // elsewhere and the whole expression is zero, which is the right answer
+    // and one no amount of source reading reaches.
+    // Cores that pay, which is one fewer than the cores that touch: the
+    // store's own core does not invalidate itself. A single-sharer
+    // deployment therefore prices to zero, which is what redis with
+    // io-threads 1 measured, and what the previous form got wrong by
+    // charging it one full transfer per store.
+    const auto payers = [](int64_t touching) {
+        return toMilli(touching > 1 ? touching - 1 : 0);
+    };
+    if (workload.sharersKnown())
+        est.add("sharers", payers(workload.sharers), true,
+                "workload_sharers minus the storing core");
+    else
+        est.add("sharers", payers(disjointRoles ? 2 : 4), disjointRoles,
+                disjointRoles ? "writer and reader roles are disjoint"
+                              : "not established, taken as 4");
 
     Milli ratio = kMilli;
     if (wRate > 0 && rRate < wRate)
@@ -2299,7 +2329,7 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                                               (wr & rr) == 0;
                         d.cost = estimateLineCost(W, R, disjoint, rates,
                                                   machine, calib,
-                                                  workloadName);
+                                                  workloadName, workload);
                     }
                 }
             }
@@ -2368,6 +2398,7 @@ static unsigned emitCrossTUSharedLineFindings(
         const MachineModel &machine,
         const CostCalibration &calib,
         const std::string &workloadName,
+        const WorkloadModel &workload,
         uint64_t lineBytes) {
     if (lineBytes == 0)
         return 0;
@@ -2575,7 +2606,7 @@ static unsigned emitCrossTUSharedLineFindings(
             if (hits[0].writerSet && hits[0].otherSet)
                 est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
                                        disjointRoles, rates, machine, calib,
-                                       workloadName);
+                                       workloadName, workload);
             for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
@@ -2635,7 +2666,7 @@ static unsigned emitCrossTUSharedLineFindings(
         if (hits[0].writerSet && hits[0].otherSet)
             d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
                                       disjointRoles, rates, machine, calib,
-                                      workloadName);
+                                      workloadName, workload);
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
         if (disjointRoles)
             d.escalations.push_back(
@@ -4155,6 +4186,7 @@ ScanResult ScanPipeline::run(
     const MachineModel *machine = &machineStorage;
     WorkloadModel workload;
     workload.cyclesPerOp = request.config.workloadCyclesPerOp;
+    workload.sharers = request.config.workloadSharers;
     const std::string workloadName = request.config.workloadName.empty()
                                          ? std::string("unspecified")
                                          : request.config.workloadName;
@@ -4197,7 +4229,8 @@ ScanResult ScanPipeline::run(
                " per-thread striped array finding(s)");
     unsigned sweepEmitted = emitAggregationSweepFindings(
         result.diagnostics, result.stripedArrays, result.threadRoles, rates,
-        *machine, costCalib, workloadName, request.config.cacheLineBytes);
+        *machine, costCalib, workloadName, workload,
+        request.config.cacheLineBytes);
     if (sweepEmitted > 0)
         report("aggregation_sweeps", std::to_string(sweepEmitted) +
                " aggregation sweep finding(s)");
@@ -4216,7 +4249,7 @@ ScanResult ScanPipeline::run(
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
         result.threadRoles, globalHot, rates, *machine, costCalib,
-        workloadName, request.config.cacheLineBytes);
+        workloadName, workload, request.config.cacheLineBytes);
     if (crossLine > 0)
         report("shared_lines", std::to_string(crossLine) +
                " cross-TU read/write line-sharing finding(s)");

@@ -124,7 +124,17 @@ struct MachineModel {
 // figure from elsewhere.
 struct WorkloadModel {
     uint32_t cyclesPerOp = 0;
+
+    // Cores that actually touch shared state under this deployment. Source
+    // cannot know it: redis with io-threads 1 produced exactly zero HITM in
+    // a fifteen second window while the analyzer, seeing the same code,
+    // still predicted a cost. A runtime setting can remove the mechanism
+    // outright and nothing in the AST says so. Zero means unconfigured, and
+    // the sharer term stays a stand-in.
+    uint32_t sharers = 0;
+
     bool known() const { return cyclesPerOp != 0; }
+    bool sharersKnown() const { return sharers != 0; }
 };
 
 // Severity a cost supports, as a share of the workload's own per-operation

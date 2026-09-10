@@ -120,6 +120,11 @@ struct Config {
     // residual learned on one shape is not applied to another.
     std::string workloadName;
 
+    // Cores touching shared state under this deployment. A runtime setting,
+    // not a property of the source: io-threads 1 has one and measured zero
+    // coherence traffic where the analyzer predicted some.
+    unsigned workloadSharers = 0;
+
     // Observations of predicted against measured cost. Each one corrects the
     // mechanism rather than the finding it came from, so a measurement taken
     // on one target improves every scan that composes the same terms.
