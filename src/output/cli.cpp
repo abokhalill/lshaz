@@ -25,11 +25,7 @@ std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostic
            << " [" << evidenceTierName(d.evidenceTier) << "]\n";
 
         if (!d.cost.empty()) {
-            // Integer arithmetic, not a stream of a double: under a European
-            // locale that prints a comma.
-            const int64_t whole = d.cost.cyclesPerOp / kMilli;
-            const int64_t frac = (d.cost.cyclesPerOp % kMilli) / 100;
-            os << "  Cost: ~" << whole << "." << frac
+            os << "  Cost: ~" << milliToText(d.cost.cyclesPerOp)
                << " cycles per operation"
                << (d.cost.complete ? "" : " (upper bound, some terms estimated)")
                << "\n";

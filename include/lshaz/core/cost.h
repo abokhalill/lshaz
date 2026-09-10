@@ -37,6 +37,20 @@ constexpr Milli milliMul(Milli a, Milli b) {
     return static_cast<Milli>(r);
 }
 
+// Fixed point rendered by hand rather than streamed as a double, because
+// under a European locale a stream prints a comma and the output contract
+// says a dot. Three copies of this had already appeared; the fourth caller
+// is what made it a function.
+inline std::string milliToText(Milli v) {
+    const bool neg = v < 0;
+    const int64_t a = neg ? -v : v;
+    std::string out = (neg ? "-" : "") + std::to_string(a / kMilli) + ".";
+    const int64_t frac = a % kMilli;
+    if (frac < 100) out += "0";
+    if (frac < 10) out += "0";
+    return out + std::to_string(frac);
+}
+
 // A named factor in a finding's cost, with where it came from and whether
 // it is a measurement or a stand-in. An unestablished term still
 // participates in the product, because an optimistic bound that lands below
@@ -50,6 +64,12 @@ struct CostTerm {
 };
 
 struct CostEstimate {
+    // Which hardware effect the product is an estimate of. Measurement comes
+    // back keyed by this, so a residual learned from a contended field is
+    // never applied to a sequential sweep. Without it on the finding the
+    // key exists only inside the pipeline and no external measurement can
+    // name what it corrected.
+    std::string mechanism;
     std::vector<CostTerm> terms;
     Milli cyclesPerOp = 0;
     // Every term came from a measurement or a structural fact. False means

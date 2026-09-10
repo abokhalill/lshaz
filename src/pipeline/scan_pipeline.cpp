@@ -1944,6 +1944,26 @@ static unsigned emitStripedArrayFindings(
 // Measured second on redis under load, 64 of 1198 HITM.
 static constexpr const char *kSweepMechanism = "coherence_sweep";
 
+// Which call sites the estimate was built from, in a form a profile can be
+// joined against. The number is a claim about these functions specifically,
+// so a measurement naming none of them has not tested it, and one naming a
+// different set measured something else. Sets are ordered, so the rendering
+// is too.
+static void recordCostSites(Diagnostic &d,
+                            const std::set<std::string> &writers,
+                            const std::set<std::string> &readers) {
+    const auto join = [](const std::set<std::string> &s) {
+        std::string out;
+        for (const auto &n : s) {
+            if (!out.empty()) out += ',';
+            out += n;
+        }
+        return out;
+    };
+    if (!writers.empty()) d.structuralEvidence["cost_writers"] = join(writers);
+    if (!readers.empty()) d.structuralEvidence["cost_readers"] = join(readers);
+}
+
 static unsigned emitAggregationSweepFindings(
         std::vector<Diagnostic> &diagnostics,
         const StripedArraySummary &striped,
@@ -2065,6 +2085,7 @@ static unsigned emitAggregationSweepFindings(
         // must not be learned from the other.
         {
             CostEstimate est;
+            est.mechanism = kSweepMechanism;
             const bool rateKnown = rates.anyKnown(s.aggregators);
             const Milli sweepRate =
                 rateKnown ? rates.maxRateOf(s.aggregators) : kMilli;
@@ -2112,6 +2133,7 @@ static unsigned emitAggregationSweepFindings(
             }
             est.settle();
             d.cost = est;
+            recordCostSites(d, {}, s.aggregators);
         }
 
         diagnostics.push_back(std::move(d));
@@ -2203,6 +2225,7 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
                                      const std::string &workloadName,
                                      const WorkloadModel &workload) {
     CostEstimate est;
+    est.mechanism = kCoherenceMechanism;
 
     const bool wKnown = rates.anyKnown(writers);
     const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
@@ -2272,15 +2295,6 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     return est;
 }
 
-static std::string milliText(Milli v) {
-    const bool neg = v < 0;
-    const int64_t a = neg ? -v : v;
-    std::string out = (neg ? "-" : "") + std::to_string(a / kMilli) + ".";
-    const int64_t frac = a % kMilli;
-    if (frac < 100) out += "0";
-    if (frac < 10) out += "0";
-    return out + std::to_string(frac);
-}
 
 // The estimate enters the ledger as a gating claim, which is where a
 // conjunct belongs. It can retire a finding the structure graded Critical,
@@ -2330,6 +2344,7 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                         d.cost = estimateLineCost(W, R, disjoint, rates,
                                                   machine, calib,
                                                   workloadName, workload);
+                        recordCostSites(d, W, R);
                     }
                 }
             }
@@ -2343,7 +2358,7 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         if (!workload.known()) {
             ++graded;
             d.escalations.push_back(
-                "estimated cost " + milliText(d.cost.cyclesPerOp) +
+                "estimated cost " + milliToText(d.cost.cyclesPerOp) +
                 " cycles per operation, ungraded: set workload_cycles_per_op "
                 "to read it as a share of the target's own work");
             continue;
@@ -2362,8 +2377,12 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         // it is implausible, and do not let it carry a grade.
         if (workload.known() &&
             d.cost.cyclesPerOp > toMilli(workload.cyclesPerOp)) {
+            // Marked structurally as well as in prose, so a measurement
+            // ingest can refuse to learn a residual from a number the model
+            // has already disowned without parsing an escalation string.
+            d.structuralEvidence["cost_implausible"] = "yes";
             d.escalations.push_back(
-                "estimated cost " + milliText(d.cost.cyclesPerOp) +
+                "estimated cost " + milliToText(d.cost.cyclesPerOp) +
                 " cycles per operation exceeds the whole " +
                 std::to_string(workload.cyclesPerOp) +
                 " cycle budget, so a term is wrong: reported, not graded");
@@ -2379,11 +2398,11 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         std::string terms;
         for (const auto &t : d.cost.terms) {
             if (!terms.empty()) terms += " x ";
-            terms += t.name + "=" + milliText(t.value);
+            terms += t.name + "=" + milliToText(t.value);
             if (!t.established) terms += "?";
         }
         d.escalations.push_back(
-            "estimated cost " + milliText(d.cost.cyclesPerOp) +
+            "estimated cost " + milliToText(d.cost.cyclesPerOp) +
             " cycles per operation" +
             (workload.known()
                  ? " against a " + std::to_string(workload.cyclesPerOp) +
@@ -2625,8 +2644,10 @@ static unsigned emitCrossTUSharedLineFindings(
             for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
-                if (d->cost.empty() && !est.empty())
+                if (d->cost.empty() && !est.empty()) {
                     d->cost = est;
+                    recordCostSites(*d, *hits[0].writerSet, *hits[0].otherSet);
+                }
             }
             continue;
         }
@@ -2678,10 +2699,12 @@ static unsigned emitCrossTUSharedLineFindings(
             {"cross_tu_line_sharing", "true"},
             {"atomics", sig.hasAtomics ? "yes" : "no"},
         };
-        if (hits[0].writerSet && hits[0].otherSet)
+        if (hits[0].writerSet && hits[0].otherSet) {
             d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
                                       disjointRoles, rates, machine, calib,
                                       workloadName, workload);
+            recordCostSites(d, *hits[0].writerSet, *hits[0].otherSet);
+        }
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
         if (disjointRoles)
             d.escalations.push_back(

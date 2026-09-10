@@ -8,23 +8,6 @@
 namespace lshaz {
 
 namespace {
-// Milli to decimal by integer arithmetic. Streaming a double runs through
-// LC_NUMERIC and prints a comma under a European locale, which is not JSON
-// and which no consumer would parse.
-std::string milliToText(Milli v) {
-    const bool neg = v < 0;
-    const int64_t a = neg ? -v : v;
-    std::string out = (neg ? "-" : "") + std::to_string(a / 1000) + ".";
-    const int64_t frac = a % 1000;
-    if (frac < 100) out += "0";
-    if (frac < 10) out += "0";
-    out += std::to_string(frac);
-    return out;
-}
-} // namespace
-
-
-namespace {
 
 std::string escape(const std::string &s) {
     std::string out;
@@ -118,7 +101,8 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
         // product because a number nobody can decompose is a verdict again.
         os << ",\n      \"cost\": {\"cyclesPerOp\": "
            << milliToText(d.cost.cyclesPerOp)
-           << ", \"complete\": " << (d.cost.complete ? "true" : "false")
+           << ", \"mechanism\": \"" << escape(d.cost.mechanism)
+           << "\", \"complete\": " << (d.cost.complete ? "true" : "false")
            << ", \"terms\": [";
         for (size_t j = 0; j < d.cost.terms.size(); ++j) {
             const auto &t = d.cost.terms[j];
