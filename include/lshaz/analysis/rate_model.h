@@ -46,15 +46,22 @@ struct RateModel {
         for (const auto &f : fns) best = std::max(best, rateOf(f));
         return best;
     }
-    // Reached without passing through a single loop, so as far as the merged
-    // call graph can see it runs once per program. Startup code sits here.
-    // A rule whose mechanism needs an effect to recur asks about this, not
-    // about how many times the effect appears in the source: one store in an
-    // event loop is one site and runs forever.
-    static constexpr Milli kOnceRate = 1;
+    // Functions the merged call graph reaches through at least one loop, so
+    // they run more than once per program entry. Startup code is absent.
+    //
+    // Deliberately not derived from perOp. That is normalised against the
+    // busiest function so it can be read as a share of an operation, and a
+    // function six decades below the peak floors to the minimum whatever its
+    // structure. Recurrence is a structural yes or no and must not depend on
+    // what else the program happens to contain: a store in an event loop
+    // recurs whether or not some unrelated startup routine sweeps a million
+    // element array.
+    std::set<std::string> repeated;
 
     bool recurrent(const std::set<std::string> &fns) const {
-        return maxRateOf(fns) > kOnceRate;
+        for (const auto &f : fns)
+            if (repeated.count(f)) return true;
+        return false;
     }
 
     bool anyKnown(const std::set<std::string> &fns) const {

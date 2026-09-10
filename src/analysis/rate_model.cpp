@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/rate_model.h"
+#include "lshaz/analysis/loop_shape.h"
 
 #include <fnmatch.h>
 
@@ -9,17 +10,11 @@ namespace lshaz {
 
 namespace {
 
-// Executions attributed to one loop level with no known trip count. The
-// Ball and Larus backedge heuristic puts a loop backedge at about 88%
-// taken, which is roughly eight iterations; ten is the same order and
-// rounder. Being wrong here scales every rate by the same factor, and every
-// term the cost model consumes is a ratio, so a uniform error cancels.
-constexpr Milli kLoopTrips = 10;
-
-// Nesting past this contributes nothing a bounded model can defend, and
-// without a clamp a five-deep loop nest multiplies a rate by 100,000 and
-// makes every other function round to zero.
-constexpr unsigned kMaxLoopDepth = 3;
+// Ceiling on an accumulated frequency. A chain of loops whose bounds the
+// source all states reaches numbers no downstream term can use, and the
+// normaliser would divide every other function to zero against it. Six
+// decades is more range than the cost ladder resolves.
+constexpr Milli kFreqCeiling = toMilli(1000000);
 
 // Enough rounds for the deepest call chain in the corpora, and a hard stop
 // so a recursive cycle settles at a bounded number rather than running to
@@ -34,11 +29,13 @@ bool matchesAny(const std::string &name,
     return false;
 }
 
-Milli rateForDepth(unsigned depth) {
+// Nesting depth read as a frequency, for edges reported by a producer that
+// did not carry one.
+Milli frequencyForDepth(unsigned depth) {
     Milli m = kMilli;
-    for (unsigned i = 0; i < std::min(depth, kMaxLoopDepth); ++i)
-        m = milliMul(m, toMilli(kLoopTrips));
-    return m;
+    for (unsigned i = 0; i < depth && m < kFreqCeiling; ++i)
+        m = milliMul(m, toMilli(static_cast<int64_t>(kDefaultTripCount)));
+    return m > kFreqCeiling ? kFreqCeiling : m;
 }
 
 } // namespace
@@ -62,34 +59,58 @@ RateModel computeRateModel(const ThreadRoleSummary &facts,
     if (seeds.empty())
         return rm;
 
-    // Accumulated loop nesting, not a per-edge multiplier. Multiplying at
-    // every edge compounds along the chain: a twelve-deep path through
-    // loops reaches 10^36, the normaliser divides by that, and every other
-    // function in the program rounds to zero. Capping total depth instead
-    // bounds the range to four buckets, which is the resolution loop depth
-    // actually supports. Claiming more would be invented precision.
-    std::map<std::string, unsigned> depth;
+    // Executions per program entry, propagated as a product of per-edge
+    // frequencies. Each edge carries the source's own trip count where the
+    // source states one, so a loop over sixteen elements contributes sixteen
+    // and a loop over a runtime bound contributes the default.
+    //
+    // The previous form accumulated nesting depth and capped it at three,
+    // giving four possible rates for the whole program. That is why a cost
+    // model built on it could not rank: 87 of redis's 161 single-field
+    // findings priced identically while the machine measured twenty to one
+    // between the top contended line and the next. Depth is still merged for
+    // hotness, which grades on nesting rather than on rate.
+    //
+    // Saturating at kFreqCeiling. Multiplying at every edge otherwise
+    // compounds along a deep chain until the normaliser crushes everything
+    // else to zero against it, which is the failure the depth cap was
+    // avoiding by giving up the resolution entirely.
+    std::map<std::string, Milli> freq;
     for (const auto &s2 : seeds)
-        depth[s2] = 0;
+        freq[s2] = kMilli;
 
     for (int round = 0; round < kRounds; ++round) {
         bool changed = false;
         for (const auto &[caller, callees] : facts.callEdges) {
-            auto cit = depth.find(caller);
-            if (cit == depth.end())
+            auto cit = freq.find(caller);
+            if (cit == freq.end())
                 continue;
+            auto edges = facts.edgeFrequency.find(caller);
             auto depths = facts.edgeLoopDepth.find(caller);
             for (const auto &callee : callees) {
-                unsigned edge = 0;
-                if (depths != facts.edgeLoopDepth.end()) {
-                    auto d = depths->second.find(callee);
-                    if (d != depths->second.end()) edge = d->second;
+                Milli edge = kMilli;
+                bool haveEdge = false;
+                if (edges != facts.edgeFrequency.end()) {
+                    auto f = edges->second.find(callee);
+                    if (f != edges->second.end()) {
+                        edge = f->second;
+                        haveEdge = true;
+                    }
                 }
-                const unsigned reached =
-                    std::min(cit->second + edge, kMaxLoopDepth);
-                auto it = depth.find(callee);
-                if (it == depth.end() || reached > it->second) {
-                    depth[callee] = reached;
+                // A shard built before edge frequencies existed, or an edge
+                // whose caller was compiled by one, still reports depth. Fall
+                // back rather than silently rating those call sites as though
+                // they sat outside every loop.
+                if (!haveEdge && depths != facts.edgeLoopDepth.end()) {
+                    auto d = depths->second.find(callee);
+                    if (d != depths->second.end())
+                        edge = frequencyForDepth(d->second);
+                }
+                Milli reached = milliMul(cit->second, edge);
+                if (reached > kFreqCeiling) reached = kFreqCeiling;
+                auto it = freq.find(callee);
+                if (it == freq.end() || reached > it->second) {
+                    freq[callee] = reached;
                     changed = true;
                 }
             }
@@ -99,16 +120,37 @@ RateModel computeRateModel(const ThreadRoleSummary &facts,
     }
 
     // A function's own loops make it busy even when nothing calls it in one.
+    for (const auto &[fn, own] : facts.ownFrequency) {
+        auto it = freq.find(fn);
+        if (it == freq.end()) continue;
+        Milli scaled = milliMul(it->second, own);
+        it->second = scaled > kFreqCeiling ? kFreqCeiling : scaled;
+    }
     for (const auto &[fn, own] : facts.ownLoopDepth) {
-        auto it = depth.find(fn);
-        if (it != depth.end())
-            it->second = std::min(it->second + own, kMaxLoopDepth);
+        if (facts.ownFrequency.count(fn)) continue;
+        auto it = freq.find(fn);
+        if (it == freq.end()) continue;
+        Milli scaled = milliMul(it->second, frequencyForDepth(own));
+        it->second = scaled > kFreqCeiling ? kFreqCeiling : scaled;
     }
 
-    const Milli peak = rateForDepth(kMaxLoopDepth);
-    for (const auto &[fn, d] : depth)
-        rm.perOp[fn] = static_cast<Milli>(
-            (static_cast<__int128>(rateForDepth(d)) * kMilli) / peak);
+    Milli peak = 0;
+    for (const auto &[fn, f] : freq)
+        peak = std::max(peak, f);
+    if (peak <= 0)
+        return rm;
+
+    // Normalised so the busiest function runs about once per operation, with
+    // a floor of one milli. Three decades of range, and below that the cost
+    // ladder dismisses anyway, so the floor costs nothing and keeps a rarely
+    // reached function distinguishable from one the model never rated.
+    for (const auto &[fn, f] : freq) {
+        Milli r = static_cast<Milli>(
+            (static_cast<__int128>(f) * kMilli) / peak);
+        rm.perOp[fn] = r < 1 ? 1 : r;
+        if (f > kMilli)
+            rm.repeated.insert(fn);
+    }
 
     return rm;
 }

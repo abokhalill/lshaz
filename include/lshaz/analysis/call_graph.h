@@ -79,7 +79,12 @@ private:
     // (caller, callee) -> max loop depth over that pair's call sites.
     std::map<std::pair<const clang::FunctionDecl *,
                        const clang::FunctionDecl *>, unsigned> edgeLoopDepth_;
+    // Same pairs, executions per entry to the caller in milli-units, using
+    // the source's own trip counts where it states them.
+    std::map<std::pair<const clang::FunctionDecl *,
+                       const clang::FunctionDecl *>, Milli> edgeFrequency_;
     std::unordered_map<const clang::FunctionDecl *, unsigned> ownLoopDepth_;
+    std::unordered_map<const clang::FunctionDecl *, Milli> ownFrequency_;
     std::unordered_set<const clang::FunctionDecl *> poolEntryDecls_;
     std::unordered_set<const clang::FunctionDecl *> poolReachable_;
 

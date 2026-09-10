@@ -70,6 +70,11 @@ struct CostEstimate {
     // key exists only inside the pipeline and no external measurement can
     // name what it corrected.
     std::string mechanism;
+
+    // The specific line this estimate is of, in a form measurement can key
+    // back to. Empty when the finding does not identify one.
+    std::string site;
+
     std::vector<CostTerm> terms;
     Milli cyclesPerOp = 0;
     // Every term came from a measurement or a structural fact. False means

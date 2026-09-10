@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -56,7 +57,7 @@ std::string basename(const std::string &p) {
 }
 
 struct CostedFinding {
-    std::string ruleID, file, mechanism, entity;
+    std::string ruleID, file, mechanism, entity, site;
     unsigned line = 0;
     Milli reported = 0;
 
@@ -120,6 +121,7 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
         CostedFinding f;
         if (auto s = d->getString("ruleID")) f.ruleID = s->str();
         if (auto s = cost->getString("mechanism")) f.mechanism = s->str();
+        if (auto s = cost->getString("site")) f.site = s->str();
         if (const auto *loc = d->getObject("location")) {
             if (auto s = loc->getString("file")) f.file = basename(s->str());
             if (auto n = loc->getInteger("line"))
@@ -178,6 +180,32 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
     return true;
 }
 
+// Symbols the machine actually executed, from `perf report --stdio`.
+//
+// Recall alone is a metric you can win by reporting everything, so it has to
+// come with the other half. The denominator for precision is not every
+// finding: a hazard on a path the workload never took is not a false
+// positive, it is untested. It is the findings whose code demonstrably ran
+// and whose predicted transfer did not happen.
+std::set<std::string> parseExecutedSymbols(const std::string &text) {
+    std::set<std::string> out;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        // The map marker separates the overhead columns from the symbol,
+        // and is present in every perf report layout that prints one.
+        const auto mark = line.find("[.]");
+        const auto pos = mark == std::string::npos ? line.find("[k]") : mark;
+        if (pos == std::string::npos) continue;
+        std::istringstream rest(line.substr(pos + 3));
+        std::string sym;
+        if (rest >> sym && !sym.empty())
+            out.insert(baseSymbol(sym));
+    }
+    return out;
+}
+
 void usage() {
     llvm::outs()
         << "Usage: lshaz observe --profile <c2c.txt> --findings <scan.json> "
@@ -201,6 +229,10 @@ void usage() {
            "a config\n"
         << "  --machine NAME       machine key, overriding the config\n"
         << "  --workload NAME      workload key, overriding the config\n"
+        << "  --executed PATH      `perf report --stdio` from the same "
+           "window, which\n"
+        << "                       turns recall into a pair by naming what "
+           "ran\n"
         << "  --store PATH         calibration store to read and write\n"
         << "  --write              append the observation (default: report "
            "only)\n"
@@ -210,7 +242,7 @@ void usage() {
 } // namespace
 
 int runObserveCommand(int argc, const char **argv) {
-    std::string profilePath, findingsPath, configPath, storePath;
+    std::string profilePath, findingsPath, configPath, storePath, executedPath;
     std::string machineName, workloadName;
     uint64_t ops = 0, hitmEvents = 0, samplePeriod = 0;
     unsigned top = 10;
@@ -229,6 +261,7 @@ int runObserveCommand(int argc, const char **argv) {
         else if (a == "--findings") findingsPath = next("--findings");
         else if (a == "--config") configPath = next("--config");
         else if (a == "--store") storePath = next("--store");
+        else if (a == "--executed") executedPath = next("--executed");
         else if (a == "--machine") machineName = next("--machine");
         else if (a == "--workload") workloadName = next("--workload");
         else if (a == "--ops") ops = std::strtoull(next("--ops"), nullptr, 10);
@@ -304,6 +337,12 @@ int runObserveCommand(int argc, const char **argv) {
     };
     std::vector<Unexplained> unexplained;
     uint64_t measuredSamples = 0, unattributed = 0;
+
+    // Lines whose code the machine ran and which produced no coherence
+    // traffic at all. A measurement of zero is a measurement, and recording
+    // it is how the loop that closed the ranking gap closes the precision
+    // gap: the next scan prices these at what they were observed to cost.
+    std::vector<const CostedFinding *> executedSilent;
 
     // Measured traffic per mechanism, counted once per line however many
     // findings claim it. Summing per finding instead would count one
@@ -509,6 +548,76 @@ int runObserveCommand(int argc, const char **argv) {
                  << "  " << (measuredSamples - unexplainedHitm) << " of "
                  << measuredSamples << " attributed HITM samples\n";
 
+    // The other half. Recall is a metric you can win by reporting
+    // everything, so on its own it flatters whoever built it.
+    if (!executedPath.empty()) {
+        auto execBuf = llvm::MemoryBuffer::getFile(executedPath);
+        if (!execBuf) {
+            llvm::errs() << "lshaz: error: cannot read " << executedPath
+                         << ": " << execBuf.getError().message() << "\n";
+            return 3;
+        }
+        const auto executed =
+            parseExecutedSymbols(execBuf.get()->getBuffer().str());
+        if (executed.empty()) {
+            llvm::errs() << "lshaz: error: no symbols in " << executedPath
+                         << "; expected `perf report --stdio` output\n";
+            return 3;
+        }
+
+        unsigned ran = 0, confirmed = 0;
+        executedSilent.clear();
+        std::vector<const CostedFinding *> silent;
+        for (const auto &f : findings) {
+            bool executedHere = false;
+            for (const auto &s : f.writers)
+                if (executed.count(s)) { executedHere = true; break; }
+            for (const auto &s : f.readers) {
+                if (executedHere) break;
+                if (executed.count(s)) executedHere = true;
+            }
+            if (!executedHere) continue;
+            ++ran;
+            if (f.hitmSamples) {
+                ++confirmed;
+            } else {
+                silent.push_back(&f);
+                if (!f.site.empty() && !f.implausible && f.base > 0)
+                    executedSilent.push_back(&f);
+            }
+        }
+
+        llvm::outs() << "\nCoherence precision on " << machineName << "/"
+                     << workloadName << ": "
+                     << (ran ? confirmed * 100 / ran : 0)
+                     << "% of findings whose code ran showed measured "
+                        "traffic\n"
+                     << "  " << confirmed << " of " << ran
+                     << " costed findings, from " << executed.size()
+                     << " executed symbol(s)\n"
+                     << "  " << (findings.size() - ran)
+                     << " finding(s) excluded: their code did not run in this "
+                        "window, so the\n  workload did not test them and a "
+                        "silent line proves nothing about them\n";
+
+        if (!silent.empty()) {
+            llvm::outs() << "\nRan and stayed silent, which is what a false "
+                            "positive looks like ("
+                         << silent.size() << "):\n";
+            std::sort(silent.begin(), silent.end(),
+                      [](const CostedFinding *a, const CostedFinding *b) {
+                          if (a->reported != b->reported)
+                              return a->reported > b->reported;
+                          return a->entity < b->entity;
+                      });
+            for (unsigned i = 0; i < silent.size() && i < top; ++i)
+                llvm::outs() << "  " << silent[i]->ruleID << "  "
+                             << silent[i]->entity << "  predicted "
+                             << milliToText(silent[i]->reported)
+                             << " cycles/op\n";
+        }
+    }
+
     if (!unexplained.empty()) {
         llvm::outs() << "\nMeasured, unexplained by any finding ("
                      << unexplained.size() << " lines, " << unexplainedHitm
@@ -588,6 +697,62 @@ int runObserveCommand(int argc, const char **argv) {
         o.measured = measured;
         store.observe(o);
     }
+
+    // One row per measured line as well as one per mechanism, and this is
+    // the half that ranks. The static model prices two lines identically
+    // whenever both are stored somewhere on the command path, and it is
+    // right to: reads do not multiply transfers, so the difference between
+    // them is how often each is actually stored per operation, which no
+    // amount of source reading resolves. The machine resolves it, and a
+    // sited row is how the next scan keeps the answer.
+    unsigned sited = 0;
+    const uint64_t total = prof.totalHitmSamples();
+    for (const auto &f : findings) {
+        if (!f.hitmSamples || f.implausible || f.base <= 0 ||
+            f.mechanism.empty() || f.site.empty() || !total)
+            continue;
+        const unsigned latency = static_cast<unsigned>(
+            (f.cycleWeight + f.hitmSamples / 2) / f.hitmSamples);
+        const unsigned marginal = latency > l1Cycles ? latency - l1Cycles : 0;
+        CostObservation o;
+        o.mechanism = f.mechanism;
+        o.machine = machineName;
+        o.workload = workloadName;
+        o.site = f.site;
+        o.predicted = f.base;
+        o.measured = static_cast<Milli>(
+            (static_cast<__int128>(f.hitmSamples) * scaleNum * marginal *
+             kMilli) /
+            (static_cast<__int128>(total) * ops));
+        store.observe(o);
+        if (sited++ < top)
+            llvm::outs() << "  " << f.site << " on " << machineName << "/"
+                         << workloadName << ": predicted "
+                         << milliToText(f.base) << ", measured "
+                         << milliToText(o.measured) << " cycles/op from "
+                         << f.hitmSamples << " sample(s)\n";
+    }
+    // Zero is a measurement. Without these the store only ever learns about
+    // lines that turned out to cost something, so every scan repeats the
+    // same false positives at the same grade however many times the machine
+    // has shown them silent.
+    unsigned zeroed = 0;
+    for (const auto *f : executedSilent) {
+        CostObservation o;
+        o.mechanism = f->mechanism;
+        o.machine = machineName;
+        o.workload = workloadName;
+        o.site = f->site;
+        o.predicted = f->base;
+        o.measured = 0;
+        store.observe(o);
+        ++zeroed;
+    }
+    if (sited || zeroed)
+        llvm::outs() << "  " << sited << " line(s) measured individually and "
+                     << zeroed
+                     << " observed silent while running, which is what ranks "
+                        "them\n";
 
     if (!write) {
         llvm::outs() << "\nNot written. Rerun with --write to store, which "

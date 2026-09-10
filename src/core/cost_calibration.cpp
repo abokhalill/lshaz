@@ -15,7 +15,11 @@ namespace {
 // shell script on a rented box, and anything it can produce with printf is
 // one less thing to get wrong at three in the morning.
 //
-//   mechanism \t machine \t workload \t predicted_milli \t measured_milli
+//   mechanism \t machine \t workload \t predicted_milli \t measured_milli [\t site]
+//
+// The site column is optional and trailing, so a store written before sites
+// existed still reads, and a row without one is a measurement of the
+// mechanism rather than of a line.
 bool parseLine(const std::string &line, CostObservation &out) {
     std::istringstream is(line);
     std::string pred, meas;
@@ -23,7 +27,8 @@ bool parseLine(const std::string &line, CostObservation &out) {
     if (!std::getline(is, out.machine, '\t')) return false;
     if (!std::getline(is, out.workload, '\t')) return false;
     if (!std::getline(is, pred, '\t')) return false;
-    if (!std::getline(is, meas)) return false;
+    if (!std::getline(is, meas, '\t')) return false;
+    std::getline(is, out.site);
     try {
         out.predicted = std::stoll(pred);
         out.measured = std::stoll(meas);
@@ -67,9 +72,9 @@ bool CostCalibration::load(const std::string &path, std::string &err) {
     // corrections. The scan's output must not depend on append order.
     std::sort(obs_.begin(), obs_.end(),
               [](const CostObservation &a, const CostObservation &b) {
-                  return std::tie(a.mechanism, a.machine, a.workload,
+                  return std::tie(a.mechanism, a.machine, a.workload, a.site,
                                   a.predicted, a.measured) <
-                         std::tie(b.mechanism, b.machine, b.workload,
+                         std::tie(b.mechanism, b.machine, b.workload, b.site,
                                   b.predicted, b.measured);
               });
     return true;
@@ -83,10 +88,12 @@ bool CostCalibration::save(const std::string &path, std::string &err) const {
             err = "cannot write " + tmp;
             return false;
         }
-        out << "# mechanism\tmachine\tworkload\tpredicted_milli\tmeasured_milli\n";
+        out << "# mechanism\tmachine\tworkload\tpredicted_milli"
+               "\tmeasured_milli\tsite\n";
         for (const auto &o : obs_)
             out << o.mechanism << '\t' << o.machine << '\t' << o.workload
-                << '\t' << o.predicted << '\t' << o.measured << '\n';
+                << '\t' << o.predicted << '\t' << o.measured << '\t'
+                << o.site << '\n';
         if (!out) {
             err = "write failed for " + tmp;
             return false;
@@ -104,19 +111,38 @@ void CostCalibration::observe(const CostObservation &o) { obs_.push_back(o); }
 std::optional<CostCalibration::Factor>
 CostCalibration::factorFor(const std::string &mechanism,
                            const std::string &machine,
-                           const std::string &workload) const {
+                           const std::string &workload,
+                           const std::string &site) const {
+    const auto gather = [&](bool wantSite) {
+        std::vector<Milli> out;
+        for (const auto &o : obs_) {
+            if (o.mechanism != mechanism || o.machine != machine ||
+                o.workload != workload || o.predicted <= 0)
+                continue;
+            if (wantSite ? o.site != site : !o.site.empty())
+                continue;
+            out.push_back(static_cast<Milli>(
+                (static_cast<__int128>(o.measured) * kMilli) / o.predicted));
+        }
+        return out;
+    };
+
+    // This line's own measurements first. Falling back to the mechanism's
+    // median is what every unmeasured line gets, and mixing the two would
+    // pull a measured site back toward the average of lines that are not it.
+    bool sited = false;
     std::vector<Milli> ratios;
-    for (const auto &o : obs_) {
-        if (o.mechanism != mechanism || o.machine != machine ||
-            o.workload != workload || o.predicted <= 0)
-            continue;
-        ratios.push_back(static_cast<Milli>(
-            (static_cast<__int128>(o.measured) * kMilli) / o.predicted));
+    if (!site.empty()) {
+        ratios = gather(/*wantSite=*/true);
+        sited = !ratios.empty();
     }
+    if (ratios.empty())
+        ratios = gather(/*wantSite=*/false);
     if (ratios.empty())
         return std::nullopt;
     std::sort(ratios.begin(), ratios.end());
     Factor f;
+    f.sited = sited;
     f.samples = static_cast<unsigned>(ratios.size());
     const size_t mid = ratios.size() / 2;
     // Even counts average the two central values, which keeps the result an

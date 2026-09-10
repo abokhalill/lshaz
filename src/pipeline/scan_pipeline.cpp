@@ -1351,9 +1351,13 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
                                      const MachineModel &machine,
                                      const CostCalibration &calib,
                                      const std::string &workloadName,
-                                     const WorkloadModel &workload) {
+                                     const WorkloadModel &workload,
+                                     const std::string &site = {},
+                                     const char *mechanism =
+                                         kCoherenceMechanism) {
     CostEstimate est;
-    est.mechanism = kCoherenceMechanism;
+    est.mechanism = mechanism;
+    est.site = site;
 
     const bool wKnown = rates.anyKnown(writers);
     const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
@@ -1422,16 +1426,23 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
             machine.hasOverlap() ? machine.name
                                  : "unmeasured, taken as fully exposed");
 
-    // What measurement has said about this mechanism on this machine under
-    // this workload. Absent means nobody has checked, and no term is added:
-    // a neutral factor of one that looked established would claim the model
-    // had been verified here when it has not.
-    if (auto f = calib.factorFor(kCoherenceMechanism, machine.name,
-                                 workloadName)) {
+    // What measurement has said, about this line if anything has measured
+    // it and about the mechanism otherwise. Absent means nobody has checked,
+    // and no term is added: a neutral factor of one that looked established
+    // would claim the model had been verified here when it has not.
+    //
+    // A sited factor is the only thing that ranks two lines the static model
+    // prices identically, and it prices them identically for a sound reason:
+    // coherence cost is stores per operation times the cores holding the
+    // line, reads do not multiply it, and how often a line is actually
+    // stored per operation is a property of the run.
+    if (auto f = calib.factorFor(est.mechanism, machine.name,
+                                 workloadName, site)) {
         const bool trusted = f->samples >= CostCalibration::kTrustedSamples;
         est.add("calibration", f->value, trusted,
                 std::to_string(f->samples) + " observation(s) on " +
                     machine.name + "/" + workloadName +
+                    (f->sited ? " of " + site : " of this mechanism") +
                     (trusted ? "" : ", below the trusted sample count"));
     }
 
@@ -1514,9 +1525,9 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                         const uint8_t wr = roles.rolesOf(W), rr = roles.rolesOf(R);
                         const bool disjoint = wr != ROLE_NONE &&
                                               rr != ROLE_NONE && (wr & rr) == 0;
-                        CostEstimate est =
-                            estimateLineCost(W, R, disjoint, rates, machine,
-                                             calib, workloadName, workload);
+                        CostEstimate est = estimateLineCost(
+                            W, R, disjoint, rates, machine, calib,
+                            workloadName, workload, flip ? b : a);
                         if (best.empty() ||
                             est.cyclesPerOp > best.cyclesPerOp) {
                             best = std::move(est);
@@ -1637,6 +1648,7 @@ struct TrueSharingGates {
     unsigned notBothSides = 0;
     unsigned writesUnobservable = 0;
     unsigned handedNotStanding = 0;
+    unsigned perRequestObject = 0;
     unsigned writeDoesNotRecur = 0;
     unsigned everyReaderAlsoWrites = 0;
     unsigned oneRoleOnly = 0;
@@ -1651,6 +1663,8 @@ struct TrueSharingGates {
                std::to_string(writesUnobservable) +
                " writes not fully visible, " +
                std::to_string(handedNotStanding) + " handed not standing, " +
+               std::to_string(perRequestObject) +
+               " reached through a pointer to a per-request object, " +
                std::to_string(writeDoesNotRecur) + " write does not recur, " +
                std::to_string(everyReaderAlsoWrites) +
                " every reader also writes, " + std::to_string(oneRoleOnly) +
@@ -1662,6 +1676,7 @@ static unsigned emitTrueSharingFindings(
         std::vector<Diagnostic> &diagnostics,
         const ContentionGraph &graph,
         const EscapeSummary &escape,
+        const ThreadRoleSummary &facts,
         const ThreadRoleVerdicts &roles,
         const std::map<std::string, HotnessSource> &globalHot,
         const RateModel &rates,
@@ -1689,6 +1704,13 @@ static unsigned emitTrueSharingFindings(
             continue;
         }
 
+        // Whether the program mints one of these per unit of work.
+        bool freshlyAllocatedPerOp = false;
+        if (auto a = facts.allocatorsOfType.find(node.owner);
+            a != facts.allocatorsOfType.end())
+            for (const auto &fn : a->second)
+                if (globalHot.count(fn)) { freshlyAllocatedPerOp = true; break; }
+
         for (const auto &r : node.residents) {
             if (!r.written() || !r.read()) {
                 ++gates.notBothSides;
@@ -1714,6 +1736,15 @@ static unsigned emitTrueSharingFindings(
             // claim rather than silently treated as equal.
             const bool standingWrites = r.access.standing();
             const bool oneObject = standingWrites || r.access.standingReads();
+            // Freshness of the object was tried here as a gate and
+            // measurement refused it. The reasoning was that a type
+            // allocated on the hot path is per-request, so reads through a
+            // pointer to it concentrate on nothing; on redis that dropped
+            // client::flags, which the machine measured at 874 samples, the
+            // largest contended line in the run. A per-request object handed
+            // between two threads is contended precisely on the fields they
+            // hand it over with. The freshness signal survives as evidence
+            // below, not as a gate.
             if (!standingWrites && !r.access.anyStandingRead()) {
                 ++gates.handedNotStanding;
                 continue;
@@ -1722,7 +1753,29 @@ static unsigned emitTrueSharingFindings(
             // state after the first read and costs nothing further. A store
             // inside a loop says so directly; otherwise the writing
             // function's rate on the merged call graph does.
+            //
+            // Reachable through some loop is far too weak a test in an
+            // event-driven program, where essentially every function is
+            // reached through the event loop. Measurement made that
+            // concrete: at 17% precision the silent findings were
+            // redisServer::verbosity, ::dbnum, ::hz, ::repl_state and a
+            // dozen slowlog and peak-memory counters, every one a field
+            // written at startup or on a rare path and read often. A line
+            // whose writer runs once per ten thousand operations carries no
+            // sustained traffic however many cores read it, because after
+            // the first read it sits in Shared state and stays there.
             const bool loopWrite = r.loopWritten();
+            bool writerHot = false;
+            for (const auto &fn : r.writers)
+                if (globalHot.count(fn)) { writerHot = true; break; }
+            // Requiring the writer to be hot as well was tried here and
+            // measured: precision went 17% to 12% and back to 17% while the
+            // canary stopped firing, because the hotness verdict carries its
+            // own depth and spreading thresholds and FL006 inherited them.
+            // Structure proposes, the cost model grades, and measurement
+            // retires. A third gate in front of all of that only decides
+            // which findings never reach the grade that would have dismissed
+            // them anyway. Hotness stays as a claim below.
             if (!loopWrite && !rates.recurrent(r.writers)) {
                 ++gates.writeDoesNotRecur;
                 continue;
@@ -1823,6 +1876,10 @@ static unsigned emitTrueSharingFindings(
                 {"the writer and the readers reach one object",
                  standingWrites
                      ? "the stores reach a fixed object the program names"
+                     : freshlyAllocatedPerOp
+                         ? "the loads reach it through a global name, but the "
+                           "program allocates one of these per unit of work, "
+                           "so that name denotes a different object each time"
                      : oneObject
                          ? "the loads mostly reach a fixed object the program "
                            "names, while the stores arrive through a "
@@ -1830,27 +1887,27 @@ static unsigned emitTrueSharingFindings(
                          : "some loads reach a fixed object the program "
                            "names, but most of the accesses on both sides "
                            "arrive through a parameter",
-                 standingWrites, Severity::High},
+                 standingWrites || (oneObject && !freshlyAllocatedPerOp),
+                 Severity::High},
                 {"the reading cores are not the storing core",
                  disjoint ? "writer and reader thread roles are provably "
                             "disjoint"
                           : "readers span more than one thread role",
                  disjoint || spansRoles, Severity::High},
                 {"the invalidation recurs rather than settling",
-                 loopWrite ? "stores issued from inside a loop"
-                           : "the storing function is reached through a loop "
-                             "on the merged call graph",
-                 loopWrite, Severity::Critical},
+                 writerHot ? "a storing function confirmed hot on the merged "
+                             "call graph"
+                           : "stores issued from inside a loop",
+                 writerHot, Severity::Critical},
                 {"the readers run often enough to pay it",
                  "a reading function confirmed hot on the merged call graph",
                  readerHot, Severity::Critical},
             };
 
-            CostEstimate est = estimateLineCost(r.writers, pureReaders,
-                                                disjoint, rates, machine,
-                                                calib, workloadName, workload);
-            est.mechanism = kTrueSharingMechanism;
-            d.cost = std::move(est);
+            d.cost = estimateLineCost(
+                r.writers, pureReaders, disjoint, rates, machine, calib,
+                workloadName, workload, node.owner + "::" + r.field,
+                kTrueSharingMechanism);
             recordCostSites(d, r.writers, pureReaders);
 
             diagnostics.push_back(std::move(d));
@@ -3734,8 +3791,8 @@ ScanResult ScanPipeline::run(
     TrueSharingGates tsGates;
     emitTrueSharingFindings(
         result.diagnostics, contention, result.escapeSummary,
-        result.threadRoles, globalHot, rates, *machine, costCalib,
-        workloadName, workload, tsGates);
+        result.threadRoleFacts, result.threadRoles, globalHot, rates,
+        *machine, costCalib, workloadName, workload, tsGates);
     // Reported whether or not anything fired, which is the point.
     report("true_sharing", tsGates.summary());
 

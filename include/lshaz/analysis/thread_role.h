@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "lshaz/core/cost.h"
+
 #include <cstdint>
 #include <map>
 #include <set>
@@ -109,6 +111,15 @@ struct ThreadRoleSummary {
     // than degrading every cross-TU callee to the weakest grade.
     std::map<std::string, std::map<std::string, unsigned>> edgeLoopDepth;
     std::map<std::string, unsigned> ownLoopDepth;
+
+    // Executions of a call site per entry to its caller, milli-units, using
+    // the source's own trip counts where it states them. Strictly finer than
+    // edgeLoopDepth, which resolves the same quantity into four values and
+    // is kept because hotness relaxation grades on nesting rather than on
+    // rate. Sparse: an edge outside every loop is absent, which is most of
+    // them.
+    std::map<std::string, std::map<std::string, Milli>> edgeFrequency;
+    std::map<std::string, Milli> ownFrequency;
 
     // Functions that allocate, and functions that free, a block of a given
     // pointee type. The join key is the type name because it is the only
@@ -228,6 +239,17 @@ struct ThreadRoleSummary {
         for (const auto &[fn, d] : other.ownLoopDepth) {
             auto &cur = ownLoopDepth[fn];
             if (d > cur) cur = d;
+        }
+        for (const auto &[caller, edges] : other.edgeFrequency) {
+            auto &dst = edgeFrequency[caller];
+            for (const auto &[callee, f] : edges) {
+                auto &cur = dst[callee];
+                if (f > cur) cur = f;
+            }
+        }
+        for (const auto &[fn, f] : other.ownFrequency) {
+            auto &cur = ownFrequency[fn];
+            if (f > cur) cur = f;
         }
         for (const auto &[ty, fns] : other.allocatorsOfType)
             allocatorsOfType[ty].insert(fns.begin(), fns.end());

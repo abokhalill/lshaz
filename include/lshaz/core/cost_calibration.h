@@ -40,6 +40,26 @@ struct CostObservation {
     std::string mechanism;
     std::string machine;
     std::string workload;
+
+    // Which line was measured, when the measurement was of one line rather
+    // than of the mechanism across a program. Empty means the whole
+    // mechanism.
+    //
+    // This is what lets measurement rank what source cannot. Coherence cost
+    // is stores per operation times the cores that hold the line, and reads
+    // do not multiply it: a core that reads a line fifty times after one
+    // invalidation takes one transfer and forty-nine hits. So two fields
+    // both stored once on the command path cost the same as far as any
+    // static model can tell, and the model is right to say so. The machine
+    // measured 372 samples on one and 3 on another, and the difference is
+    // how often each is actually stored per operation, which is a property
+    // of the run and not of the source.
+    //
+    // The static model proposes the candidate set. Measurement ranks it.
+    // Recording the ranking here is what makes the second scan better than
+    // the first instead of identical to it.
+    std::string site;
+
     Milli predicted = 0;
     Milli measured = 0;
 };
@@ -63,13 +83,19 @@ public:
     // Nothing matching returns nothing, rather than a factor of one. A
     // neutral term that looks established would claim the model had been
     // checked here when it has not.
+    // A site's own observations when it has any, and the mechanism's
+    // otherwise. Site beats mechanism because it is the same mechanism
+    // measured on the exact line being priced, which is strictly more
+    // specific evidence; the caller learns which it got from `sited`.
     struct Factor {
         Milli value = kMilli;
         unsigned samples = 0;
+        bool sited = false;
     };
     std::optional<Factor> factorFor(const std::string &mechanism,
                                     const std::string &machine,
-                                    const std::string &workload) const;
+                                    const std::string &workload,
+                                    const std::string &site = {}) const;
 
     size_t size() const { return obs_.size(); }
     const std::vector<CostObservation> &observations() const { return obs_; }

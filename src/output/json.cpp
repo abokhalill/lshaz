@@ -102,6 +102,7 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
         os << ",\n      \"cost\": {\"cyclesPerOp\": "
            << milliToText(d.cost.cyclesPerOp)
            << ", \"mechanism\": \"" << escape(d.cost.mechanism)
+           << "\", \"site\": \"" << escape(d.cost.site)
            << "\", \"complete\": " << (d.cost.complete ? "true" : "false")
            << ", \"terms\": [";
         for (size_t j = 0; j < d.cost.terms.size(); ++j) {

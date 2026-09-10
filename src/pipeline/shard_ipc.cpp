@@ -277,12 +277,38 @@ std::string serializeShardResult(int exitCode,
             firstCaller = false;
         }
     }
+    buf += "},\"edgeFreq\":{";
+    {
+        bool firstCaller = true;
+        for (const auto &[caller, edges] : threadRoles.edgeFrequency) {
+            if (edges.empty()) continue;
+            if (!firstCaller) buf += ',';
+            buf += '"'; buf += esc(caller); buf += "\":{";
+            bool firstEdge = true;
+            for (const auto &[callee, f] : edges) {
+                if (!firstEdge) buf += ',';
+                buf += '"'; buf += esc(callee); buf += "\":" + std::to_string(f);
+                firstEdge = false;
+            }
+            buf += '}';
+            firstCaller = false;
+        }
+    }
     buf += "},\"ownDepth\":{";
     {
         bool first = true;
         for (const auto &[fn, d] : threadRoles.ownLoopDepth) {
             if (!first) buf += ',';
             buf += '"'; buf += esc(fn); buf += "\":" + std::to_string(d);
+            first = false;
+        }
+    }
+    buf += "},\"ownFreq\":{";
+    {
+        bool first = true;
+        for (const auto &[fn, f] : threadRoles.ownFrequency) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":" + std::to_string(f);
             first = false;
         }
     }
@@ -825,6 +851,50 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                                 static_cast<unsigned>(ipc::parseNum(json, i));
                             ipc::expect(json, i, ',');
                         }
+                        ipc::expect(json, i, ',');
+                    }
+                } else if (tk == "edgeFreq") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string caller = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        auto &dst = out.threadRoles.edgeFrequency[caller];
+                        ipc::expect(json, i, '{');
+                        while (true) {
+                            ipc::skipWS(json, i);
+                            if (i >= json.size() || json[i] == '}') {
+                                if (i < json.size()) ++i;
+                                break;
+                            }
+                            std::string callee = ipc::parseStr(json, i);
+                            ipc::expect(json, i, ':');
+                            const Milli f =
+                                static_cast<Milli>(ipc::parseNum(json, i));
+                            auto &cur = dst[callee];
+                            if (f > cur) cur = f;
+                            ipc::expect(json, i, ',');
+                        }
+                        ipc::expect(json, i, ',');
+                    }
+                } else if (tk == "ownFreq") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string fn = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        const Milli f =
+                            static_cast<Milli>(ipc::parseNum(json, i));
+                        auto &cur = out.threadRoles.ownFrequency[fn];
+                        if (f > cur) cur = f;
                         ipc::expect(json, i, ',');
                     }
                 } else if (tk == "ownDepth") {

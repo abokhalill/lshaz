@@ -2,6 +2,7 @@
 #include "lshaz/analysis/call_graph.h"
 #include "lshaz/analysis/loop_shape.h"
 #include "lshaz/analysis/symbols.h"
+#include "lshaz/core/cost.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Expr.h>
@@ -93,6 +94,24 @@ public:
     // this is the structural signal hotness is derived from.
     std::unordered_map<const clang::FunctionDecl *, unsigned> calleeLoopDepth;
     unsigned loopDepth = 0;
+
+    // How many times a call site runs per entry to this function, in milli.
+    //
+    // Nesting depth answers this in four values. The source usually states
+    // it: sixteen iterations is sixteen, and the depth model calls that the
+    // same as a loop over a runtime bound. Carrying the product instead is
+    // what lets a cost model rank two findings that both sit one loop deep.
+    //
+    // Saturating, because a nest whose bounds are all constant reaches
+    // numbers no downstream term can use and the normaliser would crush
+    // everything else to zero against it.
+    static constexpr Milli kFreqCeiling = toMilli(1000000);
+    std::unordered_map<const clang::FunctionDecl *, Milli> calleeFrequency;
+    Milli frequency = kMilli;
+    // Busiest point anywhere in this body, call site or not. A leaf that
+    // sweeps an array repeats on its own, and crediting only call sites
+    // rates it as though it ran once.
+    Milli ownFrequency = kMilli;
     // Deepest loop nesting anywhere in this body, call or not. A leaf that
     // sweeps an array repeats on its own; crediting only call sites scored
     // it zero, which is backwards.
@@ -105,7 +124,22 @@ public:
         const unsigned step = (ctx && isDegenerateLoop(N, *ctx)) ? 0u : 1u;
         loopDepth += step;
         if (loopDepth > ownLoopDepth) ownLoopDepth = loopDepth;
+
+        // The source's own trip count where it states one, and the default
+        // where it does not. Being wrong about the default scales a whole
+        // subtree by one factor and every term the cost model consumes is a
+        // ratio, so a uniform error cancels; being wrong by treating a
+        // sixteen-iteration loop as a thousand-iteration one does not.
+        const Milli saved = frequency;
+        if (step) {
+            uint64_t trips = ctx ? constantTripCount(N, *ctx) : 0;
+            if (trips == 0) trips = kDefaultTripCount;
+            frequency = milliMul(frequency, toMilli(static_cast<int64_t>(trips)));
+            if (frequency > kFreqCeiling) frequency = kFreqCeiling;
+            if (frequency > ownFrequency) ownFrequency = frequency;
+        }
         bool r = (this->*base)(N);
+        frequency = saved;
         loopDepth -= step;
         return r;
     }
@@ -139,6 +173,8 @@ public:
         callees.insert(callee);
         auto &d = calleeLoopDepth[callee];
         d = std::max(d, loopDepth);
+        auto &f = calleeFrequency[callee];
+        f = std::max(f, frequency);
     }
 
     bool TraverseLambdaExpr(clang::LambdaExpr *LE) {
@@ -297,6 +333,7 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
     visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 
     ownLoopDepth_[canon] = visitor.ownLoopDepth;
+    ownFrequency_[canon] = visitor.ownFrequency;
 
     auto &targets = calleeMap_[canon];
     for (const auto *callee : visitor.callees) {
@@ -305,6 +342,9 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         auto it = visitor.calleeLoopDepth.find(callee);
         if (it != visitor.calleeLoopDepth.end())
             edgeLoopDepth_[{canon, callee}] = it->second;
+        auto fit = visitor.calleeFrequency.find(callee);
+        if (fit != visitor.calleeFrequency.end())
+            edgeFrequency_[{canon, callee}] = fit->second;
         ++edgeCount_;
     }
     for (const auto *entry : visitor.threadEntries)
@@ -376,6 +416,11 @@ void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
             // Sparse: zero is both the default on the read side and the
             // overwhelming majority of call sites. Materialising it would put
             // an IPC entry on every edge in the program.
+            auto fit = edgeFrequency_.find({caller, callee});
+            if (fit != edgeFrequency_.end() && fit->second > kMilli) {
+                auto &f = out.edgeFrequency[callerName][calleeName];
+                if (fit->second > f) f = fit->second;
+            }
             const unsigned d = callSiteLoopDepth(caller, callee);
             if (!d) continue;
             auto &cur = out.edgeLoopDepth[callerName][calleeName];
@@ -385,9 +430,15 @@ void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
     // Own loop depth travels for every node, not only callers: a leaf that
     // spins is still the body the grade sharpens on.
     for (const auto *fn : functions()) {
+        const std::string name = threadRoleNodeName(fn, ctx_);
+        auto fit = ownFrequency_.find(fn);
+        if (fit != ownFrequency_.end() && fit->second > kMilli) {
+            auto &f = out.ownFrequency[name];
+            if (fit->second > f) f = fit->second;
+        }
         const unsigned d = ownLoopDepth(fn);
         if (!d) continue;
-        auto &cur = out.ownLoopDepth[threadRoleNodeName(fn, ctx_)];
+        auto &cur = out.ownLoopDepth[name];
         if (d > cur) cur = d;
     }
 }
