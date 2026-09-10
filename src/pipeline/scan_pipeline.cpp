@@ -1942,10 +1942,16 @@ static unsigned emitStripedArrayFindings(
 // re-acquire on its next write. Padding cannot fix it and increases the line
 // count, so the correctly padded array FL003 skips is where this lives.
 // Measured second on redis under load, 64 of 1198 HITM.
+static constexpr const char *kSweepMechanism = "coherence_sweep";
+
 static unsigned emitAggregationSweepFindings(
         std::vector<Diagnostic> &diagnostics,
         const StripedArraySummary &striped,
         const ThreadRoleVerdicts &roles,
+        const RateModel &rates,
+        const MachineModel &machine,
+        const CostCalibration &calib,
+        const std::string &workloadName,
         uint64_t lineBytes) {
     // Below this the sweep touches a couple of lines and no call rate
     // makes that matter.
@@ -2049,6 +2055,50 @@ static unsigned emitAggregationSweepFindings(
             "that: the cost is the number of lines touched, which padding "
             "increases. If the sweep genuinely must be live, read it from "
             "one thread and publish the result.";
+
+        // Costed with the same machinery as a shared line, because it is the
+        // same event counted differently: the sweep's own rate against two
+        // transactions per line it touches. A distinct mechanism name keeps
+        // its residual separate, since a sweep's misses are sequential and
+        // prefetchable where a contended field's are not, and one correction
+        // must not be learned from the other.
+        {
+            CostEstimate est;
+            const bool rateKnown = rates.anyKnown(s.aggregators);
+            const Milli sweepRate =
+                rateKnown ? rates.maxRateOf(s.aggregators) : kMilli;
+            est.add("sweep_rate", sweepRate, rateKnown,
+                    rateKnown ? "call graph"
+                              : "unmeasured, taken as once per op");
+            est.add("transactions",
+                    toMilli(static_cast<int64_t>(2 * sweptLines)), true,
+                    "two per line swept: Shared on the read, Exclusive on the "
+                    "owner's next write");
+            est.add("hitm_cycles",
+                    toMilli(machine.cyclesHitmLocal ? machine.cyclesHitmLocal
+                                                    : 100),
+                    machine.hasCoherenceCost(),
+                    machine.hasCoherenceCost() ? machine.name
+                                               : "unmeasured, taken as 100");
+            const Milli exposed =
+                machine.hasOverlap()
+                    ? toMilli(100 - static_cast<int64_t>(machine.mlpOverlapPct)) / 100
+                    : kMilli;
+            est.add("exposed_share", exposed, machine.hasOverlap(),
+                    machine.hasOverlap() ? machine.name
+                                         : "unmeasured, taken as fully exposed");
+            if (auto f = calib.factorFor(kSweepMechanism, machine.name,
+                                         workloadName)) {
+                const bool trusted =
+                    f->samples >= CostCalibration::kTrustedSamples;
+                est.add("calibration", f->value, trusted,
+                        std::to_string(f->samples) + " observation(s) on " +
+                            machine.name + "/" + workloadName +
+                            (trusted ? "" : ", below the trusted sample count"));
+            }
+            est.settle();
+            d.cost = est;
+        }
 
         diagnostics.push_back(std::move(d));
         ++emitted;
@@ -4089,30 +4139,6 @@ ScanResult ScanPipeline::run(
     bool alignedOwnerAvailable = false;
     for (const auto &[tn, sig] : result.escapeSummary)
         if (sig.hasDeliberateLayout) { alignedOwnerAvailable = true; break; }
-    unsigned stripedEmitted = emitStripedArrayFindings(
-        result.diagnostics, result.stripedArrays, result.threadRoles,
-        request.config.cacheLineBytes, request.config.l1dSizeBytes,
-        alignedOwnerAvailable);
-    if (stripedEmitted > 0)
-        report("striped_arrays", std::to_string(stripedEmitted) +
-               " per-thread striped array finding(s)");
-    unsigned sweepEmitted = emitAggregationSweepFindings(
-        result.diagnostics, result.stripedArrays, result.threadRoles,
-        request.config.cacheLineBytes);
-    if (sweepEmitted > 0)
-        report("aggregation_sweeps", std::to_string(sweepEmitted) +
-               " aggregation sweep finding(s)");
-
-    if (unsigned r = settleStoreRepetition(result.diagnostics,
-                                           result.threadRoleFacts))
-        report("store_repetition", std::to_string(r / 1000) +
-               " redundant-store finding(s) dropped as single-shot, " +
-               std::to_string(r % 1000) + " confirmed repeating");
-
-    // Cost model inputs, entirely from configuration. Nothing about any
-    // specific part is compiled in, so a target with no measurements gets
-    // stand-in terms and says so, rather than inheriting numbers measured
-    // on hardware it has nothing to do with.
     MachineModel machineStorage;
     machineStorage.name = request.config.machineName.empty()
                               ? std::string("unspecified")
@@ -4161,6 +4187,31 @@ ScanResult ScanPipeline::run(
                     ? ""
                     : " (workload_cycles_per_op unset, so cost estimates "
                       "are reported but not graded)"));
+
+    unsigned stripedEmitted = emitStripedArrayFindings(
+        result.diagnostics, result.stripedArrays, result.threadRoles,
+        request.config.cacheLineBytes, request.config.l1dSizeBytes,
+        alignedOwnerAvailable);
+    if (stripedEmitted > 0)
+        report("striped_arrays", std::to_string(stripedEmitted) +
+               " per-thread striped array finding(s)");
+    unsigned sweepEmitted = emitAggregationSweepFindings(
+        result.diagnostics, result.stripedArrays, result.threadRoles, rates,
+        *machine, costCalib, workloadName, request.config.cacheLineBytes);
+    if (sweepEmitted > 0)
+        report("aggregation_sweeps", std::to_string(sweepEmitted) +
+               " aggregation sweep finding(s)");
+
+    if (unsigned r = settleStoreRepetition(result.diagnostics,
+                                           result.threadRoleFacts))
+        report("store_repetition", std::to_string(r / 1000) +
+               " redundant-store finding(s) dropped as single-shot, " +
+               std::to_string(r % 1000) + " confirmed repeating");
+
+    // Cost model inputs, entirely from configuration. Nothing about any
+    // specific part is compiled in, so a target with no measurements gets
+    // stand-in terms and says so, rather than inheriting numbers measured
+    // on hardware it has nothing to do with.
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
