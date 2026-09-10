@@ -402,6 +402,21 @@ std::string serializeShardResult(int exitCode,
     }
     buf += "]";
 
+    // Cost estimates are computed in the reduce phase and are not part of
+    // this protocol. A rule that sets one in the map phase would have it
+    // silently dropped here and kept on the sequential path, which is the
+    // jobs-dependent verdict this boundary exists to prevent. Fail rather
+    // than serialise half of it.
+    for (const auto &d : diagnostics) {
+        if (!d.cost.empty()) {
+            llvm::errs() << "lshaz: internal error: rule " << d.ruleID
+                         << " set a cost estimate in the map phase, which "
+                            "does not cross the shard boundary. Emit the "
+                            "terms from the reduce phase instead.\n";
+            std::abort();
+        }
+    }
+
     // Escape summary: {"typeName":{a:0/1,s:0/1,o:0/1,v:0/1,p:0/1,n:N},...}
     buf += ",\"escapeSummary\":{";
     {
@@ -2099,18 +2114,116 @@ static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
     return dropped * 1000u + settled;
 }
 
+// What a shared line costs per unit of the target's work.
+//
+//   transfers/op = write_rate * sharers * min(1, read_rate/write_rate)
+//   cycles/op    = transfers * hitm_cycles * (1 - overlap)
+//
+// The rate ratio stops this charging every store to every core: a store
+// only costs a sharer that reads before the next store lands. The overlap
+// term is why a coherence finding measures zero on a syscall-bound server,
+// where the miss hides behind work already in flight.
+//
+// Every unestablished term takes its cost-maximising value, never a middle
+// guess. That is what makes a low product a sound dismissal and a high one
+// merely unproven.
+static CostEstimate estimateLineCost(const std::set<std::string> &writers,
+                                     const std::set<std::string> &readers,
+                                     bool disjointRoles,
+                                     const RateModel &rates,
+                                     const MachineModel &machine) {
+    CostEstimate est;
+
+    const bool wKnown = rates.anyKnown(writers);
+    const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
+    est.add("write_rate", wRate, wKnown,
+            wKnown ? "call graph" : "unmeasured, taken as once per op");
+
+    const bool rKnown = rates.anyKnown(readers);
+    const Milli rRate = rKnown ? rates.maxRateOf(readers) : kMilli;
+
+    // Cores that can be holding the line. Source cannot count these: the
+    // thread-entry count is how many bodies exist, not how many run at once
+    // on this object, and using it charged redis sixteen sharers for a line
+    // two roles touch. Disjoint writer and reader roles prove two.
+    est.add("sharers", toMilli(disjointRoles ? 2 : 4), disjointRoles,
+            disjointRoles ? "writer and reader roles are disjoint"
+                          : "not established, taken as 4");
+
+    Milli ratio = kMilli;
+    if (wRate > 0 && rRate < wRate)
+        ratio = static_cast<Milli>(
+            (static_cast<__int128>(rRate) * kMilli) / wRate);
+    est.add("reads_per_store", ratio, wKnown && rKnown, "call graph");
+
+    est.add("hitm_cycles",
+            toMilli(machine.cyclesHitmLocal ? machine.cyclesHitmLocal : 100),
+            machine.hasCoherenceCost(),
+            machine.hasCoherenceCost() ? machine.name
+                                       : "unmeasured, taken as 100");
+
+    const Milli exposed =
+        machine.hasOverlap()
+            ? toMilli(100 - static_cast<int64_t>(machine.mlpOverlapPct)) / 100
+            : kMilli;
+    est.add("exposed_share", exposed, machine.hasOverlap(),
+            machine.hasOverlap() ? machine.name
+                                 : "unmeasured, taken as fully exposed");
+
+    est.settle();
+    return est;
+}
+
 // The estimate enters the ledger as a gating claim, which is where a
 // conjunct belongs. It can retire a finding the structure graded Critical,
 // because a cost built from cost-maximising stand-ins that still lands below
 // the threshold is a sound dismissal. It cannot promote one: an estimate
 // with any unmeasured term supports no more than the finding already had.
 static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
+                                 const ThreadRoleSummary &facts,
+                                 const ThreadRoleVerdicts &roles,
+                                 const RateModel &rates,
                                  const MachineModel &machine) {
     if (!machine.hasBudget())
         return 0;
     unsigned graded = 0;
     for (auto &d : diagnostics) {
-        if (d.suppressed || d.cost.empty())
+        if (d.suppressed)
+            continue;
+        // Every line-sharing finding gets costed, not only the ones the
+        // cross-TU join built. Wiring it to that join alone left the model
+        // touching one finding of 1580 on redis, which is a demonstration
+        // rather than a verdict. The pair the rule already flagged carries
+        // the field names, and the merged facts carry who touches them.
+        if (d.cost.empty() && (d.ruleID == "FL002" || d.ruleID == "FL041")) {
+            auto tn = d.structuralEvidence.find("type_name");
+            auto pf = d.structuralEvidence.find("pair_fields");
+            if (tn != d.structuralEvidence.end() &&
+                pf != d.structuralEvidence.end() && !pf->second.empty()) {
+                const std::string first = pf->second.substr(
+                    0, pf->second.find(';'));
+                const size_t bar = first.find('|');
+                if (bar != std::string::npos) {
+                    const std::string a = tn->second + "::" + first.substr(0, bar);
+                    const std::string b = tn->second + "::" + first.substr(bar + 1);
+                    static const std::set<std::string> kNone;
+                    auto wit = facts.fieldWriters.find(a);
+                    auto rit = facts.fieldReaders.find(b);
+                    auto w2 = facts.fieldWriters.find(b);
+                    const auto &W = wit != facts.fieldWriters.end() ? wit->second : kNone;
+                    const auto &R = rit != facts.fieldReaders.end()
+                                        ? rit->second
+                                        : (w2 != facts.fieldWriters.end() ? w2->second : kNone);
+                    if (!W.empty() && !R.empty()) {
+                        const uint8_t wr = roles.rolesOf(W), rr = roles.rolesOf(R);
+                        const bool disjoint = wr != ROLE_NONE && rr != ROLE_NONE &&
+                                              (wr & rr) == 0;
+                        d.cost = estimateLineCost(W, R, disjoint, rates, machine);
+                    }
+                }
+            }
+        }
+        if (d.cost.empty())
             continue;
         // Every unestablished term carries its cost-maximising value, so the
         // product is an upper bound whether or not the estimate is complete.
@@ -2161,77 +2274,6 @@ static unsigned emitCrossTUSharedLineFindings(
     if (lineBytes == 0)
         return 0;
 
-    // What a shared line costs per unit of the target's work.
-    //
-    //   transfers/op = write_rate * sharers * min(1, read_rate/write_rate)
-    //   cycles/op    = transfers * hitm_cost * (1 - overlap)
-    //
-    // The rate ratio is the term that stops this charging every store to
-    // every core: a store only costs a sharer that reads before the next
-    // store lands. The overlap term is the one that explains a coherence
-    // finding measuring zero on a syscall-bound server, where the miss is
-    // hidden behind work already in flight.
-    //
-    // An unestablished term takes its cost-maximising value, never a
-    // middle guess. That is what makes a low estimate a sound dismissal
-    // and a high one merely unproven, and it is why the estimate can
-    // retire a finding but never promote one on terms nobody measured.
-    auto estimateLineCost = [&](const std::set<std::string> &writers,
-                                const std::set<std::string> &readers) {
-        CostEstimate est;
-
-        const bool wKnown = rates.anyKnown(writers);
-        const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
-        est.add("write_rate", wRate, wKnown,
-                wKnown ? "call graph" : "unmeasured, taken as once per op");
-
-        const bool rKnown = rates.anyKnown(readers);
-        const Milli rRate = rKnown ? rates.maxRateOf(readers) : kMilli;
-
-        // Threads that could be holding the line. Bounded by the entries the
-        // program actually spawns, plus the main thread.
-        // Bounded by the entries the program actually spawns, plus main.
-        // With none recorded the count is a stand-in like the others, and
-        // like the others it takes a cost-maximising value rather than the
-        // 1 that would silently zero the whole expression.
-        const bool sharersKnown = !facts.threadEntries.empty();
-        const Milli sharers =
-            toMilli(static_cast<int64_t>(
-                sharersKnown ? std::min<size_t>(facts.threadEntries.size() + 1, 16)
-                             : 4));
-        est.add("sharers", sharers, sharersKnown,
-                sharersKnown ? "thread entries in the merged graph"
-                             : "none recorded, taken as 4");
-
-        // A sharer that reads less often than the writer stores pays on
-        // only some of those stores.
-        Milli ratio = kMilli;
-        if (wRate > 0 && rRate < wRate)
-            ratio = static_cast<Milli>(
-                (static_cast<__int128>(rRate) * kMilli) / wRate);
-        est.add("reads_per_store", ratio, wKnown && rKnown, "call graph");
-
-        est.add("hitm_cycles", toMilli(machine.cyclesHitmLocal
-                                           ? machine.cyclesHitmLocal
-                                           : 100),
-                machine.hasCoherenceCost(),
-                machine.hasCoherenceCost() ? machine.name
-                                           : "unmeasured, taken as 100");
-
-        // Exposed share of the miss. Unmeasured means none of it hides,
-        // which is the expensive assumption.
-        const Milli exposed =
-            machine.hasOverlap()
-                ? toMilli(100 - static_cast<int64_t>(machine.mlpOverlapPct)) /
-                      100
-                : kMilli;
-        est.add("exposed_share", exposed, machine.hasOverlap(),
-                machine.hasOverlap() ? machine.name
-                                     : "unmeasured, taken as fully exposed");
-
-        est.settle();
-        return est;
-    };
 
     // A type already reported takes the pair as added evidence. A second
     // finding would land on the same record location and be collapsed by
@@ -2433,7 +2475,8 @@ static unsigned emitCrossTUSharedLineFindings(
         if (existing != reported.end()) {
             CostEstimate est;
             if (hits[0].writerSet && hits[0].otherSet)
-                est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet);
+                est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
+                                       disjointRoles, rates, machine);
             for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
@@ -2491,7 +2534,8 @@ static unsigned emitCrossTUSharedLineFindings(
             {"atomics", sig.hasAtomics ? "yes" : "no"},
         };
         if (hits[0].writerSet && hits[0].otherSet)
-            d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet);
+            d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
+                                      disjointRoles, rates, machine);
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
         if (disjointRoles)
             d.escalations.push_back(
@@ -4046,7 +4090,9 @@ ScanResult ScanPipeline::run(
         report("shared_lines", std::to_string(crossLine) +
                " cross-TU read/write line-sharing finding(s)");
 
-    if (unsigned costGraded = applyCostVerdict(result.diagnostics, *machine))
+    if (unsigned costGraded = applyCostVerdict(
+            result.diagnostics, result.threadRoleFacts, result.threadRoles,
+            rates, *machine))
         report("cost_model", std::to_string(costGraded) +
                " finding(s) carry an estimated cycles-per-operation");
 

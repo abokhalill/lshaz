@@ -34,7 +34,7 @@ bool matchesAny(const std::string &name,
     return false;
 }
 
-Milli loopMultiplier(unsigned depth) {
+Milli rateForDepth(unsigned depth) {
     Milli m = kMilli;
     for (unsigned i = 0; i < std::min(depth, kMaxLoopDepth); ++i)
         m = milliMul(m, toMilli(kLoopTrips));
@@ -62,59 +62,54 @@ RateModel computeRateModel(const ThreadRoleSummary &facts,
     if (seeds.empty())
         return rm;
 
-    std::map<std::string, Milli> rate;
-    for (const auto &s : seeds)
-        rate[s] = kMilli;
+    // Accumulated loop nesting, not a per-edge multiplier. Multiplying at
+    // every edge compounds along the chain: a twelve-deep path through
+    // loops reaches 10^36, the normaliser divides by that, and every other
+    // function in the program rounds to zero. Capping total depth instead
+    // bounds the range to four buckets, which is the resolution loop depth
+    // actually supports. Claiming more would be invented precision.
+    std::map<std::string, unsigned> depth;
+    for (const auto &s2 : seeds)
+        depth[s2] = 0;
 
     for (int round = 0; round < kRounds; ++round) {
-        std::map<std::string, Milli> next = rate;
         bool changed = false;
         for (const auto &[caller, callees] : facts.callEdges) {
-            auto cit = rate.find(caller);
-            if (cit == rate.end() || cit->second == 0)
+            auto cit = depth.find(caller);
+            if (cit == depth.end())
                 continue;
             auto depths = facts.edgeLoopDepth.find(caller);
             for (const auto &callee : callees) {
-                unsigned depth = 0;
+                unsigned edge = 0;
                 if (depths != facts.edgeLoopDepth.end()) {
                     auto d = depths->second.find(callee);
-                    if (d != depths->second.end()) depth = d->second;
+                    if (d != depths->second.end()) edge = d->second;
                 }
-                const Milli contributed =
-                    milliMul(cit->second, loopMultiplier(depth));
-                // Max, not sum. Summing over callers double counts a helper
-                // called from twenty places at the same rate, and the term
-                // the cost model wants is how often this runs relative to
-                // the busiest thing in the program, not a total.
-                Milli &slot = next[callee];
-                if (contributed > slot) {
-                    slot = contributed;
+                const unsigned reached =
+                    std::min(cit->second + edge, kMaxLoopDepth);
+                auto it = depth.find(callee);
+                if (it == depth.end() || reached > it->second) {
+                    depth[callee] = reached;
                     changed = true;
                 }
             }
         }
-        rate.swap(next);
         if (!changed)
             break;
     }
 
-    // Normalise so the busiest function is 1.0. Every consumer wants a
-    // ratio, and an absolute count would need a workload the analyzer does
-    // not have.
-    Milli peak = 0;
-    for (const auto &[fn, r] : rate) {
-        (void)fn;
-        peak = std::max(peak, r);
+    // A function's own loops make it busy even when nothing calls it in one.
+    for (const auto &[fn, own] : facts.ownLoopDepth) {
+        auto it = depth.find(fn);
+        if (it != depth.end())
+            it->second = std::min(it->second + own, kMaxLoopDepth);
     }
-    if (peak <= 0)
-        return rm;
 
-    for (const auto &[fn, r] : rate) {
-        // Integer divide after scaling, so the result is exact and does not
-        // depend on evaluation order across shards.
+    const Milli peak = rateForDepth(kMaxLoopDepth);
+    for (const auto &[fn, d] : depth)
         rm.perOp[fn] = static_cast<Milli>(
-            (static_cast<__int128>(r) * kMilli) / peak);
-    }
+            (static_cast<__int128>(rateForDepth(d)) * kMilli) / peak);
+
     return rm;
 }
 
