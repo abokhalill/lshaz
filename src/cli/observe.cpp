@@ -242,7 +242,8 @@ void usage() {
 } // namespace
 
 int runObserveCommand(int argc, const char **argv) {
-    std::string profilePath, findingsPath, configPath, storePath, executedPath;
+    std::string profilePath, findingsPath, configPath, storePath, executedPath,
+        targetObject;
     std::string machineName, workloadName;
     uint64_t ops = 0, hitmEvents = 0, samplePeriod = 0;
     unsigned top = 10;
@@ -262,6 +263,7 @@ int runObserveCommand(int argc, const char **argv) {
         else if (a == "--config") configPath = next("--config");
         else if (a == "--store") storePath = next("--store");
         else if (a == "--executed") executedPath = next("--executed");
+        else if (a == "--object") targetObject = next("--object");
         else if (a == "--machine") machineName = next("--machine");
         else if (a == "--workload") workloadName = next("--workload");
         else if (a == "--ops") ops = std::strtoull(next("--ops"), nullptr, 10);
@@ -329,14 +331,42 @@ int runObserveCommand(int argc, const char **argv) {
         byName[f.file + ":" + std::to_string(f.line)].push_back(&f);
     }
 
+    // Which binary the analyzer was pointed at. Traffic inside a dependency
+    // is not a recall failure: a scan of valkey's sources cannot name a lock
+    // inside glibc, and counting it against the analyzer makes the metric a
+    // statement about how much of a program's coherence cost happens to live
+    // in libc rather than about the analyzer.
+    //
+    // On valkey one glibc line carried 1953 of 4120 sampled transfers, 47% of
+    // the whole run, and dragged measured recall from 91% to 43%.
+    //
+    // Inferred by how many distinct lines each object appears on rather than
+    // by sample count, so a single enormous line in a dependency cannot win
+    // the vote. Reported, and overridable, because an inference that decides
+    // a headline number has to be visible.
+    std::map<std::string, unsigned> objectLines;
+    for (const auto &line : prof.lines) {
+        std::set<std::string> here;
+        for (const auto &acc : line.accesses)
+            if (!acc.object.empty()) here.insert(acc.object);
+        for (const auto &o : here) ++objectLines[o];
+    }
+    std::string target = targetObject;
+    if (target.empty()) {
+        unsigned best = 0;
+        for (const auto &[obj, n] : objectLines)
+            if (n > best) { best = n; target = obj; }
+    }
+
     struct Unexplained {
         uint64_t address = 0;
         uint64_t hitm = 0;
         unsigned offsets = 0;
         std::string where;
+        bool inTarget = true;
     };
     std::vector<Unexplained> unexplained;
-    uint64_t measuredSamples = 0, unattributed = 0;
+    uint64_t measuredSamples = 0, unattributed = 0, dependencySamples = 0;
 
     // Lines whose code the machine ran and which produced no coherence
     // traffic at all. A measurement of zero is a measurement, and recording
@@ -374,11 +404,29 @@ int runObserveCommand(int argc, const char **argv) {
             if (!acc.hitmSamples) continue;
             lineHitm += acc.hitmSamples;
             lineCycleWeight += acc.hitmSamples * acc.hitmCycles;
-            measuredSamples += acc.hitmSamples;
             if (!worst || acc.hitmSamples > worst->hitmSamples) worst = &acc;
             if (acc.file.empty()) unattributed += acc.hitmSamples;
         }
         if (!lineHitm) continue;
+
+        // A line the analyzer was never shown. Counted and reported, never
+        // silently dropped: a target whose contention has moved into its
+        // allocator is a real result about the target.
+        const bool inTarget = !worst || worst->object.empty() ||
+                              target.empty() || worst->object == target;
+        if (!inTarget) {
+            dependencySamples += lineHitm;
+            Unexplained u;
+            u.address = line.address;
+            u.hitm = lineHitm;
+            u.offsets = line.contendedOffsets();
+            u.inTarget = false;
+            u.where = worst ? worst->symbol + " in " + worst->object
+                            : std::string("unresolved");
+            unexplained.push_back(std::move(u));
+            continue;
+        }
+        measuredSamples += lineHitm;
 
         std::set<CostedFinding *> candidates;
         for (const auto &n : names) {
@@ -531,7 +579,8 @@ int runObserveCommand(int argc, const char **argv) {
                   return a.address < b.address;
               });
     uint64_t unexplainedHitm = 0;
-    for (const auto &u : unexplained) unexplainedHitm += u.hitm;
+    for (const auto &u : unexplained)
+        if (u.inTarget) unexplainedHitm += u.hitm;
 
     // The number this whole path exists to produce. A static analyzer's
     // recall against the hardware, on a named machine under a named
@@ -543,8 +592,8 @@ int runObserveCommand(int argc, const char **argv) {
                          ? (measuredSamples - unexplainedHitm) * 100 /
                                measuredSamples
                          : 0)
-                 << "% of measured transfers landed on a line some finding "
-                    "claims\n"
+                 << "% of transfers measured in " + target +
+                        " landed on a line some finding claims\n"
                  << "  " << (measuredSamples - unexplainedHitm) << " of "
                  << measuredSamples << " attributed HITM samples\n";
 
@@ -617,6 +666,13 @@ int runObserveCommand(int argc, const char **argv) {
                              << " cycles/op\n";
         }
     }
+
+    if (dependencySamples)
+        llvm::outs() << "  " << dependencySamples
+                     << " further sample(s) landed outside " << target
+                     << " and are excluded: a scan of this source cannot "
+                        "name a line\n  inside a dependency, and charging it "
+                        "here would measure the dependency\n";
 
     if (!unexplained.empty()) {
         llvm::outs() << "\nMeasured, unexplained by any finding ("
