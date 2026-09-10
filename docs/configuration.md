@@ -432,11 +432,43 @@ lshaz observe --profile <c2c.txt> --findings <scan.json> [options]
 | `--ops <n>` | Operations the target completed in the profiled window |
 | `--hitm-events <n>` | Counted coherence transfers in the same window |
 | `--sample-period <n>` | The record's fixed sample period, if it used one |
+| `--executed <path>` | `perf report --stdio` from the same window, which turns recall into a pair |
+| `--object <name>` | The binary that was analyzed; inferred if absent |
 | `--config <path>` | Reads machine, workload and store path from a config |
 | `--machine <name>`, `--workload <name>` | Override the config's keys |
 | `--store <path>` | Calibration store to read and write |
 | `--write` | Append the observation. Default is report only. |
 | `--top <n>` | Unexplained lines to list (default 10) |
+
+### The two numbers
+
+**Recall** is the share of measured coherence transfers that landed on a line
+some finding claims. It is scoped to the analyzed object: a scan of one
+program's sources cannot name a line inside glibc, and counting that as a
+recall failure measures glibc. Dependency traffic is reported on its own line
+rather than dropped, because a target whose contention has moved into its
+allocator is a real result about the target.
+
+**Precision** needs `--executed` and is the share of findings whose code
+demonstrably ran that showed measured traffic. The denominator is not every
+finding: a hazard on a path the workload never took is untested, not wrong.
+Recall on its own is a metric you win by reporting more, so it is not
+reported alone.
+
+### What one round changes
+
+A measured line records its own residual, keyed by site, and the next scan
+prices it at what it was observed to cost. A line whose code ran and produced
+no traffic records a measured zero and is demoted. Both are necessary: without
+the first the model cannot rank, and without the second it repeats the same
+false positive at the same grade forever.
+
+The model cannot rank on its own, and the reason is not a resolution gap.
+Coherence cost is stores per operation times the cores holding the line, and
+reads do not multiply it: a core that reads a line fifty times after one
+invalidation takes one transfer and forty-nine hits. Two fields both stored
+somewhere on the command path are therefore indistinguishable to any static
+model. On redis the machine separated them 874 samples to 3.
 
 Findings join to measured traffic at cache-line granularity: a finding
 matches a line when both of its role sets are represented on it. That tests
@@ -466,10 +498,25 @@ Full loop:
 lshaz scan . -f json -o scan.json --config lshaz.config.yaml
 perf c2c record --all-user --ldlat=5 -p $PID -- sleep 20
 perf c2c report --stdio --full-symbols > profile.txt
-lshaz observe --profile profile.txt --findings scan.json \
+
+# Where the transfers landed, and how many there were. c2c records at a
+# frequency, so it ranks lines and does not count them; the counter counts.
+perf stat -e <a counted coherence-transfer event> -p $PID -- sleep 20
+
+# What ran at all, for the precision denominator.
+perf record -F 999 -p $PID -- sleep 20
+perf report --stdio --no-children -F overhead,symbol --percent-limit 0 > ran.txt
+
+lshaz observe --profile profile.txt --findings scan.json --executed ran.txt \
     --config lshaz.config.yaml --ops $OPS --hitm-events $HITM --write
 lshaz scan . -f json -o scan.json --config lshaz.config.yaml
 ```
+
+The counted event is whatever the target machine's PMU exposes for a
+cross-core transfer; `perf list` names it. No event is compiled in, because
+naming one would be right on one vendor and wrong everywhere else. Without a
+counted total or a fixed `--sample-period`, the command reports the ranking
+and stores nothing rather than scaling a sampled total by a guess.
 
 ---
 
