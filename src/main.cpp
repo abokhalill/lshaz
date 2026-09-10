@@ -6,6 +6,7 @@
 #include "cli/fix.h"
 #include "cli/hyp.h"
 #include "cli/init.h"
+#include "cli/observe.h"
 #include "cli/scan.h"
 
 #include "lshaz/core/version.h"
@@ -31,6 +32,8 @@ int main(int argc, const char **argv) {
         return lshaz::runExpCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "feedback") == 0)
         return lshaz::runFeedbackCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "observe") == 0)
+        return lshaz::runObserveCommand(argc - 2, argv + 2);
 
     if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
                       std::strcmp(argv[1], "--version") == 0)) {
@@ -54,6 +57,7 @@ int main(int argc, const char **argv) {
             << "  lshaz init [path]             Generate compile_commands.json and config\n"
             << "  lshaz diff <a.json> <b.json>  Compare two scan results\n"
             << "  lshaz feedback <dir> --store  Ingest experiment results\n"
+            << "  lshaz observe --profile p --findings f  Feed a hardware profile back\n"
             << "  lshaz explain [rule]          Show rule documentation\n"
             << "  lshaz version                 Print version\n"
             << "  lshaz help                    Show this help\n"

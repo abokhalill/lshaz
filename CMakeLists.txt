@@ -104,6 +104,7 @@ set(LSHAZ_SOURCES
     src/analysis/struct_layout.cpp
     src/analysis/escape.cpp
     src/analysis/cache_line.cpp
+    src/analysis/coherence_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/thread_role.cpp
@@ -151,6 +152,7 @@ set(LSHAZ_SOURCES
     src/cli/scan.cpp
     src/cli/explain.cpp
     src/cli/init.cpp
+    src/cli/observe.cpp
     src/cli/diff.cpp
     src/cli/fix.cpp
     src/cli/hyp.cpp
@@ -213,6 +215,7 @@ target_include_directories(pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothe
 add_executable(analysis_test
     test/analysis_test.cpp
     src/analysis/cache_line.cpp
+    src/analysis/coherence_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/escape.cpp
