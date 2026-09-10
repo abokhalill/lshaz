@@ -2355,6 +2355,21 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         // the asymmetry the whole model turns on: dismissal is cheap,
         // promotion is not. As a gating claim this can only lower a grade,
         // so a high estimate on guessed terms promotes nothing.
+        // An estimate above the whole per-operation budget is arithmetic,
+        // not a finding: the hazard cannot cost more than the operation
+        // does. It means a term is wrong, and grading Critical on it would
+        // launder a modelling error into a verdict. Report the number, say
+        // it is implausible, and do not let it carry a grade.
+        if (workload.known() &&
+            d.cost.cyclesPerOp > toMilli(workload.cyclesPerOp)) {
+            d.escalations.push_back(
+                "estimated cost " + milliText(d.cost.cyclesPerOp) +
+                " cycles per operation exceeds the whole " +
+                std::to_string(workload.cyclesPerOp) +
+                " cycle budget, so a term is wrong: reported, not graded");
+            ++graded;
+            continue;
+        }
         const Severity supported =
             severityForCost(d.cost.cyclesPerOp, workload);
         d.mechanismClaims.push_back(
