@@ -1360,8 +1360,24 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     est.add("write_rate", wRate, wKnown,
             wKnown ? "call graph" : "unmeasured, taken as once per op");
 
+    // Total read rate, not the busiest reader's. A line read once per
+    // operation from forty places on the command path is re-fetched far more
+    // often than one read from two, and the maximum reports both as the
+    // same. That flattening is why 87 of redis's 161 single-field findings
+    // priced to the identical number while the machine measured a 20x spread
+    // between the top line and the next.
+    //
+    // Saturating at once per operation, because a rate model built on four
+    // loop-depth buckets cannot defend a claim above that, and an unbounded
+    // sum over a large reader set would run away on exactly the fields where
+    // the buckets are least trustworthy.
     const bool rKnown = rates.anyKnown(readers);
-    const Milli rRate = rKnown ? rates.maxRateOf(readers) : kMilli;
+    Milli rSum = 0;
+    for (const auto &fn : readers) {
+        rSum += rates.rateOf(fn);
+        if (rSum >= kMilli) { rSum = kMilli; break; }
+    }
+    const Milli rRate = rKnown ? rSum : kMilli;
 
     // Cores that can be holding the line. Source cannot count these: the
     // thread-entry count is how many bodies exist, not how many run at once
