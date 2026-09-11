@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "shard_ipc.h"
 
+#include <charconv>
 #include <cstdlib>
 #include <string>
 #include <vector>
