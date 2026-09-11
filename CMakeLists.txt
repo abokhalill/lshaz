@@ -221,6 +221,7 @@ target_include_directories(pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothe
 # --- Analysis ground truth test ---
 add_executable(analysis_test
     test/analysis_test.cpp
+    src/core/cost_calibration.cpp
     src/analysis/cache_line.cpp
     src/analysis/event_profile.cpp
     src/analysis/coherence_profile.cpp

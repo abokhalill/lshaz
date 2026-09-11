@@ -9,6 +9,7 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/event_profile.h"
 #include "lshaz/analysis/loop_shape.h"
+#include "lshaz/core/cost_calibration.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
@@ -18,6 +19,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -923,7 +926,77 @@ void testConstantTripCounts() {
     }
 }
 
+
+// Ratios taken from one divide measured three ways: the instruction alone,
+// its share of a cycles profile, and end to end. The spread is the scopes,
+// not noise, so the median is wrong for all three.
+void testInstrumentScopesDoNotBlend() {
+    using namespace lshaz;
+    CostCalibration c;
+    auto row = [&](Milli measured, const char *instrument) {
+        CostObservation o;
+        o.mechanism = "divide";
+        o.machine = "i9-9900K";
+        o.workload = "memtier-9to1";
+        o.site = "monotonic.c:81";
+        o.predicted = toMilli(1);
+        o.measured = measured;
+        o.instrument = instrument;
+        c.observe(o);
+    };
+    row(710, "microbench");
+    row(1080, "cycles-profile");
+    row(1440, "throughput-ab");
+
+    auto any = c.factorFor("divide", "i9-9900K", "memtier-9to1",
+                           "monotonic.c:81");
+    check(any.has_value(), "unfiltered query finds the rows");
+    check(any->value == 1080, "unfiltered median is the middle scope");
+    check(any->mixedInstruments,
+          "a median spanning three instruments says so");
+
+    struct { const char *instrument; Milli want; } cases[] = {
+        {"microbench", 710}, {"cycles-profile", 1080}, {"throughput-ab", 1440},
+    };
+    for (const auto &w : cases) {
+        auto f = c.factorFor("divide", "i9-9900K", "memtier-9to1",
+                             "monotonic.c:81", w.instrument);
+        check(f.has_value(), "each instrument answers on its own");
+        check(f->value == w.want, "and returns its own scope, not the median");
+        check(!f->mixedInstruments, "a single instrument is not mixed");
+    }
+}
+
+// Rows predating the instrument column still load, and do not answer a query
+// that names one.
+void testLegacyRowsRoundTrip() {
+    using namespace lshaz;
+    const std::string path = "/tmp/lshaz_calib_legacy.tsv";
+    {
+        std::ofstream out(path, std::ios::trunc);
+        out << "coherence\tbox\twl\t1000\t500\tfoo.c:1\n";
+    }
+    CostCalibration c;
+    std::string err;
+    check(c.load(path, err), "a store without the instrument column loads");
+    check(c.size() == 1, "and keeps its row");
+
+    auto legacy = c.factorFor("coherence", "box", "wl", "foo.c:1");
+    check(legacy.has_value() && legacy->value == 500,
+          "an unfiltered query still corrects from it");
+    check(!c.factorFor("coherence", "box", "wl", "foo.c:1", "throughput-ab")
+               .has_value(),
+          "but it does not answer for an instrument it never named");
+
+    check(c.save(path, err), "and it writes back with the new column");
+    CostCalibration again;
+    check(again.load(path, err) && again.size() == 1, "which reloads");
+    std::remove(path.c_str());
+}
+
 int main() {
+    testInstrumentScopesDoNotBlend();
+    testLegacyRowsRoundTrip();
     testPerfReportParsing();
     testConstantTripCounts();
     testSimplePOD();

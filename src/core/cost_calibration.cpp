@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <tuple>
 
@@ -16,11 +17,12 @@ namespace {
 // shell script on a rented box, and anything it can produce with printf is
 // one less thing to get wrong at three in the morning.
 //
-//   mechanism \t machine \t workload \t predicted_milli \t measured_milli [\t site]
+//   mechanism \t machine \t workload \t predicted_milli \t measured_milli
+//       [\t site [\t instrument]]
 //
-// The site column is optional and trailing, so a store written before sites
-// existed still reads, and a row without one is a measurement of the
-// mechanism rather than of a line.
+// Both trailing columns are optional, so a store written before either
+// existed still reads. A row without a site measures the mechanism rather
+// than a line.
 bool parseLine(const std::string &line, CostObservation &out) {
     std::istringstream is(line);
     std::string pred, meas;
@@ -29,7 +31,15 @@ bool parseLine(const std::string &line, CostObservation &out) {
     if (!std::getline(is, out.workload, '\t')) return false;
     if (!std::getline(is, pred, '\t')) return false;
     if (!std::getline(is, meas, '\t')) return false;
-    std::getline(is, out.site);
+    std::string rest;
+    std::getline(is, rest);
+    const auto tab = rest.find('\t');
+    if (tab == std::string::npos) {
+        out.site = rest;
+    } else {
+        out.site = rest.substr(0, tab);
+        out.instrument = rest.substr(tab + 1);
+    }
     try {
         out.predicted = std::stoll(pred);
         out.measured = std::stoll(meas);
@@ -74,9 +84,9 @@ bool CostCalibration::load(const std::string &path, std::string &err) {
     std::sort(obs_.begin(), obs_.end(),
               [](const CostObservation &a, const CostObservation &b) {
                   return std::tie(a.mechanism, a.machine, a.workload, a.site,
-                                  a.predicted, a.measured) <
+                                  a.instrument, a.predicted, a.measured) <
                          std::tie(b.mechanism, b.machine, b.workload, b.site,
-                                  b.predicted, b.measured);
+                                  b.instrument, b.predicted, b.measured);
               });
     return true;
 }
@@ -90,11 +100,11 @@ bool CostCalibration::save(const std::string &path, std::string &err) const {
             return false;
         }
         out << "# mechanism\tmachine\tworkload\tpredicted_milli"
-               "\tmeasured_milli\tsite\n";
+               "\tmeasured_milli\tsite\tinstrument\n";
         for (const auto &o : obs_)
             out << o.mechanism << '\t' << o.machine << '\t' << o.workload
                 << '\t' << o.predicted << '\t' << o.measured << '\t'
-                << o.site << '\n';
+                << o.site << '\t' << o.instrument << '\n';
         if (!out) {
             err = "write failed for " + tmp;
             return false;
@@ -113,15 +123,21 @@ std::optional<CostCalibration::Factor>
 CostCalibration::factorFor(const std::string &mechanism,
                            const std::string &machine,
                            const std::string &workload,
-                           const std::string &site) const {
+                           const std::string &site,
+                           const std::string &instrument) const {
+    std::set<std::string> seen;
     const auto gather = [&](bool wantSite) {
         std::vector<Milli> out;
+        seen.clear();
         for (const auto &o : obs_) {
             if (o.mechanism != mechanism || o.machine != machine ||
                 o.workload != workload || o.predicted <= 0)
                 continue;
             if (wantSite ? o.site != site : !o.site.empty())
                 continue;
+            if (!instrument.empty() && o.instrument != instrument)
+                continue;
+            seen.insert(o.instrument);
             out.push_back(static_cast<Milli>(
                 (static_cast<__int128>(o.measured) * kMilli) / o.predicted));
         }
@@ -144,6 +160,7 @@ CostCalibration::factorFor(const std::string &mechanism,
     std::sort(ratios.begin(), ratios.end());
     Factor f;
     f.sited = sited;
+    f.mixedInstruments = seen.size() > 1;
     f.samples = static_cast<unsigned>(ratios.size());
     const size_t mid = ratios.size() / 2;
     // Even counts average the two central values, which keeps the result an

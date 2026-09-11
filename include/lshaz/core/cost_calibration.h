@@ -36,6 +36,12 @@ struct CostObservation {
     // first. Mix them and the median lands between two different events.
     Milli predicted = 0;
     Milli measured = 0;
+
+    // Which instrument produced `measured`. A microbenchmark, a profiler and
+    // a throughput A/B measure nested scopes of the same effect, so a median
+    // mixing them corrects for none of them. Empty is a row predating this,
+    // and matches only a query that leaves it empty too.
+    std::string instrument;
 };
 
 class CostCalibration {
@@ -52,6 +58,10 @@ public:
         Milli value = kMilli;
         unsigned samples = 0;
         bool sited = false;
+
+        // The rows behind `value` span more than one instrument, so the
+        // median crosses scopes that measure different quantities.
+        bool mixedInstruments = false;
     };
 
     // Median of measured/predicted, preferring the site's own rows. Median so
@@ -60,10 +70,14 @@ public:
     //
     // Nothing matching returns nothing. A neutral factor of one would look
     // like we had checked.
+    // `instrument` empty means take whatever is there, which is what every
+    // caller wanted before instruments were recorded. Pass one to restrict
+    // the median to rows measuring the same scope.
     std::optional<Factor> factorFor(const std::string &mechanism,
                                     const std::string &machine,
                                     const std::string &workload,
-                                    const std::string &site = {}) const;
+                                    const std::string &site = {},
+                                    const std::string &instrument = {}) const;
 
     size_t size() const { return obs_.size(); }
     const std::vector<CostObservation> &observations() const { return obs_; }
