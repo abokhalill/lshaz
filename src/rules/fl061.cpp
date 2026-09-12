@@ -199,12 +199,12 @@ public:
         diag.mechanismClaims = {
             {"I-cache and BTB footprint from wide fan-out",
              "a hot function with many real (non-builtin) call targets",
-             true, Severity::Medium},
+             ClaimState::Established, Severity::Medium},
             {"indirect target misprediction across polymorphic sites",
              "three or more virtual dispatch sites",
-             info.virtualCalls >= 3, Severity::High},
+             claimFrom(info.virtualCalls >= 3), Severity::High},
             {"the fan-out is re-walked on every iteration",
-             "the dispatch sits inside a loop", info.hasLoop,
+             "the dispatch sits inside a loop", claimFrom(info.hasLoop),
              Severity::High},
         };
         diag.escalations = std::move(escalations);

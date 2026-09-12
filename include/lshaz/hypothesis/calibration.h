@@ -105,10 +105,17 @@ private:
     static double computeLabelQuality(const ExperimentResult &result);
     bool validateSchema(const ExperimentResult &result) const;
 
+    // Euclidean over features each normalised to [0,1], divided by sqrt(D) so
+    // the result is a fraction of the greatest distance the space allows.
+    // Scale-free, and independent of how many features there are, so adding
+    // one does not silently loosen every stored neighbourhood.
     static double featureDistance(const std::vector<double> &a,
                                   const std::vector<double> &b);
 
-    static constexpr double kNeighborhoodRadius = 0.25;
+    // A tenth of the space's diameter. A policy choice about how alike two
+    // findings must be before a refutation of one speaks for the other, not a
+    // measured quantity; it is stated here so it can be argued with.
+    static constexpr double kNeighborhoodRadius = 0.10;
 
     std::string storePath_;
     std::vector<LabeledRecord> records_;

@@ -553,12 +553,12 @@ public:
                          "against a plain MOV",
                  isARM ? "an atomic op whose relaxed form emits fewer barriers"
                        : "a seq_cst store on x86-64",
-                 true, sev},
+                 ClaimState::Established, sev},
                 // Repetition within one call, which the loop establishes.
                 // Phrasing it as frequency would restate the hotness claim
                 // beside it, which is separately unestablished.
                 {"the barrier is paid once per iteration, not once per call",
-                 "the write sits inside a loop", site.inLoop != 0,
+                 "the write sits inside a loop", claimFrom(site.inLoop != 0),
                  Severity::Critical},
             };
             diag.escalations = std::move(escalations);

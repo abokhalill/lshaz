@@ -11,7 +11,7 @@ treat them as independent axes, not redundant encodings:
 | Signal | Type | Values | Semantics |
 |---|---|---|---|
 | Severity | enum | `Critical`, `High`, `Medium`, `Informational` | Worst-case latency impact if the hazard is exercised |
-| Confidence | float | `[0.0, 1.0]` | Tool's belief that the hazard exists at this site, after IR refinement and evidence grading |
+| Confidence | float | `[0.0, 1.0]` | **Ranking prior, not a probability.** How well the producing rule's own evidence ladder pins the finding down. It orders findings from one rule, picks the survivor when several TUs saw a site with different evidence, and breaks ties. It is not the odds the hazard is real, and comparing it across rules means nothing. Set once by the rule; no later phase moves it. |
 | Evidence tier | enum | `Proven`, `Likely`, `Speculative` | Strength of the structural guarantee. `Proven` means the layout forces the claim (e.g., line-aligned record with a same-line atomic pair). |
 
 A Critical/`Likely` finding and a Medium/`Proven` finding are both actionable
@@ -30,8 +30,8 @@ Per-diagnostic fields:
 | `hardwareReasoning` | The mechanism claim, with its assumptions stated inline |
 | `structuralEvidence` | String map of measured facts (`sizeof`, `atomic_pairs_same_line`, `type_name`, `global_write_count`, …). Keys vary by rule. |
 | `mitigation` | Specific remediation guidance |
-| `escalations` | Trace of every severity/confidence adjustment with its reason. Aggravating evidence, demotions (deliberate layout, missing write evidence), IR confirmations, cross-TU merge notes. The audit trail for "why this severity". |
-| `mechanismClaims` | The rule's hardware argument, decomposed. Array of `{effect, precondition, established, gating, supports}`. Severity is clamped to what these establish, so a consumer can verify the grade rather than trust it. See below. |
+| `escalations` | Trace of every severity adjustment with its reason, including withdrawals. Aggravating evidence, demotions (deliberate layout, missing write evidence), IR confirmations, cross-TU merge notes. The audit trail for "why this severity". |
+| `mechanismClaims` | The rule's hardware argument, decomposed. Array of `{effect, precondition, state, gating, supports, observation}`. `state` is `unknown`, `established` or `refuted`; `observation` names what settled it. Severity is clamped to what these establish, so a consumer can verify the grade rather than trust it. A `refuted` claim never reaches the output: it withdraws the finding. See below. |
 
 ## CLI format
 
@@ -84,16 +84,18 @@ cross-TU) follows them when applicable.
         {
           "effect": "co-located mutable fields share a line",
           "precondition": "two mutable fields co-resident under some base alignment",
-          "established": true,
+          "state": "established",
           "gating": false,
-          "supports": "Medium"
+          "supports": "Medium",
+          "observation": ""
         },
         {
           "effect": "MESI invalidation ping-pong between cores",
           "precondition": "distinct writers reaching the pair, or atomics evidencing multi-writer intent",
-          "established": true,
+          "state": "established",
           "gating": false,
-          "supports": "Critical"
+          "supports": "Critical",
+          "observation": "writers of 'head' and 'tail' attribute to disjoint thread roles"
         }
       ]
     }

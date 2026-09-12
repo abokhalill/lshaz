@@ -381,12 +381,12 @@ public:
 
         diag.mechanismClaims = {
             {"co-located mutable fields share a line",
-             "two mutable fields co-resident under some base alignment", true,
+             "two mutable fields co-resident under some base alignment", ClaimState::Established,
              Severity::Medium},
             {"MESI invalidation ping-pong between cores",
              "distinct writers reaching the pair, or atomics evidencing "
              "multi-writer intent",
-             hasAtomicPairs || wev == kMultiWriter,
+             claimFrom(hasAtomicPairs || wev == kMultiWriter),
              deliberateLayout ? Severity::Medium : Severity::Critical},
             // Gating: no temporal proximity, no mechanism.
             {"writes land close enough in time to catch the line resident "
@@ -394,7 +394,7 @@ public:
              "no writer is separated from the next by an opaque call, on a "
              "target whose writers share one last-level cache, where "
              "coherence cost decays with spacing",
-             !(sparsePair && !densePair && decayApplies),
+             claimFrom(!(sparsePair && !densePair && decayApplies)),
              (sparsePair && !densePair && decayApplies) ? Severity::Medium : sev,
              /*gating=*/true},
             // Not gated on ev.hasSharingRoute: it is a per-TU fact, and for a

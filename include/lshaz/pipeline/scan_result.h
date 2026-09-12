@@ -52,6 +52,12 @@ struct ScanResult {
     unsigned vendoredTUsSkipped      = 0;
     unsigned outOfTreeSuppressed     = 0;
     unsigned totalTUsFailed          = 0;
+
+    // Findings retired because an evidence source refuted a precondition,
+    // which is a different outcome from a filter dropping them and has to
+    // stay countable: it is the only number that says evidence disagreed
+    // with the analysis rather than the analysis finding nothing.
+    unsigned withdrawnByRefutation   = 0;
 };
 
 } // namespace lshaz

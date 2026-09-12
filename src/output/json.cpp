@@ -87,7 +87,7 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
             const auto &c = d.mechanismClaims[j];
             os << "\n        {\"effect\": \"" << escape(c.effect)
                << "\", \"precondition\": \"" << escape(c.precondition)
-               << "\", \"established\": " << (c.established ? "true" : "false")
+               << "\", \"state\": \"" << claimStateName(c.state) << "\""
                << ", \"gating\": " << (c.gating ? "true" : "false")
                << ", \"supports\": \"" << severityToString(c.supports)
                << "\"}";
@@ -110,7 +110,8 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
             os << "\n        {\"name\": \"" << escape(t.name)
                << "\", \"value\": " << milliToText(t.value)
                << ", \"established\": " << (t.established ? "true" : "false")
-               << ", \"source\": \"" << escape(t.source) << "\"}";
+               << ", \"role\": \"" << termRoleName(t.role)
+               << "\", \"source\": \"" << escape(t.source) << "\"}";
             if (j + 1 < d.cost.terms.size()) os << ",";
         }
         os << "\n      ]}";

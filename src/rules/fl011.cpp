@@ -329,10 +329,10 @@ public:
 
         std::vector<MechanismClaim> claims = {
             {"LOCK-prefixed op serializes against the store buffer",
-             "an atomic write on a hot path", true,
+             "an atomic write on a hot path", ClaimState::Established,
              hasLoopWrite ? Severity::Critical : Severity::High},
             {"cross-core cache line ownership transfer",
-             "a second core writing the same line", false,
+             "a second core writing the same line", ClaimState::Unknown,
              Severity::Critical},
         };
 

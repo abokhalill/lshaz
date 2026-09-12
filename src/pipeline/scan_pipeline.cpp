@@ -759,7 +759,12 @@ static unsigned applyThreadRoleEscalation(
 
         uint8_t ra = verdicts.fieldWriterRoles(facts, type + "::" + fieldA);
         uint8_t rb = verdicts.fieldWriterRoles(facts, type + "::" + fieldB);
-        d.confidence = std::min(d.confidence + 0.08, 0.95);
+        // The merged graph settles what the per-TU pass could only assume.
+        // Rewarding it numerically as well would score one cause twice: the
+        // rule's own writer evidence already counted it.
+        d.settleClaim("MESI invalidation ping-pong", ClaimState::Established,
+                      "writers of '" + fieldA + "' and '" + fieldB +
+                      "' attribute to disjoint thread roles");
         d.escalations.push_back(
             "cross-TU thread-role attribution: '" + fieldA +
             "' written only from " + roleMaskName(ra) + " code, '" + fieldB +
@@ -807,8 +812,9 @@ static unsigned applyPagingRespect(std::vector<Diagnostic> &diagnostics,
     for (auto &d : diagnostics) {
         if (d.suppressed || d.ruleID != "FL070")
             continue;
+        // Severity is the axis this belongs on. An author steering paging
+        // changes what the hazard costs, not how well we identified it.
         d.severity = Severity::Informational;
-        d.confidence = std::max(d.confidence - 0.10, 0.05);
         d.escalations.push_back(
             "paging policy managed in-tree (madvise/mallopt observed): "
             "hugepage inference demoted, verify against the author's "
@@ -832,7 +838,6 @@ static unsigned applyAffinityRespect(std::vector<Diagnostic> &diagnostics,
             d.severity = Severity::Medium;
         else
             d.severity = Severity::Informational;
-        d.confidence = std::max(d.confidence - 0.10, 0.05);
         d.escalations.push_back(
             "explicit placement management in-tree (" + api +
             "): first-touch inference demoted. The author is already "
@@ -919,7 +924,6 @@ static unsigned emitStripedArrayFindings(
         if (v.ownerIndexed && !v.multiRole) {
             if (d.severity > Severity::Medium)
                 d.severity = Severity::Medium;
-            d.confidence = std::max(d.confidence - 0.15, 0.35);
             d.escalations.push_back(
                 "every thread-identity subscript reaches this array through a "
                 "field of an object the caller handed in, which names the "
@@ -998,14 +1002,15 @@ static unsigned emitStripedArrayFindings(
              straddles ? "an element stride that is not a line multiple, so "
                          "boundaries fall mid-line for any base address"
                        : "an element stride narrower than the line, unpadded",
-             true, Severity::Medium},
+             ClaimState::Established, Severity::Medium},
             {"per-write RFO transfer between the owning cores",
              "distinct thread-indexed writers reaching separate slots",
-             v.writerCount >= 2 || s.tlsIndexed,
+             claimFrom(v.writerCount >= 2 || s.tlsIndexed),
              v.multiRole ? Severity::Critical : Severity::High},
             {"the traffic is sustained at hot-path rates",
              "writes established on a hot path rather than assumed",
-             v.frequency == WriteFrequencyTier::Hot, Severity::Critical},
+             claimFrom(v.frequency == WriteFrequencyTier::Hot),
+             Severity::Critical},
         };
 
         {
@@ -1171,13 +1176,14 @@ static unsigned emitAggregationSweepFindings(
             {"each swept slot's line is taken in Shared, downgrading its "
              "owner out of Modified",
              "a loop reads every slot of an array written under a "
-             "thread-identity index", true, Severity::Medium},
+             "thread-identity index", ClaimState::Established, Severity::Medium},
             {"the owner pays an Exclusive re-acquire on its next write",
-             "writers observed on the swept array", v.writerCount >= 1,
+             "writers observed on the swept array",
+             claimFrom(v.writerCount >= 1),
              Severity::High},
             {"the sweep runs often enough for the cost to recur",
              "sweep hotness established rather than assumed",
-             tier == WriteFrequencyTier::Hot, Severity::Critical},
+             claimFrom(tier == WriteFrequencyTier::Hot), Severity::Critical},
         };
 
         d.mitigation =
@@ -1225,14 +1231,16 @@ static unsigned emitAggregationSweepFindings(
                                                     : 100),
                     machine.hasCoherenceCost(),
                     machine.hasCoherenceCost() ? machine.name
-                                               : "unmeasured, taken as 100");
+                                               : "unmeasured, taken as 100",
+                    TermRole::Conversion);
             const Milli exposed =
                 machine.hasOverlap()
                     ? toMilli(100 - static_cast<int64_t>(machine.mlpOverlapPct)) / 100
                     : kMilli;
             est.add("exposed_share", exposed, machine.hasOverlap(),
                     machine.hasOverlap() ? machine.name
-                                         : "unmeasured, taken as fully exposed");
+                                         : "unmeasured, taken as fully exposed",
+                    TermRole::Conversion);
             if (auto f = calib.factorFor(kSweepMechanism, machine.name,
                                          workloadName)) {
                 const bool trusted =
@@ -1240,7 +1248,8 @@ static unsigned emitAggregationSweepFindings(
                 est.add("calibration", f->value, trusted,
                         std::to_string(f->samples) + " observation(s) on " +
                             machine.name + "/" + workloadName +
-                            (trusted ? "" : ", below the trusted sample count"));
+                            (trusted ? "" : ", below the trusted sample count"),
+                        TermRole::Correction);
             }
             est.settle();
             d.cost = est;
@@ -1295,7 +1304,7 @@ static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
         }
         for (auto &claim : d.mechanismClaims)
             if (claim.gating && claim.effect == "the store runs more than once")
-                claim.established = repeats;
+                claim.state = claimFrom(repeats);
         if (repeats) {
             d.escalations.push_back(
                 "the store repeats: '" + fn + "' is reached from " +
@@ -1390,7 +1399,8 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
             toMilli(machine.cyclesHitmLocal ? machine.cyclesHitmLocal : 100),
             machine.hasCoherenceCost(),
             machine.hasCoherenceCost() ? machine.name
-                                       : "unmeasured, taken as 100");
+                                       : "unmeasured, taken as 100",
+            TermRole::Conversion);
 
     const Milli exposed =
         machine.hasOverlap()
@@ -1398,7 +1408,8 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
             : kMilli;
     est.add("exposed_share", exposed, machine.hasOverlap(),
             machine.hasOverlap() ? machine.name
-                                 : "unmeasured, taken as fully exposed");
+                                 : "unmeasured, taken as fully exposed",
+            TermRole::Conversion);
 
     // What measurement has said, about this line if anything has measured
     // it and about the mechanism otherwise. Absent means nobody has checked,
@@ -1417,7 +1428,8 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
                 std::to_string(f->samples) + " observation(s) on " +
                     machine.name + "/" + workloadName +
                     (f->sited ? " of " + site : " of this mechanism") +
-                    (trusted ? "" : ", below the trusted sample count"));
+                    (trusted ? "" : ", below the trusted sample count"),
+                TermRole::Correction);
     }
 
     est.settle();
@@ -1546,7 +1558,7 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         d.mechanismClaims.push_back(
             {"the hazard costs enough of an operation to be worth acting on",
              "estimated cycles per operation above the dismissal threshold",
-             d.cost.complete, supported, /*gating=*/true});
+             claimFrom(d.cost.complete), supported, /*gating=*/true});
         std::string terms;
         for (const auto &t : d.cost.terms) {
             if (!terms.empty()) terms += " x ";
@@ -1816,7 +1828,7 @@ static unsigned emitTrueSharingFindings(
             d.mechanismClaims = {
                 {"a store invalidates every core holding the line",
                  "the field is written and separately read, on one line",
-                 true, Severity::Medium},
+                 ClaimState::Established, Severity::Medium},
                 {"the writer and the readers reach one object",
                  standingWrites
                      ? "the stores reach a fixed object the program names"
@@ -1831,21 +1843,22 @@ static unsigned emitTrueSharingFindings(
                          : "some loads reach a fixed object the program "
                            "names, but most of the accesses on both sides "
                            "arrive through a parameter",
-                 standingWrites || (oneObject && !freshlyAllocatedPerOp),
+                 claimFrom(standingWrites ||
+                           (oneObject && !freshlyAllocatedPerOp)),
                  Severity::High},
                 {"the reading cores are not the storing core",
                  disjoint ? "writer and reader thread roles are provably "
                             "disjoint"
                           : "readers span more than one thread role",
-                 disjoint || spansRoles, Severity::High},
+                 claimFrom(disjoint || spansRoles), Severity::High},
                 {"the invalidation recurs rather than settling",
                  writerHot ? "a storing function confirmed hot on the merged "
                              "call graph"
                            : "stores issued from inside a loop",
-                 writerHot, Severity::Critical},
+                 claimFrom(writerHot), Severity::Critical},
                 {"the readers run often enough to pay it",
                  "a reading function confirmed hot on the merged call graph",
-                 readerHot, Severity::Critical},
+                 claimFrom(readerHot), Severity::Critical},
             };
 
             d.cost = estimateLineCost(
@@ -2161,7 +2174,7 @@ static unsigned emitCrossTUSharedLineFindings(
 
         d.mechanismClaims = {
             {"co-located mutable fields share a line",
-             "two mutable fields co-resident under some base alignment", true,
+             "two mutable fields co-resident under some base alignment", ClaimState::Established,
              Severity::Medium},
             {anyMultiWriter
                  ? "MESI invalidation ping-pong between the two writers"
@@ -2175,11 +2188,12 @@ static unsigned emitCrossTUSharedLineFindings(
                        ? "the neighbour has readers and no writer anywhere in "
                          "the merged program"
                        : "a writer of one field and a non-writing reader of the other",
-             true, d.severity},
+             ClaimState::Established, d.severity},
             // The gate the map phase cannot answer: the record lives in a
             // header and its global lives in one .c.
             {"two threads reach the same instance",
-             "some TU shows a shared instance and a thread-borne writer", true,
+             "some TU shows a shared instance and a thread-borne writer",
+             ClaimState::Established,
              d.severity, /*gating=*/true},
         };
         d.mitigation =
@@ -2289,12 +2303,12 @@ static unsigned emitOptRemarkFindings(
         d.mechanismClaims = {
             {"a load repeated per iteration at a loop-invariant address",
              "the compiler recorded the decision in its own remark stream",
-             true, Severity::Medium},
+             ClaimState::Established, Severity::Medium},
             {std::string("this code runs often enough for the cost to recur (") +
                  hotnessSourceName(src) + ", cross-TU)",
              "hotness established by profile or declaration, not inferred "
              "from shape alone",
-             src >= HotnessSource::Declared,
+             claimFrom(src >= HotnessSource::Declared),
              hotnessSupportedSeverity(src, Severity::Medium),
              /*gating=*/true},
         };
@@ -2377,11 +2391,11 @@ static unsigned synthesizeUnappliedMitigation(
         // the fix. So it can never outrank the finding it was built from.
         c.mechanismClaims = {
             {"the component hazard's own mechanism",
-             "the attributed finding established it", true,
+             "the attributed finding established it", ClaimState::Established,
              d.severitySupportedByClaims()},
             {"the fix idiom is established in-tree and was not applied here",
              "another type in this codebase is deliberately line-isolated",
-             !mitigated.empty(), d.severity},
+             claimFrom(!mitigated.empty()), d.severity},
         };
         c.escalations = {
             "precedent join: " + std::to_string(mitigated.size()) +
@@ -2433,7 +2447,7 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
         d.mechanismClaims.push_back(
             {"two threads reach the same instance",
              "some TU shows a shared instance and a thread-borne writer",
-             false, Severity::Medium, /*gating=*/true});
+             ClaimState::Unknown, Severity::Medium, /*gating=*/true});
         d.escalations.push_back(
             "no TU showed a thread reaching a shared instance of this type: "
             "co-location is real, cross-core contention is not established");
@@ -3485,9 +3499,9 @@ ScanResult ScanPipeline::run(
             for (auto &c : d.mechanismClaims) {
                 if (c.precondition.rfind("a free on a thread other than", 0) ==
                     0)
-                    c.established = true;
+                    c.state = ClaimState::Established;
                 if (c.gating && c.precondition.rfind("alloc and free", 0) == 0) {
-                    c.established = true;
+                    c.state = ClaimState::Established;
                     c.precondition = "alloc and free of '" + ty +
                                      "' attributed to disjoint thread roles";
                 }
@@ -3812,6 +3826,43 @@ ScanResult ScanPipeline::run(
             llvm::errs() << "lshaz: error: " << storeErr << "\n";
             result.status = ScanStatus::ToolError;
             return result;
+        }
+    }
+
+    // Refuted preconditions retire findings, before anything grades them.
+    //
+    // A precondition an evidence source checked and found false is a verdict
+    // on the mechanism, not a weaker version of it, so the finding leaves
+    // naming what refuted it. This is where the ran-versus-never-ran rule
+    // reaches the claim ledger: Unknown survives untouched, and only Refuted
+    // withdraws.
+    {
+        std::map<std::string, unsigned> byRule;
+        for (auto &d : result.diagnostics) {
+            if (d.suppressed)
+                continue;
+            const auto *dead = d.refutedPrecondition();
+            if (!dead)
+                continue;
+            d.suppressed = true;
+            ++byRule[d.ruleID];
+            d.escalations.push_back(
+                "withdrawn: '" + dead->precondition + "' is refuted (" +
+                (dead->observation.empty() ? std::string("no observation "
+                                                         "recorded")
+                                           : dead->observation) + ")");
+        }
+        if (!byRule.empty()) {
+            std::string detail;
+            unsigned total = 0;
+            for (const auto &[rule, n] : byRule) {
+                total += n;
+                detail += (detail.empty() ? "" : " ") + rule + "=" +
+                          std::to_string(n);
+            }
+            result.withdrawnByRefutation = total;
+            report("refuted", std::to_string(total) +
+                   " finding(s) withdrawn on a refuted precondition; " + detail);
         }
     }
 

@@ -51,6 +51,10 @@ std::vector<double> doublesFrom(const llvm::json::Array *a) {
 
 double CalibrationFeedbackStore::featureDistance(
     const std::vector<double> &a, const std::vector<double> &b) {
+    // Differing arity means the two were built by different feature versions
+    // and are not comparable. Refusing to match is the safe direction: a
+    // stored refutation stops speaking rather than speaking about the wrong
+    // thing.
     if (a.size() != b.size() || a.empty())
         return std::numeric_limits<double>::max();
     double sum = 0.0;
@@ -58,7 +62,7 @@ double CalibrationFeedbackStore::featureDistance(
         double d = a[i] - b[i];
         sum += d * d;
     }
-    return std::sqrt(sum);
+    return std::sqrt(sum) / std::sqrt(static_cast<double>(a.size()));
 }
 
 CalibrationFeedbackStore::CalibrationFeedbackStore(const std::string &storePath)

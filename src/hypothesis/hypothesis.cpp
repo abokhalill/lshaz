@@ -2,6 +2,7 @@
 #include "lshaz/hypothesis/hypothesis.h"
 #include "lshaz/hypothesis/template.h"
 
+#include <cmath>
 #include <functional>
 #include <sstream>
 
@@ -55,13 +56,22 @@ EvidenceTier HypothesisConstructor::inferEvidenceTier(const Diagnostic &finding)
     return EvidenceTier::Speculative;
 }
 
+// Every dimension lands in [0,1], so the Euclidean distance between two
+// findings is bounded by sqrt(D) and no dimension can dominate by virtue of
+// its unit. Raw values cannot: a byte count and a nesting depth in the same
+// sum means the byte count *is* the metric, and a radius that looks small is
+// then narrower than a one-byte difference in struct size.
+//
+// Counts compress logarithmically because similarity here is a matter of
+// order of magnitude. Two 300B records are alike; 300B and 300KB are not, and
+// the gap between 300B and 301B is noise.
+static double magnitude(double v, double scale) {
+    if (v <= 0.0) return 0.0;
+    const double x = std::log1p(v) / std::log1p(scale);
+    return x > 1.0 ? 1.0 : x;
+}
+
 std::vector<double> HypothesisConstructor::extractFeatures(const Diagnostic &finding) {
-    std::vector<double> features;
-
-    features.push_back(static_cast<double>(finding.severity));
-    features.push_back(finding.confidence);
-    features.push_back(static_cast<double>(finding.escalations.size()));
-
     /* Strip trailing 'B' suffix, parse to double, zero on failure. */
     auto extract = [&](const std::string &key) -> double {
         auto it = finding.structuralEvidence.find(key);
@@ -71,15 +81,22 @@ std::vector<double> HypothesisConstructor::extractFeatures(const Diagnostic &fin
         try { return std::stod(val); } catch (...) { return 0.0; }
     };
 
-    features.push_back(extract("sizeof"));
-    features.push_back(extract("cache_lines"));
-    features.push_back(extract("atomic_writes"));
-    features.push_back(extract("mutable_fields"));
-    features.push_back(extract("estimated_frame"));
-    features.push_back(extract("depth"));
-    features.push_back(extract("callees"));
-
-    return features;
+    // Confidence is deliberately absent. It is a per-rule ranking prior, so
+    // its values are not comparable across rules, and feeding the number that
+    // suppression reads back in as a feature that decides suppression closes
+    // a loop nothing measures.
+    return {
+        static_cast<double>(finding.severity) /
+            static_cast<double>(Severity::Critical),
+        magnitude(static_cast<double>(finding.escalations.size()), 32),
+        magnitude(extract("sizeof"), 1 << 16),
+        magnitude(extract("cache_lines"), 64),
+        magnitude(extract("atomic_writes"), 32),
+        magnitude(extract("mutable_fields"), 64),
+        magnitude(extract("estimated_frame"), 1 << 20),
+        magnitude(extract("depth"), 16),
+        magnitude(extract("callees"), 64),
+    };
 }
 
 std::string HypothesisConstructor::generateHypothesisId(const Diagnostic &finding) {

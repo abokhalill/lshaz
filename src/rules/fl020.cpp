@@ -442,18 +442,19 @@ public:
             diag.mechanismClaims = {
                 {"allocate/free round trip, and locality lost against inline "
                  "or stack storage",
-                 "an allocation on a hot path", true, Severity::Medium},
+                 "an allocation on a hot path", ClaimState::Established, Severity::Medium},
                 // Measured flat 1->3 threads for same-thread alloc/free, so
                 // allocator class alone cannot establish contention.
                 {"allocator arena lock contention",
                  "a free on a thread other than the allocating one, which "
                  "returns the block to another thread's arena",
-                 false, Severity::High},
+                 ClaimState::Unknown, Severity::High},
                 {"mmap syscall, page faults, TLB shootdown on munmap",
                  "an allocation above the mmap threshold",
-                 ac == AllocatorClass::Syscall, Severity::Critical},
+                 claimFrom(ac == AllocatorClass::Syscall), Severity::Critical},
                 {"the cost is paid on every iteration",
-                 "the allocation sits inside a loop", site.inLoop != 0,
+                 "the allocation sits inside a loop",
+                 claimFrom(site.inLoop != 0),
                  Severity::High},
                 // Established by the size alone: no runtime frequency
                 // assumption stands behind it, unlike the round-trip claim.
@@ -461,14 +462,14 @@ public:
                  "path, several times the thread-cache round trip",
                  "a constant request above the allocator's thread-cache "
                  "boundary",
-                 overThreadCache, Severity::High},
+                 claimFrom(overThreadCache), Severity::High},
                 // Cross-thread free is the only term that reaches Critical,
                 // and proving it needs alloc/free ownership across TUs, which
                 // we cannot do yet. Unestablished so the grade says so.
                 {"the block is freed by a thread other than the allocator, "
                  "costing 4-5x under jemalloc and up to 25x under glibc",
                  "alloc and free attributed to disjoint thread roles",
-                 false, Severity::High, /*gating=*/true},
+                 ClaimState::Unknown, Severity::High, /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }

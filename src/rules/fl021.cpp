@@ -174,10 +174,11 @@ public:
 
         diag.mechanismClaims = {
             {"L1D capacity pressure from lines touched on entry",
-             "a stack frame large enough to matter on a hot path", true,
+             "a stack frame large enough to matter on a hot path",
+             ClaimState::Established,
              isHot ? Severity::High : Severity::Medium},
             {"D-TLB working-set growth and stack page-fault risk",
-             "a frame spanning more than one page", pages >= 2,
+             "a frame spanning more than one page", claimFrom(pages >= 2),
              Severity::Critical},
         };
         diag.escalations = std::move(escalations);

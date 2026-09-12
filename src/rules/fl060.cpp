@@ -189,13 +189,13 @@ public:
         diag.escalations = std::move(escalations);
         diag.mechanismClaims = {
             {"a large shared mutable structure with no placement control",
-             "size past the threshold, thread escape, mutable state", true,
+             "size past the threshold, thread escape, mutable state", ClaimState::Established,
              Severity::Medium},
             // One cache-miss-sized step, not an order of magnitude, so it
             // cannot carry Critical on its own.
             {"remote-node access costing one cache-miss step over local",
              "a multi-socket deployment (numa_sockets >= 2)",
-             Cfg.numaSockets >= 2, Severity::High},
+             claimFrom(Cfg.numaSockets >= 2), Severity::High},
         };
         out.push_back(std::move(diag));
     }

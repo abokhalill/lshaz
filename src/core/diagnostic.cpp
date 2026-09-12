@@ -61,7 +61,8 @@ bool diagnosticContentLess(const Diagnostic &a, const Diagnostic &b) {
         if (x.supports != y.supports)
             return static_cast<uint8_t>(x.supports) <
                    static_cast<uint8_t>(y.supports);
-        if (x.established != y.established) return x.established < y.established;
+        if (x.state != y.state)
+            return static_cast<uint8_t>(x.state) < static_cast<uint8_t>(y.state);
         if (x.gating != y.gating)           return x.gating < y.gating;
         if (x.effect != y.effect)           return x.effect < y.effect;
         if (x.precondition != y.precondition)

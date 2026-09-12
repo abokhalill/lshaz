@@ -154,11 +154,11 @@ public:
 
         diag.mechanismClaims = {
             {"centralized mutable state reachable from any thread",
-             "a global, non-thread_local, mutable object", true,
+             "a global, non-thread_local, mutable object", ClaimState::Established,
              Severity::Medium},
             {"cross-core RFO transfer and remote NUMA access",
              "two or more writers, at least one on a spawned thread",
-             concurrentWriters, Severity::Critical},
+             claimFrom(concurrentWriters), Severity::Critical},
         };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));

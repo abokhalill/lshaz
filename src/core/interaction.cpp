@@ -137,10 +137,10 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                     std::string(hazardClassName(entries[i].hc)) + " x " +
                     std::string(hazardClassName(entries[j].hc));
                 compound.severity = std::max(dA.severity, dB.severity);
-                compound.confidence = std::min(dA.confidence, dB.confidence)
-                                       * (1.0 + tmpl->interactionThreshold);
-                if (compound.confidence > 1.0)
-                    compound.confidence = 1.0;
+                // The weaker leg bounds it. A join produces no evidence of
+                // its own, so multiplying above either parent would invent
+                // some.
+                compound.confidence = std::min(dA.confidence, dB.confidence);
                 compound.evidenceTier = std::min(dA.evidenceTier,
                                                   dB.evidenceTier);
 
@@ -150,7 +150,8 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 // evidenced than that component is.
                 compound.mechanismClaims = {
                     {"two hazards on one entity, paid together under load",
-                     "both components' own mechanisms established", true,
+                     "both components' own mechanisms established",
+                     ClaimState::Established,
                      std::min(dA.severitySupportedByClaims(),
                               dB.severitySupportedByClaims())},
                 };
@@ -239,16 +240,14 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                     std::string(hazardClassName(tmpl.components[2]));
                 compound.severity = Severity::Critical;
                 compound.confidence = std::min({dA.confidence, dB.confidence,
-                                                 dC.confidence})
-                                       * (1.0 + tmpl.interactionThreshold);
-                if (compound.confidence > 1.0)
-                    compound.confidence = 1.0;
+                                                 dC.confidence});
                 compound.evidenceTier = std::min({dA.evidenceTier,
                                                    dB.evidenceTier,
                                                    dC.evidenceTier});
                 compound.mechanismClaims = {
                     {"three hazards on one entity, paid together under load",
-                     "all three components' own mechanisms established", true,
+                     "all three components' own mechanisms established",
+                     ClaimState::Established,
                      std::min({dA.severitySupportedByClaims(),
                                dB.severitySupportedByClaims(),
                                dC.severitySupportedByClaims()})},

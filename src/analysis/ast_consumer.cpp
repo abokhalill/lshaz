@@ -195,6 +195,12 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
             // Attached here rather than in each rule so a new hot-path rule
             // cannot forget it: the ceiling is a property of how hotness was
             // evidenced, not of the individual mechanism.
+            // A profile that was supplied and does not name this function
+            // contradicts a declaration of it. The declaration stands, but it
+            // stops counting as established: an assertion the evidence
+            // declines to corroborate must not grade like a measurement.
+            const bool contradicted =
+                FD && oracle_.profileContradictsDeclaration(FD);
             for (size_t i = before; i < diagnostics_.size(); ++i) {
                 // Recorded so the reduce phase can tell an unresolved
                 // cross-TU candidate from a settled local verdict without
@@ -205,12 +211,19 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                                  "recur (") + hotnessSourceName(hs) + ")",
                      "hotness established by profile or declaration, not "
                      "inferred from shape alone",
-                     hs >= HotnessSource::Declared,
+                     (hs >= HotnessSource::Declared && !contradicted)
+                         ? ClaimState::Established
+                         : ClaimState::Unknown,
                      // Bound the grade the rule actually assigned, not the
                      // rule's base: rules escalate above base on evidence,
                      // and capping at base would erase those escalations.
                      hotnessSupportedSeverity(hs, diagnostics_[i].severity),
                      /*gating=*/true});
+                if (contradicted)
+                    diagnostics_[i].escalations.push_back(
+                        "declared hot by configuration, but the supplied "
+                        "profile does not name this function: the declaration "
+                        "is uncorroborated and no longer grades as measured");
             }
         }
     }

@@ -280,13 +280,13 @@ public:
 
             d.mechanismClaims = {
                 {"the address carries an alignment the source never proved",
-                 "an atomic cast from a base narrower than the access", true,
+                 "an atomic cast from a base narrower than the access", ClaimState::Established,
                  Severity::Medium},
                 {isARM ? "alignment fault on a misaligned exclusive access"
                        : "the issuing core serializes on the split lock",
                  "the access crosses a cache line under a realizable base "
                  "alignment",
-                 s.splitsSometimes, Severity::Critical},
+                 claimFrom(s.splitsSometimes), Severity::Critical},
             };
             d.escalations = std::move(esc);
             out.push_back(std::move(d));

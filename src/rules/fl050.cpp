@@ -213,18 +213,19 @@ public:
             diag.escalations = std::move(escalations);
             diag.mechanismClaims = {
                 {"branch prediction surface on a hot path",
-                 "a deep nest or a large switch in a hot function", true,
+                 "a deep nest or a large switch in a hot function", ClaimState::Established,
                  Severity::Medium},
                 {"an indirect jump whose target the predictor must resolve",
                  "a switch whose arms are real work, not a constant lookup",
-                 site.isSwitchStmt, Severity::High},
+                 claimFrom(site.isSwitchStmt), Severity::High},
                 {"correlated misprediction chains that defeat pattern "
                  "predictors",
                  "nesting depth at or beyond six",
-                 !site.isSwitchStmt && site.depth >= 6, Severity::High},
+                 claimFrom(!site.isSwitchStmt && site.depth >= 6),
+                 Severity::High},
                 {"branch outcomes vary unpredictably at run time",
                  "runtime branch-miss evidence for this site",
-                 /*established=*/false, Severity::Medium, /*gating=*/true},
+                 ClaimState::Unknown, Severity::Medium, /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }

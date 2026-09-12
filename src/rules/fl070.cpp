@@ -290,7 +290,7 @@ public:
                 diag.mechanismClaims = {
                     {"page walks once the working set outruns dTLB reach",
                      "a region spanning far more base pages than the dTLB "
-                     "covers", true,
+                     "covers", ClaimState::Established,
                      hugeAligned ? Severity::Informational : Severity::Medium},
                 };
                 out.push_back(std::move(diag));
@@ -352,11 +352,12 @@ public:
                 "after the map; 2MB-align the base either way.";
             diag.mechanismClaims = {
                 {"page walks once the working set outruns dTLB reach",
-                 "a mapping large enough to exceed dTLB reach", true,
+                 "a mapping large enough to exceed dTLB reach", ClaimState::Established,
                  Severity::Medium},
                 {"the mapping actually lands on base pages",
                  "no hugepage alignment or THP-backed allocator exonerates it",
-                 !s.unprovableArg && !thpAllocator, Severity::Medium},
+                 claimFrom(!s.unprovableArg && !thpAllocator),
+                 Severity::Medium},
             };
             out.push_back(std::move(diag));
         }

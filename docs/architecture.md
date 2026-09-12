@@ -330,37 +330,56 @@ structural signals) or `speculative`; and **mechanism claims**.
 
 A rule does not assert a hazard as an opaque verdict. It decomposes its
 hardware argument into claims, each naming an effect, the precondition that
-effect requires, whether that precondition was established, and the severity
-it can support:
+effect requires, how that precondition was decided, and the severity it can
+support:
 
 ```cpp
+enum class ClaimState { Unknown, Established, Refuted };
+
 struct MechanismClaim {
     std::string effect;        // what the hardware does
     std::string precondition;  // what must hold for it to happen
-    bool        established;
+    ClaimState  state;
     Severity    supports;
     bool        gating;
+    std::string observation;   // what settled it
 };
 ```
 
-`Diagnostic::severitySupportedByClaims()` combines them, and the pipeline
-clamps each finding's severity to the result. A finding cannot be graded
-Critical on a mechanism whose precondition was never shown.
+**Three states, because two cannot say what the analyzer knows.** Unknown is
+where a pass leaves a condition it could not see, and it stays recoverable: a
+later phase, a profile or a measurement may settle it. Refuted is a verdict,
+and it retires the finding. Collapsing them means an evidence source that
+looked for a condition and found it absent has no way to say so except by
+lowering a number until some threshold elsewhere deletes the finding, which is
+deletion by coincidence rather than by reason.
 
-**Ordinary claims are alternatives; gating claims are conjuncts.** Any one
-established mechanism can carry a finding, so ordinary claims combine with
-`max`. A gating claim caps the result instead:
+Only a source that looked for absence may write Refuted. A rule's own
+predicate coming out false is Unknown (`claimFrom`), because not observing a
+condition is not disproving it.
+
+`Diagnostic::severitySupportedByClaims()` combines the survivors, and the
+pipeline clamps each finding's severity to the result:
 
 ```
 result = min( max(established ordinary claims), min(all gating claims) )
 ```
 
-Hotness is the canonical gating claim: no mechanism costs anything in code
-that never runs. The distinction is load-bearing, not decorative. Folding a
-gating claim into the `max` makes it a no-op.
+**Ordinary claims are alternatives; gating claims are conjuncts.** Any one
+established mechanism can carry a finding, so ordinary claims combine with
+`max`. A gating claim caps instead. Hotness is the canonical one: no mechanism
+costs anything in code that never runs. Folding a gating claim into the `max`
+makes it a no-op.
 
-`scan_test` gates the contract shut: every emitted finding must declare
-its claims, and severity may never outrank an established one.
+`Diagnostic::refutedPrecondition()` decides withdrawal. A refuted gate is a
+necessary condition known false; refuting every alternative leaves the finding
+asserting no mechanism at all. Either withdraws it, naming the observation
+that did it, and the scan reports the count so evidence disagreeing with the
+analysis stays distinguishable from the analysis finding nothing.
+
+`scan_test` gates the contract shut: every emitted finding must declare its
+claims, severity may never outrank an established one, and no finding may
+reach the output still carrying a refuted gate.
 
 ### Grading principles
 
@@ -443,6 +462,29 @@ not a guard.
 The tool models line-level structural exposure; it does not simulate sets,
 associativity, or cycle timing. Runtime impact claims are delegated to the
 experiment pipeline.
+
+### Cost scopes
+
+A mechanism does not have one cost. A counter reports events; a throughput A/B
+reports the latency that reached the critical path; the conversion between
+them is itself part of the model and is itself estimated. So every `CostTerm`
+declares a `TermRole`:
+
+| Role | Meaning |
+|---|---|
+| `event_rate` | hardware events per unit of the target's work |
+| `conversion` | turns events into cycles that are actually exposed |
+| `correction` | a residual learned from a previous measurement |
+
+`CostEstimate::cyclesPerOp` is the product of everything, so it is exposed
+latency. `eventsPerOp()` drops the conversions, which is what a counter can be
+compared against, and drops corrections so last round's answer is not applied
+to the measurement producing the next one.
+
+The role is declared where the term is built and read where the comparison
+happens. Those are different files, so keying on the term's *name* instead
+means a rename silently changes which quantity the machine is being asked
+about, with nothing to catch it.
 
 ## Experiment pipeline
 

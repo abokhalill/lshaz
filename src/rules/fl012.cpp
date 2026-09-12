@@ -337,12 +337,13 @@ public:
 
             diag.mechanismClaims = {
                 {"lock acquisition cost and critical-section width",
-                 "a lock taken on a hot path", true,
+                 "a lock taken on a hot path",
+                 ClaimState::Established,
                  (site.inLoop && site.isNested) ? Severity::Critical
                  : (site.inLoop || site.isNested) ? Severity::High
                                                   : Severity::Medium},
                 {"lock convoy: futex wait and context switch",
-                 "a second thread contending this lock", false,
+                 "a second thread contending this lock", ClaimState::Unknown,
                  Severity::Critical},
             };
             diag.escalations = std::move(escalations);

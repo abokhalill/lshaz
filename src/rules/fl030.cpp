@@ -189,15 +189,15 @@ public:
             diag.mechanismClaims = {
                 {"an inlining barrier: the callee cannot be specialised or "
                  "folded into the caller",
-                 "a virtual call on a hot path", true, Severity::High},
+                 "a virtual call on a hot path", ClaimState::Established, Severity::High},
                 {"the barrier is paid once per iteration, so cost scales with "
                  "trip count",
-                 "the call sits inside a loop", site.inLoop != 0,
+                 "the call sits inside a loop", claimFrom(site.inLoop != 0),
                  Severity::Critical},
                 {"receiver type varies unpredictably, mispredicting the "
                  "indirect branch",
                  "runtime evidence that this site is megamorphic",
-                 /*established=*/false,
+                 ClaimState::Unknown,
                  site.inLoop ? Severity::High : Severity::Medium,
                  /*gating=*/true},
             };

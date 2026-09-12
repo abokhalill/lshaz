@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/ir/refiner.h"
-#include "lshaz/ir/confidence.h"
 
 #include <llvm/IR/Instructions.h>
 
@@ -129,6 +128,25 @@ const IRFunctionProfile *DiagnosticRefiner::findProfileForDiag(
     return findProfileByLocation(diag.location.file, diag.location.line);
 }
 
+// What the optimizer left standing.
+namespace {
+
+constexpr std::string_view kSurvives = "the mechanism survives optimization";
+
+void survives(Diagnostic &d, Severity supports, std::string observation) {
+    d.addSettledGate(std::string(kSurvives),
+                     "the construct is still present after optimization",
+                     ClaimState::Established, supports, std::move(observation));
+}
+
+void eliminated(Diagnostic &d, Severity supports, std::string observation) {
+    d.addSettledGate(std::string(kSurvives),
+                     "the construct is still present after optimization",
+                     ClaimState::Refuted, supports, std::move(observation));
+}
+
+} // namespace
+
 void DiagnosticRefiner::refine(std::vector<Diagnostic> &diagnostics) const {
     for (auto &diag : diagnostics) {
         if (diag.ruleID == "FL010") refineFL010(diag);
@@ -148,65 +166,51 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    unsigned diagLine = diag.location.line;
-    std::string diagFile = diag.location.file;
+    const unsigned diagLine = diag.location.line;
+    const std::string &diagFile = diag.location.file;
 
-    // Site-level correlation: find IR atomics at the exact source line.
-    bool siteConfirmed = false;
-    std::string siteOpName;
+    std::string siteOp;
     for (const auto &ai : profile->atomics) {
-        if (ai.sourceLine == 0)
+        if (ai.sourceLine == 0 || ai.sourceLine != diagLine)
             continue;
-        bool lineMatch = (ai.sourceLine == diagLine);
-        bool fileMatch = diagFile.empty() || ai.sourceFile.empty() ||
-                         filePathSuffixMatch(diagFile, ai.sourceFile);
-        if (lineMatch && fileMatch) {
-            bool isSeqCst = (ai.ordering ==
-                static_cast<unsigned>(llvm::AtomicOrdering::SequentiallyConsistent));
-            if (isSeqCst) {
-                siteConfirmed = true;
-                switch (ai.op) {
-                    case IRAtomicInfo::Store:   siteOpName = "store"; break;
-                    case IRAtomicInfo::RMW:     siteOpName = "rmw"; break;
-                    case IRAtomicInfo::CmpXchg: siteOpName = "cmpxchg"; break;
-                    case IRAtomicInfo::Fence:   siteOpName = "fence"; break;
-                    default:                   siteOpName = "atomic"; break;
-                }
-                break;
-            }
+        if (!(diagFile.empty() || ai.sourceFile.empty() ||
+              filePathSuffixMatch(diagFile, ai.sourceFile)))
+            continue;
+        if (ai.ordering != static_cast<unsigned>(
+                llvm::AtomicOrdering::SequentiallyConsistent))
+            continue;
+        switch (ai.op) {
+            case IRAtomicInfo::Store:   siteOp = "store"; break;
+            case IRAtomicInfo::RMW:     siteOp = "rmw"; break;
+            case IRAtomicInfo::CmpXchg: siteOp = "cmpxchg"; break;
+            case IRAtomicInfo::Fence:   siteOp = "fence"; break;
+            default:                    siteOp = "atomic"; break;
         }
+        break;
     }
 
-    if (siteConfirmed) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kSiteConfirmed,
-            evidence::kFloor, evidence::kCeilingSiteProven);
+    if (!siteOp.empty()) {
+        survives(diag, diag.severity,
+                 "seq_cst " + siteOp + " at line " + std::to_string(diagLine) +
+                 " survives lowering");
         diag.evidenceTier = EvidenceTier::Proven;
-        diag.escalations.push_back(
-            "IR site-confirmed: seq_cst " + siteOpName +
-            " at line " + std::to_string(diagLine) +
-            " survives lowering");
     } else if (profile->seqCstCount > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kFunctionConfirmed,
-            evidence::kFloor, evidence::kCeilingModerate);
-        diag.escalations.push_back(
-            "IR confirmed: " + std::to_string(profile->seqCstCount) +
-            " seq_cst instruction(s) in function (no exact line match)");
+        survives(diag, diag.severity,
+                 std::to_string(profile->seqCstCount) +
+                 " seq_cst instruction(s) in the function, no exact line");
     } else if (!profile->atomics.empty()) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kOptimizedAway,
-            evidence::kFloorOptimizedAway, evidence::kCeilingSiteProven);
-        diag.escalations.push_back(
-            "IR refinement: no seq_cst instructions emitted, "
-            "compiler may have optimized ordering");
+        // Atomics lowered here, none of them seq_cst. The ordering this rule
+        // proposes weakening is the ordering the compiler already dropped.
+        eliminated(diag, diag.severity,
+                   "the function lowered " +
+                   std::to_string(profile->atomics.size()) +
+                   " atomic(s) and none is seq_cst");
     }
 
-    if (profile->fenceCount > 0) {
+    if (profile->fenceCount > 0)
         diag.escalations.push_back(
-            "IR confirmed: " + std::to_string(profile->fenceCount) +
+            "IR: " + std::to_string(profile->fenceCount) +
             " explicit fence instruction(s)");
-    }
 }
 
 void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
@@ -214,36 +218,62 @@ void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    unsigned atomicWriteCount = 0;
-    unsigned loopAtomics = 0;
-    unsigned siteMatched = 0;
+    unsigned writes = 0, inLoop = 0, sited = 0;
     for (const auto &ai : profile->atomics) {
-        if (ai.op == IRAtomicInfo::Store || ai.op == IRAtomicInfo::RMW ||
-            ai.op == IRAtomicInfo::CmpXchg) {
-            ++atomicWriteCount;
-            if (ai.isInLoop)
-                ++loopAtomics;
-            if (ai.sourceLine > 0)
-                ++siteMatched;
+        if (ai.op != IRAtomicInfo::Store && ai.op != IRAtomicInfo::RMW &&
+            ai.op != IRAtomicInfo::CmpXchg)
+            continue;
+        ++writes;
+        if (ai.isInLoop) ++inLoop;
+        if (ai.sourceLine > 0) ++sited;
+    }
+    if (writes == 0)
+        return;
+
+    std::ostringstream obs;
+    obs << writes << " atomic write instruction(s)";
+    if (inLoop) obs << ", " << inLoop << " on a loop back edge";
+    if (sited)  obs << ", " << sited << " with a debug-loc site";
+    survives(diag, diag.severity, obs.str());
+    if (sited > 0)
+        diag.evidenceTier = EvidenceTier::Proven;
+}
+
+void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
+    const auto *profile = findProfileForDiag(diag);
+    if (!profile)
+        return;
+
+    bool mutexCall = false;
+    for (const auto &csi : profile->allCalls) {
+        if (csi.isIndirect) continue;
+        if (csi.calleeName.find("pthread_mutex") != std::string::npos ||
+            csi.calleeName.find("__gthread_mutex") != std::string::npos ||
+            csi.calleeName.find("pthread_spin") != std::string::npos ||
+            csi.calleeName.find("pthread_rwlock") != std::string::npos) {
+            mutexCall = true;
+            break;
         }
     }
 
-    if (atomicWriteCount > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kSiteConfirmed,
-            evidence::kFloor, evidence::kCeilingFuncLevel);
-        if (siteMatched > 0)
-            diag.evidenceTier = EvidenceTier::Proven;
-
-        std::ostringstream ss;
-        ss << "IR confirmed: " << atomicWriteCount
-           << " atomic write instruction(s)";
-        if (loopAtomics > 0)
-            ss << ", " << loopAtomics << " in loop back-edge blocks";
-        if (siteMatched > 0)
-            ss << " (" << siteMatched << " with debug-loc site mapping)";
-        diag.escalations.push_back(ss.str());
+    bool cmpxchg = false, sited = false;
+    for (const auto &ai : profile->atomics) {
+        if (ai.op != IRAtomicInfo::CmpXchg) continue;
+        cmpxchg = true;
+        if (ai.sourceLine == diag.location.line && diag.location.line > 0)
+            sited = true;
     }
+
+    if (!mutexCall && !cmpxchg)
+        return;
+
+    std::string what = mutexCall ? "a pthread_mutex call"
+                                 : "an atomic cmpxchg (lock internals)";
+    if (sited) {
+        what += " at line " + std::to_string(diag.location.line);
+        diag.evidenceTier = EvidenceTier::Proven;
+    }
+    survives(diag, diag.severity, what + " present in lowered IR");
 }
 
 void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
@@ -251,35 +281,25 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    unsigned heapCalls = 0;
-    unsigned loopHeapCalls = 0;
+    unsigned calls = 0, inLoop = 0;
     for (const auto &csi : profile->heapAllocCalls) {
-        if (csi.isIndirect)
-            continue;
-        ++heapCalls;
-        if (csi.isInLoop)
-            ++loopHeapCalls;
+        if (csi.isIndirect) continue;
+        ++calls;
+        if (csi.isInLoop) ++inLoop;
     }
 
-    if (heapCalls > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kHeapSurvived,
-            evidence::kFloor, evidence::kCeilingSiteProven);
-
-        std::ostringstream ss;
-        ss << "IR confirmed: " << heapCalls
-           << " heap alloc/free call(s) after inlining";
-        if (loopHeapCalls > 0)
-            ss << ", " << loopHeapCalls << " in loop blocks";
-        diag.escalations.push_back(ss.str());
-    } else {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kHeapEliminated,
-            evidence::kFloorHeapEliminated, evidence::kCeilingSiteProven);
-        diag.escalations.push_back(
-            "IR refinement: no heap alloc calls found after inlining, "
-            "allocation may have been optimized away");
+    if (calls == 0) {
+        // Inlining and escape analysis removed every allocation the rule was
+        // reporting. There is no allocator call left to contend for an arena.
+        eliminated(diag, diag.severity,
+                   "no heap alloc or free call remains after inlining");
+        return;
     }
+
+    std::ostringstream obs;
+    obs << calls << " heap alloc/free call(s) after inlining";
+    if (inLoop) obs << ", " << inLoop << " in loop blocks";
+    survives(diag, diag.severity, obs.str());
 }
 
 void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
@@ -287,56 +307,30 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    uint64_t irStackSize = profile->totalAllocaBytes;
-    const uint64_t threshold = stackFrameWarnBytes_;
+    const uint64_t frame = profile->totalAllocaBytes;
+    if (frame == 0)
+        return;   // no allocas recorded: the estimate stands unchallenged
 
-    // IR-precise frame below threshold: suppress the AST-based diagnostic.
-    if (irStackSize < threshold && irStackSize > 0) {
-        diag.suppressed = true;
-        diag.escalations.push_back(
-            "IR suppressed: actual stack frame " + std::to_string(irStackSize) +
-            "B (below " + std::to_string(threshold) +
-            "B threshold), AST estimate was inaccurate");
+    if (frame < stackFrameWarnBytes_) {
+        // The rule graded an AST estimate; the real frame is below the same
+        // bar it was emitted against.
+        eliminated(diag, diag.severity,
+                   "the lowered frame is " + std::to_string(frame) +
+                   "B, below the " + std::to_string(stackFrameWarnBytes_) +
+                   "B threshold the finding was emitted against");
         return;
     }
 
-    // Replace AST estimate with IR-precise value.
-    std::ostringstream ss;
-    ss << "IR confirmed: stack frame " << irStackSize
-       << "B from " << profile->allocas.size() << " alloca(s)";
-
-    // List large allocas.
-    for (const auto &a : profile->allocas) {
-        if (a.sizeBytes >= 256)
-            ss << " [" << a.name << "=" << a.sizeBytes << "B]";
-    }
-    diag.escalations.push_back(ss.str());
-
-    // Adjust confidence based on IR/AST agreement.
-    uint64_t astEstimate = 0;
-    auto estIt = diag.structuralEvidence.find("estimated_frame");
-    if (estIt != diag.structuralEvidence.end()) {
-        std::string val = estIt->second;
-        if (!val.empty() && val.back() == 'B') val.pop_back();
-        try { astEstimate = std::stoull(val); } catch (...) {}
-    }
-
-    if (irStackSize > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kStackConfirmed,
-            evidence::kFloor, evidence::kCeilingFuncLevel);
-        diag.evidenceTier = EvidenceTier::Proven;
-
-        diag.structuralEvidence["ir_frame"] = std::to_string(irStackSize) + "B";
-        diag.structuralEvidence["ir_allocas"] = std::to_string(profile->allocas.size());
-
-        if (astEstimate > 0 && irStackSize > astEstimate * 2) {
-            diag.escalations.push_back(
-                "IR stack frame (" + std::to_string(irStackSize) +
-                "B) exceeds AST estimate (" + std::to_string(astEstimate) +
-                "B). Compiler-generated temporaries or alignment padding");
-        }
-    }
+    std::ostringstream obs;
+    obs << "lowered frame " << frame << "B from " << profile->allocas.size()
+        << " alloca(s)";
+    for (const auto &a : profile->allocas)
+        if (a.sizeBytes >= 256) obs << " [" << a.name << "=" << a.sizeBytes << "B]";
+    survives(diag, diag.severity, obs.str());
+    diag.evidenceTier = EvidenceTier::Proven;
+    diag.structuralEvidence["ir_frame"] = std::to_string(frame) + "B";
+    diag.structuralEvidence["ir_allocas"] =
+        std::to_string(profile->allocas.size());
 }
 
 void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
@@ -345,21 +339,14 @@ void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
         return;
 
     if (profile->indirectCallCount > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kIndirectConfirmed,
-            evidence::kFloor, evidence::kCeilingFuncLevel);
-
-        std::ostringstream ss;
-        ss << "IR confirmed: " << profile->indirectCallCount
-           << " indirect call(s) remain after devirtualization";
-        diag.escalations.push_back(ss.str());
+        survives(diag, diag.severity,
+                 std::to_string(profile->indirectCallCount) +
+                 " indirect call(s) remain after devirtualization");
     } else if (profile->directCallCount > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kFullyDevirtualized,
-            evidence::kFloorDevirtualized, evidence::kCeilingSiteProven);
-        diag.escalations.push_back(
-            "IR refinement: all calls devirtualized to direct, "
-            "BTB pressure eliminated by compiler");
+        // Every call in the function lowered to a direct one. There is no
+        // indirect branch left to mispredict and no inline left to lose.
+        eliminated(diag, diag.severity,
+                   "every call devirtualized to a direct call");
     }
 }
 
@@ -368,98 +355,40 @@ void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    // std::function invocation compiles to an indirect call.
     if (profile->indirectCallCount > 0) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kIndirectConfirmed,
-            evidence::kFloor, evidence::kCeilingFuncLevel);
-        diag.escalations.push_back(
-            "IR confirmed: " + std::to_string(profile->indirectCallCount) +
-            " indirect call(s), type-erased dispatch not eliminated");
+        survives(diag, diag.severity,
+                 std::to_string(profile->indirectCallCount) +
+                 " indirect call(s): the type erasure was not eliminated");
     } else {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kOptimizedAway,
-            evidence::kFloorIndirectGone, evidence::kCeilingSiteProven);
-        diag.escalations.push_back(
-            "IR refinement: no indirect calls found, "
-            "std::function may have been devirtualized or inlined");
-    }
-}
-
-void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
-    const auto *profile = findProfileForDiag(diag);
-    if (!profile)
-        return;
-
-    unsigned diagLine = diag.location.line;
-
-    bool hasMutexCall = false;
-    bool hasAtomicCmpXchg = false;
-    bool siteCorrelated = false;
-
-    for (const auto &csi : profile->allCalls) {
-        if (csi.isIndirect)
-            continue;
-        if (csi.calleeName.find("pthread_mutex") != std::string::npos ||
-            csi.calleeName.find("__gthread_mutex") != std::string::npos ||
-            csi.calleeName.find("pthread_spin") != std::string::npos ||
-            csi.calleeName.find("pthread_rwlock") != std::string::npos)
-            hasMutexCall = true;
-    }
-    for (const auto &ai : profile->atomics) {
-        if (ai.op == IRAtomicInfo::CmpXchg) {
-            hasAtomicCmpXchg = true;
-            if (ai.sourceLine == diagLine && diagLine > 0)
-                siteCorrelated = true;
-        }
-    }
-
-    if (hasMutexCall || hasAtomicCmpXchg) {
-        diag.confidence = std::clamp(
-            diag.confidence + evidence::kLockConfirmed,
-            evidence::kFloor, evidence::kCeilingFuncLevel);
-        std::string detail;
-        if (hasMutexCall) detail = "pthread_mutex call";
-        else detail = "atomic cmpxchg (lock internals)";
-
-        if (siteCorrelated) {
-            diag.evidenceTier = EvidenceTier::Proven;
-            detail += " at line " + std::to_string(diagLine);
-        }
-        diag.escalations.push_back(
-            "IR confirmed: " + detail + " present in lowered IR");
+        eliminated(diag, diag.severity,
+                   "no indirect call remains: the std::function was inlined "
+                   "or devirtualized");
     }
 }
 
 void DiagnosticRefiner::refineFL090(Diagnostic &diag) const {
-    // FL090 is struct-level, not function-level. Scan all profiles for
-    // aggregate IR signals that correlate with the compound hazard.
-    unsigned totalAtomicWrites = 0;
-    unsigned totalIndirectCalls = 0;
-    unsigned totalFences = 0;
-
+    // Struct-level, so there is no enclosing function to look up. The module
+    // aggregate is context, not a verdict on this record, and is reported as
+    // such rather than settling any claim.
+    unsigned atomicWrites = 0, indirect = 0, fences = 0;
     for (const auto &[name, profile] : profiles_) {
-        for (const auto &ai : profile.atomics) {
+        for (const auto &ai : profile.atomics)
             if (ai.op == IRAtomicInfo::Store || ai.op == IRAtomicInfo::RMW ||
                 ai.op == IRAtomicInfo::CmpXchg)
-                ++totalAtomicWrites;
-        }
-        totalIndirectCalls += profile.indirectCallCount;
-        totalFences += profile.fenceCount;
+                ++atomicWrites;
+        indirect += profile.indirectCallCount;
+        fences   += profile.fenceCount;
     }
 
-    if (totalAtomicWrites > 0 || totalFences > 0) {
-        std::ostringstream ss;
-        ss << "IR aggregate: " << totalAtomicWrites << " atomic write(s), "
-           << totalFences << " fence(s), "
-           << totalIndirectCalls << " indirect call(s) across module";
-        diag.escalations.push_back(ss.str());
-    }
+    if (atomicWrites == 0 && fences == 0)
+        return;
+    std::ostringstream ss;
+    ss << "IR module aggregate: " << atomicWrites << " atomic write(s), "
+       << fences << " fence(s), " << indirect << " indirect call(s)";
+    diag.escalations.push_back(ss.str());
 }
 
 void DiagnosticRefiner::refineFL091(Diagnostic &diag) const {
-    // FL091 synthesized interactions are struct-level; reuse FL090's
-    // aggregate IR scan for corroborating atomic/fence/indirect evidence.
     refineFL090(diag);
 }
 

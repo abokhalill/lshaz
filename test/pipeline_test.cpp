@@ -693,23 +693,63 @@ void testMechanismClaimCeiling() {
     // The shape of every defect found in the audit: the effect carrying the
     // high grade is exactly the one whose precondition was never checked.
     d.mechanismClaims = {
-        {"lock acquisition cost", "a lock on a hot path", true,
-         lshaz::Severity::Medium},
+        {"lock acquisition cost", "a lock on a hot path",
+         lshaz::ClaimState::Established, lshaz::Severity::Medium},
         {"convoy: futex wait and context switch",
-         "a second thread contending", false, lshaz::Severity::Critical},
+         "a second thread contending", lshaz::ClaimState::Unknown,
+         lshaz::Severity::Critical},
     };
     check(d.severitySupportedByClaims() == lshaz::Severity::Medium,
-          "an unestablished claim cannot raise the ceiling");
+          "an unknown claim cannot raise the ceiling");
 
-    d.mechanismClaims[1].established = true;
+    d.mechanismClaims[1].state = lshaz::ClaimState::Established;
     check(d.severitySupportedByClaims() == lshaz::Severity::Critical,
           "establishing the precondition restores the grade");
 
     // Nothing established at all: the finding is structural only.
-    d.mechanismClaims[0].established = false;
-    d.mechanismClaims[1].established = false;
+    d.mechanismClaims[0].state = lshaz::ClaimState::Unknown;
+    d.mechanismClaims[1].state = lshaz::ClaimState::Unknown;
     check(d.severitySupportedByClaims() == lshaz::Severity::Informational,
           "no established claim supports nothing above Informational");
+    check(d.refutedPrecondition() == nullptr,
+          "unknown is not refuted, so nothing is withdrawn");
+}
+
+// Refutation is a verdict, not a low score. An evidence source that looked
+// for a precondition and found it absent retires the finding by name.
+void testRefutationWithdrawsTheFinding() {
+    std::cerr << "test: a refuted precondition withdraws the finding\n";
+    lshaz::Diagnostic d;
+
+    // A refuted alternative simply stops contributing while another stands.
+    d.mechanismClaims = {
+        {"inlining barrier", "a virtual call on a hot path",
+         lshaz::ClaimState::Established, lshaz::Severity::High},
+        {"indirect branch misprediction", "the call survives devirtualization",
+         lshaz::ClaimState::Refuted, lshaz::Severity::Critical},
+    };
+    check(d.severitySupportedByClaims() == lshaz::Severity::High,
+          "a refuted alternative cannot contribute its severity");
+    check(d.refutedPrecondition() == nullptr,
+          "one surviving mechanism keeps the finding alive");
+
+    // Refute the last standing alternative: nothing is being asserted.
+    d.mechanismClaims[0].state = lshaz::ClaimState::Refuted;
+    const auto *dead = d.refutedPrecondition();
+    check(dead != nullptr, "refuting every alternative withdraws the finding");
+
+    // A refuted gate is a necessary precondition known false.
+    lshaz::Diagnostic g;
+    g.mechanismClaims = {
+        {"arena contention", "an allocation on a hot path",
+         lshaz::ClaimState::Established, lshaz::Severity::High},
+        {"the allocation happens at all",
+         "the call survives optimization", lshaz::ClaimState::Refuted,
+         lshaz::Severity::Critical, /*gating=*/true},
+    };
+    const auto *gate = g.refutedPrecondition();
+    check(gate != nullptr && gate->gating,
+          "a refuted gate withdraws however well the mechanism is evidenced");
 }
 
 // --- PMU instrument election ---------------------------------------------
@@ -816,6 +856,7 @@ int main() {
 
     // PMU instrument election
     testMechanismClaimCeiling();
+    testRefutationWithdrawsTheFinding();
     testPMUCliffAtLineSize();
     testPMUCliffRejectsWrongMechanism();
     testPMUCliffNoTransition();

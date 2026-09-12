@@ -49,12 +49,19 @@ A gated rule emits nothing without a hotness signal.
 ## Shared contracts
 
 **Claims bound severity.** Each rule decomposes its argument into claims
-carrying an `effect`, the `precondition` it needs, whether that precondition is
-`established`, and the severity it `supports`. Ordinary claims are alternatives
+carrying an `effect`, the `precondition` it needs, the `state` of that
+precondition, and the severity it `supports`. Ordinary claims are alternatives
 and combine with `max`. A **gating** claim is a conjunct and caps the result;
 hotness is the canonical gate. The pipeline clamps every finding to what its
 claims establish, and `scan_test` fails any finding that omits its claims or
 outranks an established one.
+
+A claim is `unknown`, `established` or `refuted`. Unknown means nobody
+decided, so it cannot promote and does not withdraw. Refuted means an evidence
+source looked and found the precondition false: a refuted gate, or every
+alternative refuted, retires the finding and names what did it. A rule's own
+predicate coming out false is `unknown`, never `refuted` — not observing a
+condition is not disproving it.
 
 **Hot-path gating caps severity.** A profile or a declaration (`hot` attribute,
 config glob) imposes no ceiling. Hotness inferred from nested loops or recursion

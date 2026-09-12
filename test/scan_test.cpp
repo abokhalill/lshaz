@@ -387,6 +387,7 @@ void testMechanismClaimsBoundSeverity(const std::string &bin,
     };
 
     size_t checked = 0, violations = 0, unmigrated = 0;
+    size_t refutedSurvivors = 0;
     for (size_t i = r.out.find("\"ruleID\":"); i != std::string::npos;
          i = r.out.find("\"ruleID\":", i + 1)) {
         size_t end = r.out.find("\"ruleID\":", i + 1);
@@ -401,11 +402,14 @@ void testMechanismClaimsBoundSeverity(const std::string &bin,
         int sev = rank(strAfter(obj, "\"severity\":", 0));
 
         // Ceiling is the highest grade any ESTABLISHED claim supports.
+        // Unknown and refuted contribute nothing, and a refuted claim must
+        // never reach the output at all: the reduce phase withdraws it.
         int ceiling = 0;
-        for (size_t c = obj.find("\"established\":"); c != std::string::npos;
-             c = obj.find("\"established\":", c + 1)) {
-            bool established = obj.compare(c + 15, 4, "true") == 0;
-            if (!established) continue;
+        for (size_t c = obj.find("\"state\":"); c != std::string::npos;
+             c = obj.find("\"state\":", c + 1)) {
+            const std::string st = strAfter(obj, "\"state\":", c);
+            if (st == "refuted") ++refutedSurvivors;
+            if (st != "established") continue;
             ceiling = std::max(ceiling, rank(strAfter(obj, "\"supports\":", c)));
         }
         if (sev > ceiling) {
@@ -420,6 +424,10 @@ void testMechanismClaimsBoundSeverity(const std::string &bin,
     check(checked > 0, "rules declare mechanism claims");
     check(violations == 0, "no finding outranks its established claims");
     check(unmigrated == 0, "every emitted finding declares its mechanism");
+    // A refuted gate withdraws the finding, so one cannot reach the output
+    // still carrying the refutation that should have retired it.
+    check(refutedSurvivors == 0,
+          "no finding survives carrying a refuted gating precondition");
     fs::remove_all(tmp);
 }
 

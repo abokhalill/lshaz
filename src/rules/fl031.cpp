@@ -237,16 +237,17 @@ public:
             diag.mechanismClaims = {
                 {"indirect call through type-erased storage, and the "
                  "inlining the erasure prevents",
-                 "a std::function used on a hot path", true, Severity::High},
+                 "a std::function used on a hot path", ClaimState::Established, Severity::High},
                 {"heap allocation when the callable exceeds the small-buffer",
                  "the callable is constructed here rather than only invoked",
-                 site.kind == StdFuncSite::Construct, Severity::High},
+                 claimFrom(site.kind == StdFuncSite::Construct),
+                 Severity::High},
                 {"the indirect call and any allocation recur per iteration",
-                 "the use sits inside a loop", site.inLoop != 0,
+                 "the use sits inside a loop", claimFrom(site.inLoop != 0),
                  Severity::Critical},
                 {"the stored target varies unpredictably between calls",
                  "runtime evidence that this site is megamorphic",
-                 site.kind == StdFuncSite::Construct,
+                 claimFrom(site.kind == StdFuncSite::Construct),
                  site.kind == StdFuncSite::Construct
                      ? Severity::Critical
                      : (site.inLoop ? Severity::High : Severity::Medium),
@@ -296,7 +297,7 @@ public:
             diag.mechanismClaims = {
                 {"indirect call through type-erased storage, and the "
                  "inlining the erasure prevents",
-                 "a std::function parameter on a hot path", true,
+                 "a std::function parameter on a hot path", ClaimState::Established,
                  Severity::High},
             };
             out.push_back(std::move(diag));

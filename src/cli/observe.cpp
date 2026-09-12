@@ -24,13 +24,16 @@ namespace lshaz {
 
 namespace {
 
-// Two terms come back out before a residual is taken. exposed_share guesses
-// how much of a transfer the machine hides, and a profiler counts transfers
-// without saying whether the latency reached the critical path, so leaving it
-// in absorbs an exposure error into a term about transfer cost. calibration
-// is last round's correction, and measuring against it applies it twice.
-bool measuredByProfile(const std::string &term) {
-    return term != "exposed_share" && term != "calibration";
+// A profile counts events, so the residual is taken against the event-rate
+// product. Conversion terms turn events into exposed cycles and a counter
+// never saw that; corrections are last round's answer and measuring against
+// one applies it twice.
+//
+// Keyed on the declared role rather than the term's name: the estimate and
+// this comparison live in different files, and a renamed term must not
+// silently change which quantity the machine is being asked about.
+bool measuredByProfile(llvm::StringRef role) {
+    return role.empty() || role == "event_rate";
 }
 
 // dictPrefetcherRun arrives as dictPrefetcherRun.lto_priv.0, and demangled
@@ -202,7 +205,8 @@ bool readFindings(const std::string &path, std::vector<CostedFinding> &out,
                 auto name = t->getString("name");
                 auto val = t->getNumber("value");
                 if (!name || !val) continue;
-                if (!measuredByProfile(name->str())) continue;
+                if (!measuredByProfile(t->getString("role").value_or("")))
+                    continue;
                 base = milliMul(base,
                                 static_cast<Milli>(*val * kMilli + 0.5));
                 anyTerm = true;

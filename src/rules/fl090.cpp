@@ -178,7 +178,7 @@ public:
             {"per-line RFO transfer across the footprint",
              "atomics spanning >=2 lines and a sharing route independent of "
              "them",
-             multiLineAtomics && escapeBeyondAtomics,
+             claimFrom(multiLineAtomics && escapeBeyondAtomics),
              deliberateLayout ? Severity::Medium : Severity::Critical},
         };
         diag.escalations = std::move(escalations);

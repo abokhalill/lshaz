@@ -45,12 +45,13 @@ PrecisionBudget::PrecisionBudget() {
     // Compound hazard: requires multiple signals (native structural).
     add("FL090", 0, 0.55, Severity::Critical);
 
-    // Synthesized interaction: post-hoc correlation, tighter confidence floor.
-    add("FL091", 0, 0.60, Severity::Critical);
-
-    // Unapplied in-tree mitigation: inherits an attributed FL002, so the
-    // component's floor already applies; keep parity with FL091.
-    add("FL092", 0, 0.60, Severity::Critical);
+    // Synthesized findings carry no ladder of their own: confidence is the
+    // weakest component's, and synthesis runs on components that already
+    // cleared their own floors. A second floor would re-judge an inherited
+    // number against a bar meant for rule-emitted ones, which is what the
+    // compound's old confidence multiplier existed to climb back over.
+    add("FL091", 0, 0.0, Severity::Critical);
+    add("FL092", 0, 0.0, Severity::Critical);
 }
 
 const RulePrecisionPolicy *PrecisionBudget::getPolicy(

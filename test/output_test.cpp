@@ -125,18 +125,32 @@ void testJSONEmptyDiagnostics() {
           "empty diagnostics array");
 }
 
+// Reads the value of the "confidence" key rather than searching the whole
+// document: the schema version is also a dotted number, so a substring test
+// passes on it and would keep passing if the field stopped being emitted.
+static std::string confidenceField(const std::string &json) {
+    const std::string key = "\"confidence\": ";
+    auto at = json.find(key);
+    if (at == std::string::npos) return {};
+    at += key.size();
+    auto end = json.find_first_of(",\n", at);
+    return json.substr(at, end - at);
+}
+
 void testJSONConfidenceBounds() {
-    std::cerr << "test: JSON confidence clamped to [0,1]\n";
+    std::cerr << "test: JSON confidence bounds are serialized on the field\n";
     lshaz::JSONOutputFormatter fmt;
     auto d = makeDiag("FL001", "f", "t.cpp", 1);
 
     d.confidence = 0.0;
-    auto out1 = fmt.format({d});
-    check(contains(out1, "0.0") || contains(out1, "0.00"), "zero confidence serialized");
+    check(confidenceField(fmt.format({d})) == "0", "zero confidence on the field");
 
     d.confidence = 1.0;
-    auto out2 = fmt.format({d});
-    check(contains(out2, "1.0") || contains(out2, "1.00"), "max confidence serialized");
+    check(confidenceField(fmt.format({d})) == "1", "max confidence on the field");
+
+    d.confidence = 0.88;
+    check(confidenceField(fmt.format({d})) == "0.88",
+          "a fractional value round-trips its digits");
 }
 
 void testJSONNaNGuard() {

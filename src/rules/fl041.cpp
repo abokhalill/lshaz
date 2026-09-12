@@ -222,12 +222,12 @@ public:
         diag.escalations = std::move(escalations);
         diag.mechanismClaims = {
             {"head and tail indices occupy one line",
-             "queue-shaped naming with the pair co-resident", true,
+             "queue-shaped naming with the pair co-resident", ClaimState::Established,
              Severity::Medium},
             {"producer/consumer ownership ping-pong on every operation",
              fromAtomics ? "atomic indices evidencing multi-writer intent"
                          : "a thread-escape verdict for the record",
-             true, Severity::Critical},
+             ClaimState::Established, Severity::Critical},
         };
         out.push_back(std::move(diag));
     }

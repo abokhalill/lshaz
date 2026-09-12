@@ -107,6 +107,17 @@ void HotPathOracle::loadProfileHotFunctions(
     profileHotFunctions_ = std::move(names);
 }
 
+bool HotPathOracle::profileContradictsDeclaration(
+    const clang::FunctionDecl *FD) const {
+    if (!FD || profileHotFunctions_.empty())
+        return false;
+    const auto *canon = FD->getCanonicalDecl();
+    auto it = sources_.find(canon);
+    if (it == sources_.end() || it->second != HotnessSource::Declared)
+        return false;
+    return !matchesProfileFunction(canon);
+}
+
 bool HotPathOracle::matchesProfileFunction(
     const clang::FunctionDecl *FD) const {
     if (profileHotFunctions_.empty())

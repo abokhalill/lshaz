@@ -318,9 +318,9 @@ public:
             diag.mechanismClaims = {
                 {"the stored value changes far less often than the store runs",
                  "the value is a division, shift or predicate with a constant "
-                 "factor", true, Severity::Informational},
+                 "factor", ClaimState::Established, Severity::Informational},
                 {"the store is not already guarded on the value changing",
-                 "no enclosing condition tests the destination", true,
+                 "no enclosing condition tests the destination", ClaimState::Established,
                  Severity::Medium},
                 // Left for the reduce phase. A store in a function reached
                 // once from main runs once, and a per-TU view cannot tell
@@ -328,7 +328,7 @@ public:
                 // is only whole after every shard reports.
                 {"the store runs more than once",
                  "the enclosing function is reached from a loop or from more "
-                 "than one call site", false, Severity::Informational,
+                 "than one call site", ClaimState::Unknown, Severity::Informational,
                  /*gating=*/true},
             };
             out.push_back(std::move(diag));

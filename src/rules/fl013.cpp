@@ -467,18 +467,18 @@ public:
 
             diag.mechanismClaims = {
                 {"memory-order machine clear when the peer's write lands",
-                 "a tight poll loop with no pause or wait hint", true,
+                 "a tight poll loop with no pause or wait hint", ClaimState::Established,
                  Severity::Medium},
                 // Kept, unestablished, so the verdict names what was tested
                 // and dropped rather than silently omitting it.
                 {"sibling starvation: the spin holds issue slots the peer "
                  "needs to make the progress being waited on",
                  "a spinning sibling measurably slowing its peer, which did "
-                 "not reproduce on either vendor measured", false,
+                 "not reproduce on either vendor measured", ClaimState::Unknown,
                  Severity::High},
                 {"RFO ping-pong with the line held Modified",
                  "the spin writes each iteration (TAS) rather than reading",
-                 s.tasForm, Severity::High},
+                 claimFrom(s.tasForm), Severity::High},
             };
             out.push_back(std::move(diag));
         }

@@ -49,6 +49,26 @@ inline std::string milliToText(Milli v) {
     return out + std::to_string(frac);
 }
 
+// What a term contributes, which decides which instruments can be compared
+// against it. A mechanism does not have one cost: a counter reports events, a
+// throughput A/B reports the latency that reached the critical path, and the
+// conversion between them is itself modelled. Measuring an estimate against
+// the wrong scope measures the conversion.
+enum class TermRole : uint8_t {
+    EventRate,   // hardware events per unit of the target's work
+    Conversion,  // turns events into cycles that are actually exposed
+    Correction,  // a residual learned from a previous measurement
+};
+
+constexpr const char *termRoleName(TermRole r) {
+    switch (r) {
+        case TermRole::EventRate:  return "event_rate";
+        case TermRole::Conversion: return "conversion";
+        case TermRole::Correction: return "correction";
+    }
+    return "event_rate";
+}
+
 // A named factor in a finding's cost, with where it came from and whether
 // it is a measurement or a stand-in. An unestablished term still
 // participates in the product, because an optimistic bound that lands below
@@ -59,6 +79,7 @@ struct CostTerm {
     Milli value = 0;
     bool established = false;
     std::string source;
+    TermRole role = TermRole::EventRate;
 };
 
 struct CostEstimate {
@@ -82,9 +103,9 @@ struct CostEstimate {
     bool empty() const { return terms.empty(); }
 
     void add(std::string name, Milli value, bool established,
-             std::string source) {
+             std::string source, TermRole role = TermRole::EventRate) {
         terms.push_back({std::move(name), value, established,
-                         std::move(source)});
+                         std::move(source), role});
     }
 
     // Product of every term. Called once, after all terms are in.
@@ -96,6 +117,19 @@ struct CostEstimate {
             complete = complete && t.established;
         }
         cyclesPerOp = terms.empty() ? 0 : acc;
+    }
+
+    // Events per operation: the product with the conversion to exposed cycles
+    // left out, which is the quantity a counter reports. Corrections are out
+    // too, since a residual learned last round would otherwise be applied to
+    // the measurement that is about to produce the next one.
+    Milli eventsPerOp() const {
+        if (terms.empty()) return 0;
+        Milli acc = kMilli;
+        for (const auto &t : terms)
+            if (t.role == TermRole::EventRate)
+                acc = milliMul(acc, t.value);
+        return acc;
     }
 };
 

@@ -246,14 +246,14 @@ public:
 
         diag.mechanismClaims = {
             {"L1D footprint: the object occupies several lines at once",
-             "a record spanning more than one cache line", true,
+             "a record spanning more than one cache line", ClaimState::Established,
              Severity::High},
             {"per-line RFO transfer on write",
              "written fields spanning three or more lines",
-             writerLines >= 3, Severity::Critical},
+             claimFrom(writerLines >= 3), Severity::Critical},
             {"split load/store across a line boundary",
              "a field whose access granule crosses the boundary",
-             !straddlers.empty(), Severity::High},
+             claimFrom(!straddlers.empty()), Severity::High},
         };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));

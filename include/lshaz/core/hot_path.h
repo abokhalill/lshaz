@@ -52,6 +52,17 @@ public:
     // Why this function is hot. None when it is not.
     HotnessSource hotnessSource(const clang::FunctionDecl *FD) const;
 
+    // A profile was supplied and does not name this function, yet config or
+    // an attribute declares it hot.
+    //
+    // Declared and Profiled both impose no severity ceiling, so an assertion
+    // the evidence does not corroborate would otherwise grade exactly like a
+    // measurement, indefinitely and invisibly. This does not make the function
+    // cold: absence from a sampled profile is weak evidence of absence, and
+    // the cross-TU verdict is what withdraws findings. It removes the
+    // declaration's claim to profile-grade authority and says why.
+    bool profileContradictsDeclaration(const clang::FunctionDecl *FD) const;
+
     // Propagate hotness transitively through a call graph.
     // All functions reachable from currently-hot roots within maxDepth
     // call edges are marked hot.

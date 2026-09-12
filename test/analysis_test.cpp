@@ -9,7 +9,9 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/event_profile.h"
 #include "lshaz/analysis/loop_shape.h"
+#include "lshaz/core/config.h"
 #include "lshaz/core/cost_calibration.h"
+#include "lshaz/core/hot_path.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
@@ -994,7 +996,59 @@ void testLegacyRowsRoundTrip() {
     std::remove(path.c_str());
 }
 
+// A config glob and a profile both mark a function hot with no severity
+// ceiling, so an assertion the profile declines to corroborate would otherwise
+// grade exactly like a measurement, forever and invisibly.
+void testProfileContradictsDeclaration() {
+    std::cerr << "test: a profile that omits a declared-hot function says so\n";
+    using namespace lshaz;
+    const std::string src = R"cpp(
+        void declaredHot() {}
+        void alsoProfiled() {}
+    )cpp";
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) { std::cerr << "  FAIL: AST parse failed\n"; ++failures; return; }
+    auto &Ctx = AST->getASTContext();
+
+    const clang::FunctionDecl *declared = nullptr, *profiled = nullptr;
+    for (auto *D : Ctx.getTranslationUnitDecl()->decls())
+        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+            if (FD->getNameAsString() == "declaredHot") declared = FD;
+            if (FD->getNameAsString() == "alsoProfiled") profiled = FD;
+        }
+    check(declared && profiled, "both functions found");
+    if (!declared || !profiled) return;
+
+    Config cfg;
+    cfg.hotFunctionPatterns = {"declaredHot", "alsoProfiled"};
+
+    // No profile supplied: a declaration is all the evidence there is, and
+    // nothing contradicts it.
+    {
+        HotPathOracle oracle(cfg);
+        check(oracle.isFunctionHot(declared), "config glob marks it hot");
+        check(!oracle.profileContradictsDeclaration(declared),
+              "with no profile there is nothing to disagree with");
+    }
+
+    // A profile naming only one of them contradicts the other.
+    {
+        HotPathOracle oracle(cfg);
+        oracle.loadProfileHotFunctions({"alsoProfiled"});
+        check(oracle.isFunctionHot(declared) && oracle.isFunctionHot(profiled),
+              "both still register as hot");
+        check(oracle.profileContradictsDeclaration(declared),
+              "the declared-only function is uncorroborated");
+        check(!oracle.profileContradictsDeclaration(profiled),
+              "the one the profile names is corroborated");
+        check(oracle.hotnessSource(profiled) == HotnessSource::Profiled,
+              "and it upgrades to profile-sourced hotness");
+    }
+}
+
 int main() {
+    testProfileContradictsDeclaration();
     testInstrumentScopesDoNotBlend();
     testLegacyRowsRoundTrip();
     testPerfReportParsing();
