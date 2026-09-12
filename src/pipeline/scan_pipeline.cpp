@@ -2669,7 +2669,13 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
             for (const auto &p : CompileDBResolver::candidatePaths(
                      request.workingDirectory))
                 llvm::errs() << "\n    " << p;
-            llvm::errs() << "\n";
+            // The most common way a first run ends. Listing where we looked
+            // says what happened; this says what to do about it.
+            llvm::errs() << "\n\n  to generate one:\n"
+                         << "    lshaz init " << request.workingDirectory
+                         << "\n  or point at an existing database:\n"
+                         << "    lshaz scan " << request.workingDirectory
+                         << " --compile-db <path>\n";
             ScanResult result;
             result.status = ScanStatus::ToolError;
             return result;

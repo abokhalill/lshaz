@@ -616,8 +616,15 @@ int runScanCommand(int argc, const char **argv) {
 
     auto result = pipeline.execute(request);
 
-    // Summary on stderr.
-    {
+    // A fatal has already said what went wrong on stderr. Falling through to
+    // the formatter printed "no hazards detected" underneath it, which is the
+    // one sentence a failed scan must never end on.
+    if (result.status == ScanStatus::ToolError)
+        return 3;
+
+    // Summary on stderr. Not after a fatal: "0/0 TU(s) parsed" reads like a
+    // clean run and the error above it is the actual outcome.
+    if (result.status != ScanStatus::ToolError) {
         if (isTTY) llvm::errs() << "\r";
         unsigned ok = result.totalTUsAnalyzed - result.totalTUsFailed;
         llvm::errs() << "lshaz: " << ok << "/" << result.totalTUsAnalyzed
