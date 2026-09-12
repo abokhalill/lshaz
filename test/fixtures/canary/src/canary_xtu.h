@@ -1,8 +1,8 @@
 // Cross-TU read/write line sharing. The store and the read compile apart, so
 // no single TU holds both halves and a per-TU field-evidence gate cannot
-// express the pair. Shape taken from redis, where call() stores
-// redisCommand::calls in server.c while getKeysFromCommandWithSpecs reads the
-// key specs on the same line from db.c.
+// express the pair. The shape is a dispatch table whose call counter is
+// incremented in one file while the lookup path reads neighbouring fields on
+// the same line from another.
 #ifndef CANARY_XTU_H
 #define CANARY_XTU_H
 

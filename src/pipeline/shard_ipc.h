@@ -15,15 +15,14 @@
 namespace lshaz {
 
 // The wire between a forked child and the parent. Everything a
-// post-processing pass consumes has to appear on both sides of this, and the
-// failure mode when it does not is the worst kind available: correct at
-// --jobs 1, silently incomplete in parallel, and green on a machine whose
-// scheduler happened to put the writer and the reader in one shard.
+// post-processing pass consumes has to appear on both sides, and the failure
+// mode when it does not is the worst available: correct at --jobs 1, silently
+// incomplete in parallel, and green whenever the scheduler happens to put the
+// writer and the reader in one shard.
 //
-// Declared here rather than left in the pipeline's anonymous namespace so a
-// test can round-trip the real functions. The previous arrangement forced
-// the round-trip test to reimplement the parser, which meant it passed while
-// testing nothing about the code that runs.
+// Declared here rather than in the pipeline's anonymous namespace so the
+// round-trip test can call the real functions instead of reimplementing the
+// format.
 struct ShardIPC {
     std::string src;   // TU this record covers; empty in whole-shard form
     int exitCode = -1;

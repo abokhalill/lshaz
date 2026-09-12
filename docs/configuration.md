@@ -65,15 +65,17 @@ mapping_function_patterns: []    # FL070: large-mapping wrappers, "name" or
                                  # "name:N" with N the zero-based size
                                  # parameter (default 0). A 4MB mapping one
                                  # call deep is invisible otherwise. The index
-                                 # is explicit because ngx_memalign takes
-                                 # (alignment, size, log) and guessing the
-                                 # first integer would grade the alignment.
+                                 # is explicit because an aligned-allocation
+                                 # wrapper takes the alignment first, and
+                                 # guessing the first integer would grade
+                                 # that as the mapping size.
 
 lock_function_patterns: []       # FL012: project lock wrappers, e.g.
 unlock_function_patterns: []     # ["ngx_shmtx_lock"] / ["ngx_shmtx_unlock"],
-                                 # or LWLockAcquire/LWLockRelease. nginx takes
-                                 # 48 of its 50 locks through a wrapper, so
-                                 # without these the rule sees 4% of that tree.
+                                 # or LWLockAcquire/LWLockRelease. A tree that
+                                 # takes nearly every lock through a wrapper
+                                 # is nearly invisible to this rule without
+                                 # them.
                                  # Acquire and release are separate lists
                                  # because nesting depth is a count: inferring
                                  # the release side from the spelling
@@ -81,11 +83,11 @@ unlock_function_patterns: []     # ["ngx_shmtx_lock"] / ["ngx_shmtx_unlock"],
                                  # does not say "unlock".
 
 # Deployment topology. coherence_domains is the number of last-level-cache
-# domains, which is NOT socket count: a Ryzen 9 5950X is one socket and one
-# NUMA node with two CCDs, and cross-CCD sharing does not decay with write
-# spacing. 0 (unknown) makes FL002 decline to demote sparse sharing rather
-# than assume the favourable topology. Set 1 only when both writers provably
-# share an LLC.
+# domains, which is NOT socket count: a chiplet part is one socket and one
+# NUMA node with several domains, and cross-domain sharing does not decay with
+# write spacing. 0 (unknown) makes FL002 decline to demote sparse sharing
+# rather than assume the favourable topology. Set 1 only when both writers
+# provably share an LLC.
 coherence_domains: 0
 numa_sockets: 0
 
@@ -115,9 +117,8 @@ disabled_rules: []
 #   - "*::backoff"
 
 # SMT/Hyper-Threading enabled on the deployment target (default true).
-# Reported in FL013's evidence and nothing else. It used to move that rule a
-# severity notch on the sibling-starvation clause, until sync_cost measured
-# 0.0% sibling recovery on Coffee Lake and again on Zen 3.
+# Reported in FL013's evidence and nothing else. Deliberately not a severity
+# term: that rule's sibling-starvation clause ships unestablished.
 # smt_enabled: true
 
 # FL003 cost model: L1 data cache size the padding footprint is weighed
@@ -126,8 +127,8 @@ disabled_rules: []
 # slower tiers and outrank it, since a file glob cannot separate a
 # per-connection routine from the per-command path in the same file.
 # l1d_size_bytes: 32768
-# dispatch_path_patterns: ["createClient", "*AcceptHandler"]
-# tick_path_patterns: ["*Cron", "beforeSleep"]
+# dispatch_path_patterns: ["*AcceptHandler", "*_on_connect"]
+# tick_path_patterns: ["*Cron", "*_timer_tick"]
 
 # Opaque atomic wrapper type names.
 # Struct/typedef names treated as atomic even without _Atomic or std::atomic.
@@ -463,17 +464,18 @@ no traffic records a measured zero and is demoted. Both are necessary: without
 the first the model cannot rank, and without the second it repeats the same
 false positive at the same grade forever.
 
-The model cannot rank on its own, and the reason is not a resolution gap.
-Coherence cost is stores per operation times the cores holding the line, and
-reads do not multiply it: a core that reads a line fifty times after one
-invalidation takes one transfer and forty-nine hits. Two fields both stored
-somewhere on the command path are therefore indistinguishable to any static
-model. On redis the machine separated them 874 samples to 3.
+The static model cannot rank two lines on its own, and the reason is not a
+resolution gap. Coherence cost is stores per operation times the cores holding
+the line, and reads do not multiply it: a core that reads a line fifty times
+after one invalidation takes one transfer and forty-nine hits. Two fields both
+stored on the same path are therefore indistinguishable to any static model,
+while a machine separates them readily.
 
 Findings join to measured traffic at cache-line granularity: a finding
 matches a line when both of its role sets are represented on it. That tests
-the claim the finding makes. Matching on either name alone matched 178 call
-sites for one redis finding and measured the program rather than the hazard.
+the claim the finding makes. Matching on either name alone matches most of
+the program for any widely-accessed record, and measures the program rather
+than the hazard.
 
 `perf c2c` records at a frequency, so its sample counts carry no absolute
 scale. Without `--hitm-events` from a counted run or `--sample-period` from a

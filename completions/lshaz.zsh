@@ -9,6 +9,7 @@ _lshaz() {
         'hyp:Construct latency hypotheses from scan diagnostics'
         'exp:Synthesize experiment bundles from scan diagnostics'
         'feedback:Ingest experiment results into calibration store'
+        'observe:Correct the cost model from a hardware profile'
         'init:Generate compile_commands.json and starter config'
         'diff:Compare two JSON scan results'
         'explain:Show rule documentation'
@@ -84,13 +85,13 @@ _lshaz() {
                     _arguments \
                         '--list[List all rules]' \
                         '--help[Show help]' \
-                        '1:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)'
+                        '1:rule:(FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001)'
                     ;;
                 hyp)
                     _arguments \
                         '-o[Output file]:file:_files' \
                         '--output[Output file]:file:_files' \
-                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)' \
+                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001)' \
                         '--min-conf[Minimum confidence]:threshold:' \
                         '--help[Show help]' \
                         '1:scan result:_files -g "*.json"'
@@ -99,7 +100,7 @@ _lshaz() {
                     _arguments \
                         '-o[Output directory]:dir:_files -/' \
                         '--output[Output directory]:dir:_files -/' \
-                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091)' \
+                        '--rule[Filter by rule ID]:rule:(FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001)' \
                         '--min-conf[Minimum confidence]:threshold:' \
                         '--sku[CPU SKU family]:sku:' \
                         '--dry-run[Show what would be generated]' \
@@ -113,6 +114,23 @@ _lshaz() {
                         '--json[Output verdict as JSON]' \
                         '--help[Show help]' \
                         '1:experiment directory:_files -/'
+                    ;;
+                observe)
+                    _arguments \
+                        '--profile[perf c2c report text]:file:_files' \
+                        '--findings[Scan JSON output]:file:_files -g "*.json"' \
+                        '--executed[perf report from the same window]:file:_files' \
+                        '--ops[Operations completed in the window]:n:' \
+                        '--hitm-events[Counted coherence transfers]:n:' \
+                        '--sample-period[Fixed sample period, if used]:n:' \
+                        '--object[Binary that was analyzed]:name:' \
+                        '--config[Config supplying machine and workload]:file:_files' \
+                        '--machine[Machine key override]:name:' \
+                        '--workload[Workload key override]:name:' \
+                        '--store[Calibration store path]:file:_files' \
+                        '--write[Append the observation]' \
+                        '--top[Unexplained lines to list]:n:' \
+                        '--help[Show help]'
                     ;;
             esac
             ;;

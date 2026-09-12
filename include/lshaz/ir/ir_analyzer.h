@@ -26,7 +26,7 @@ public:
 
     // Merge profiles from another analyzer (shard-level reduction).
     // For duplicate function names, keeps the profile with more basic blocks
-    // (heuristic: richer IR → more optimization info).
+    // (heuristic: richer IR -> more optimization info).
     void mergeFrom(IRAnalyzer &&other);
 
 private:

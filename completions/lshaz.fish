@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # fish completion for lshaz
 
-set -l subcmds scan fix hyp exp feedback init diff explain version help
+set -l subcmds scan fix hyp exp feedback observe init diff explain version help
 
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a scan -d "Analyze a project"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a fix -d "Auto-remediate fixable findings"
@@ -11,6 +11,7 @@ complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a explain -d
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a hyp -d "Construct latency hypotheses"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a exp -d "Synthesize experiment bundles"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a feedback -d "Ingest experiment results"
+complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a observe -d "Correct the cost model from a hardware profile"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a version -d "Print version"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a help -d "Show help"
 
@@ -63,17 +64,17 @@ complete -c lshaz -n "__fish_seen_subcommand_from diff" -F -d "JSON scan result"
 # explain
 complete -c lshaz -n "__fish_seen_subcommand_from explain" -l list -d "List all rules"
 complete -c lshaz -n "__fish_seen_subcommand_from explain" -l help -d "Show help"
-complete -c lshaz -f -n "__fish_seen_subcommand_from explain" -a "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -d "Rule ID"
+complete -c lshaz -f -n "__fish_seen_subcommand_from explain" -a "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -d "Rule ID"
 
 # hyp
 complete -c lshaz -n "__fish_seen_subcommand_from hyp" -s o -l output -rF -d "Output file"
-complete -c lshaz -n "__fish_seen_subcommand_from hyp" -l rule -r -a "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -d "Filter by rule ID"
+complete -c lshaz -n "__fish_seen_subcommand_from hyp" -l rule -r -a "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -d "Filter by rule ID"
 complete -c lshaz -n "__fish_seen_subcommand_from hyp" -l min-conf -r -d "Minimum confidence"
 complete -c lshaz -n "__fish_seen_subcommand_from hyp" -l help -d "Show help"
 
 # exp
 complete -c lshaz -n "__fish_seen_subcommand_from exp" -s o -l output -r -d "Output directory"
-complete -c lshaz -n "__fish_seen_subcommand_from exp" -l rule -r -a "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -d "Filter by rule ID"
+complete -c lshaz -n "__fish_seen_subcommand_from exp" -l rule -r -a "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -d "Filter by rule ID"
 complete -c lshaz -n "__fish_seen_subcommand_from exp" -l min-conf -r -d "Minimum confidence"
 complete -c lshaz -n "__fish_seen_subcommand_from exp" -l sku -r -d "CPU SKU family"
 complete -c lshaz -n "__fish_seen_subcommand_from exp" -l dry-run -d "Show what would be generated"
@@ -84,3 +85,19 @@ complete -c lshaz -n "__fish_seen_subcommand_from feedback" -l store -rF -d "Cal
 complete -c lshaz -n "__fish_seen_subcommand_from feedback" -l alpha -r -d "Significance level"
 complete -c lshaz -n "__fish_seen_subcommand_from feedback" -l json -d "Output verdict as JSON"
 complete -c lshaz -n "__fish_seen_subcommand_from feedback" -l help -d "Show help"
+
+# observe
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l profile -rF -d "perf c2c report text"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l findings -rF -d "Scan JSON output"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l executed -rF -d "perf report from the same window"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l ops -r -d "Operations completed in the window"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l hitm-events -r -d "Counted coherence transfers"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l sample-period -r -d "Fixed sample period, if used"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l object -r -d "Binary that was analyzed"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l config -rF -d "Config supplying machine and workload"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l machine -r -d "Machine key override"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l workload -r -d "Workload key override"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l store -rF -d "Calibration store path"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l write -d "Append the observation"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l top -r -d "Unexplained lines to list"
+complete -c lshaz -n "__fish_seen_subcommand_from observe" -l help -d "Show help"

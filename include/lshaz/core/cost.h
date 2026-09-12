@@ -37,10 +37,8 @@ constexpr Milli milliMul(Milli a, Milli b) {
     return static_cast<Milli>(r);
 }
 
-// Fixed point rendered by hand rather than streamed as a double, because
-// under a European locale a stream prints a comma and the output contract
-// says a dot. Three copies of this had already appeared; the fourth caller
-// is what made it a function.
+// Rendered by hand rather than streamed as a double: under a locale that uses
+// a decimal comma a stream prints one, and the output contract says a dot.
 inline std::string milliToText(Milli v) {
     const bool neg = v < 0;
     const int64_t a = neg ? -v : v;
@@ -101,16 +99,14 @@ struct CostEstimate {
     }
 };
 
-// Hardware the cost model reads. Every field is supplied by configuration,
-// measured on the machine being scanned for. No part is named in this
-// source and none is built in: a table of one vendor's numbers compiled
-// into the analyzer makes every other target wrong by default, and makes
-// adding a second machine a code change.
+// Hardware the cost model reads, supplied entirely by configuration and
+// measured on the machine being scanned for. No part is named or built in: a
+// table of one vendor's numbers compiled into the analyzer makes every other
+// target wrong by default and makes adding a machine a code change.
 //
-// A zero field is not a default, it is "unmeasured here". Any term that
-// consumes one reports itself unestablished instead of substituting a
-// plausible number, which is the ran-versus-never-ran property applied to
-// the cost model.
+// A zero field is not a default, it is "unmeasured here". Any term consuming
+// one reports itself unestablished rather than substituting a plausible
+// number.
 struct MachineModel {
     std::string name;
 
@@ -137,12 +133,10 @@ struct MachineModel {
     bool hasOverlap() const { return mlpOverlapPct != 0; }
 };
 
-// Cycles the target spends per unit of its own work. This is a property of
-// the workload, not of the hardware: redis at 2.4M operations per second
-// across four 3.6GHz cores spends about 6000, and the same silicon running
-// something else spends something else entirely. Keeping it in the machine
-// struct conflated the two and would have shipped one benchmark's number as
-// a hardware constant.
+// Cycles the target spends per unit of its own work. A property of the
+// workload, not of the hardware: the same silicon running something else
+// spends something else entirely. Kept out of MachineModel so no benchmark's
+// figure can be mistaken for a hardware constant.
 //
 // Zero means unknown, and then no cost can be expressed as a share of an
 // operation, so the ladder below declines to grade rather than borrowing a
@@ -151,11 +145,9 @@ struct WorkloadModel {
     uint32_t cyclesPerOp = 0;
 
     // Cores that actually touch shared state under this deployment. Source
-    // cannot know it: redis with io-threads 1 produced exactly zero HITM in
-    // a fifteen second window while the analyzer, seeing the same code,
-    // still predicted a cost. A runtime setting can remove the mechanism
-    // outright and nothing in the AST says so. Zero means unconfigured, and
-    // the sharer term stays a stand-in.
+    // cannot know it: a runtime setting that pins the work to one thread
+    // removes the coherence mechanism outright, and nothing in the AST says
+    // so. Zero means unconfigured, and the sharer term stays a stand-in.
     uint32_t sharers = 0;
 
     bool known() const { return cyclesPerOp != 0; }

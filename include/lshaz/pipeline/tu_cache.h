@@ -25,8 +25,8 @@ public:
     // Drop entries until the tree is under capBytes, oldest access first.
     // Called once per scan rather than per store: entries are content-keyed,
     // so a survivor is never wrong, only wasteful, and the cost of pruning is
-    // not worth paying on the hot path. rocksdb writes 1.3G in one scan, so
-    // without this a long-lived checkout grows without bound.
+    // not worth paying on the hot path. A large project writes gigabytes in
+    // one scan, so without this a long-lived checkout grows without bound.
     static void prune(const std::string &dir, uint64_t capBytes);
 
     bool enabled() const { return !dir_.empty(); }

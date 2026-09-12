@@ -73,12 +73,11 @@ not. A skipped latency arm never downgrades the coherence verdict.
 Because a counter is only evidence once it has been shown to measure the
 mechanism, `pmu_sweep` calibrates before it measures:
 
-1. **Candidates** are enumerated as `(event × umask)` pairs, not event names.
-   On Zen the discrimination lives in a single umask bit, and an all-sources
-   OR folds local-L2 and DRAM fills into the same counter, roughly 10× worse
-   signal-to-background, with the collapse smeared away. `LSHAZ_PMU_CANDIDATES`
-   appends raw configs for silicon the built-in table predates; they are
-   shape-tested like any other.
+1. **Candidates** are enumerated as `(event, umask)` pairs, not event names,
+   because the discrimination lives in a single umask bit: an all-sources OR
+   folds local-L2 and DRAM fills into the same counter and smears the collapse
+   away. `LSHAZ_PMU_CANDIDATES` appends raw configs for silicon the built-in
+   table predates; they are shape-tested like any other.
 2. **Stage 1** is a two-point ratio against a known-shared line, a necessary
    condition, cheap, and not sufficient.
 3. **Stage 2** requires the count to collapse at exactly the configured line

@@ -22,8 +22,8 @@ namespace lshaz {
 // the likely NUMA placement based on how/where a variable is allocated.
 enum class NUMAPlacement : uint8_t {
     LocalInit,      // Allocated+initialized in same context (likely local)
-    MainThread,     // Allocated in main/startup → pinned to socket 0
-    AnyThread,      // Allocated by arbitrary worker thread → unpredictable
+    MainThread,     // Allocated in main/startup -> pinned to socket 0
+    AnyThread,      // Allocated by arbitrary worker thread -> unpredictable
     Interleaved,    // mbind(MPOL_INTERLEAVE) or numa_alloc_interleaved
     Explicit,       // numa_alloc_onnode / mbind(MPOL_BIND)
     Unknown,        // Cannot determine
@@ -57,10 +57,6 @@ constexpr double numaHazardFactor(NUMAPlacement p) {
 
 class NUMATopology {
 public:
-    // Infer NUMA placement for a global/static variable declaration.
-    static NUMAPlacement classifyGlobalVar(const clang::VarDecl *VD,
-                                            clang::ASTContext &Ctx);
-
     // Infer NUMA placement for a struct based on how it's typically
     // allocated (heap vs stack vs global).
     static NUMAPlacement classifyStruct(const clang::RecordDecl *RD,

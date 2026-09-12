@@ -59,22 +59,17 @@ RateModel computeRateModel(const ThreadRoleSummary &facts,
     if (seeds.empty())
         return rm;
 
-    // Executions per program entry, propagated as a product of per-edge
-    // frequencies. Each edge carries the source's own trip count where the
-    // source states one, so a loop over sixteen elements contributes sixteen
-    // and a loop over a runtime bound contributes the default.
+    // Executions per program entry, as a product of per-edge frequencies.
+    // Each edge carries the source's own trip count where the source states
+    // one; a runtime bound contributes the default.
     //
-    // The previous form accumulated nesting depth and capped it at three,
-    // giving four possible rates for the whole program. That is why a cost
-    // model built on it could not rank: 87 of redis's 161 single-field
-    // findings priced identically while the machine measured twenty to one
-    // between the top contended line and the next. Depth is still merged for
-    // hotness, which grades on nesting rather than on rate.
+    // Trip counts rather than nesting depth, which capped at three gives the
+    // whole program four possible rates and cannot rank anything. Depth is
+    // still merged for hotness, which grades on nesting rather than rate.
     //
-    // Saturating at kFreqCeiling. Multiplying at every edge otherwise
+    // Saturating at kFreqCeiling: multiplying at every edge otherwise
     // compounds along a deep chain until the normaliser crushes everything
-    // else to zero against it, which is the failure the depth cap was
-    // avoiding by giving up the resolution entirely.
+    // else to zero against it.
     std::map<std::string, Milli> freq;
     for (const auto &s2 : seeds)
         freq[s2] = kMilli;

@@ -28,7 +28,7 @@ enum class AccessPattern : uint8_t {
     WriteHeavy = 4, // worst coherence cost
 };
 
-// contention ∈ [0.0, 1.0]. 0 = no cross-thread sharing expected.
+// contention  in  [0.0, 1.0]. 0 = no cross-thread sharing expected.
 struct EscapeVerdict {
     bool escapes          = false;
     double contention     = 0.0;
@@ -78,7 +78,6 @@ public:
     void scanTranslationUnit(const clang::TranslationUnitDecl *TU);
 
     EscapeVerdict escapeVerdict(const clang::RecordDecl *RD) const;
-    bool mayEscapeThread(const clang::RecordDecl *RD) const; // delegates to above
 
     bool isFieldMutable(const clang::FieldDecl *FD) const;
     bool hasAtomicMembers(const clang::RecordDecl *RD) const;
@@ -95,7 +94,6 @@ public:
     bool isSyncType(clang::QualType QT) const;
 
     bool hasSharedOwnershipMembers(const clang::RecordDecl *RD) const;
-    bool hasCallbackMembers(const clang::RecordDecl *RD) const;
     bool isSharedOwnershipType(clang::QualType QT) const;
     bool hasVolatileMembers(const clang::RecordDecl *RD) const;
 
@@ -121,11 +119,6 @@ public:
     // in the TU and snapshots their escape signals.
     EscapeSummary buildEscapeSummary(
         const std::vector<const clang::RecordDecl *> &records) const;
-
-    // Write-once analysis: a global assigned at most once (at declaration or
-    // in an init function) is unlikely to cause runtime contention.
-    // Requires prior scanTranslationUnit() call.
-    bool isWriteOnceGlobal(const clang::VarDecl *VD) const;
 
     // Raw per-TU write count for a global. Does NOT include the initializer,
     // only explicit assignments/increments in function bodies within this TU.
@@ -162,8 +155,7 @@ public:
     // A store invalidates the whole line, so a core that only reads another
     // field on it re-fetches. That reader pays the same coherence miss a
     // second writer would, which is why write/write is sufficient for the
-    // hazard and not necessary. Measured as redis's dominant shape: `call()`
-    // stores real_cmd->calls while IO threads read the key specs beside it.
+    // hazard and not necessary, and why the read side has to be tracked.
     struct FieldReadEvidence {
         unsigned readSites = 0;
         unsigned readerFunctions = 0;
@@ -193,7 +185,6 @@ public:
     // call graph is built, since concurrency is a call-graph property.
     void setPoolRoleFunctions(
         std::unordered_set<const clang::FunctionDecl *> fns);
-    bool fieldHasPoolWriter(const clang::FieldDecl *FD) const;
 
     bool hasGlobalInstance(const clang::RecordDecl *RD) const;
     bool anyWriterOnThread(const clang::RecordDecl *RD) const;
@@ -222,25 +213,23 @@ public:
         // block produces the first. Writer counts cannot tell them apart.
         unsigned standingSites = 0;
         unsigned handedSites   = 0;
-        // Writes issued from inside a loop. Coherence cost tracks spacing,
-        // not site count: contended-RMW cost collapses 75x between 8ns and
-        // 125ns. Field-level twin of globalLoopWriteCounts_ (FL040).
+        // Writes issued from inside a loop. Coherence cost tracks spacing
+        // rather than site count, and collapses as the writes move apart.
+        // Field-level twin of globalLoopWriteCounts_ (FL040).
         unsigned loopSites     = 0;
         std::unordered_set<const clang::FunctionDecl *> writers;
         // Where the stores are, as basename:line.
         //
         // A profiler reports the DWARF line of an inlined store and the
         // symbol of whatever it was inlined into, so a name-based join to a
-        // hardware profile silently misses every static inline writer.
-        // redis stores server.unixtime from updateCachedTimeWithUs, which
-        // perf reports as `call`; the line, server.c:1380, is exact.
+        // hardware profile silently misses every static inline writer. The
+        // line survives.
         std::set<std::string> writeSiteLocs;
         unsigned readSites = 0;
-        // Reach on the read side, which the write side cannot always see.
-        // redis writes user::flags through a parameter, so every write looks
-        // handed, and reads it as DefaultUser->flags, a global singleton
-        // every thread names. The writer and those readers touch one object;
-        // only the reads say so.
+        // Reach on the read side, which the write side cannot always see. A
+        // setter writing through its parameter makes every write look handed
+        // while the readers name one global singleton, so only the reads
+        // establish that both touch a single object.
         unsigned standingReadSites = 0;
         unsigned handedReadSites = 0;
         std::unordered_set<const clang::FunctionDecl *> readers;

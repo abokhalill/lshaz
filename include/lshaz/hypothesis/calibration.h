@@ -78,19 +78,6 @@ struct LabeledRecord {
     uint64_t ingestionTimestamp = 0;
 };
 
-struct CalibrationReport {
-    std::string modelVersion;
-    uint32_t trainingRecords  = 0;
-    uint32_t testRecords      = 0;
-    double brierScore         = 1.0;
-    double maxCalibrationError = 1.0;
-    double precisionHighCritical = 0.0;
-    double recallCritical     = 0.0;
-    double aucRoc             = 0.0;
-    bool adversarialCorpusPass = false;
-    std::string driftFlags;
-};
-
 class CalibrationFeedbackStore {
 public:
     explicit CalibrationFeedbackStore(const std::string &storePath);
@@ -105,11 +92,7 @@ public:
                                         const std::vector<double> &featureVector,
                                         HazardClass hazardClass);
 
-    std::vector<LabeledRecord> queryByHazardClass(HazardClass hc) const;
-    std::vector<LabeledRecord> queryBySKU(const std::string &skuFamily) const;
-    size_t recordCount() const { return records_.size(); }
-
-    /* Requires ≥3 refutations within kNeighborhoodRadius. */
+    /* Requires >=3 refutations within kNeighborhoodRadius. */
     bool isKnownFalsePositive(const std::vector<double> &features,
                               HazardClass hc) const;
 

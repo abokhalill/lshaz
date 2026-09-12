@@ -598,9 +598,9 @@ int runInitCommand(int argc, const char **argv) {
     if (!noConfig)
         writeStarterConfig(dir);
 
-    // An unrecognized build system used to fall through to "ready" and exit 0,
-    // one line after saying it found no build system, and the scan it told the
-    // user to run then failed on the missing database.
+    // An unrecognized build system must not exit 0: "ready, run lshaz scan"
+    // one line after "no build system found" sends the user at a scan that
+    // cannot read anything.
     if (!haveDB) {
         llvm::errs() << "\nlshaz init: no compile_commands.json was produced, "
                         "so scan has nothing to read.\n"

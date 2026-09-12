@@ -96,25 +96,17 @@ public:
     unsigned loopDepth = 0;
 
     // How many times a call site runs per entry to this function, in milli.
-    //
-    // Nesting depth answers this in four values. The source usually states
-    // it: sixteen iterations is sixteen, and the depth model calls that the
-    // same as a loop over a runtime bound. Carrying the product instead is
-    // what lets a cost model rank two findings that both sit one loop deep.
-    //
-    // Saturating, because a nest whose bounds are all constant reaches
-    // numbers no downstream term can use and the normaliser would crush
-    // everything else to zero against it.
+    // Carrying the source's own trip counts is what lets a cost model rank
+    // two findings that both sit one loop deep, where nesting depth calls
+    // them equal. Saturating: an all-constant nest otherwise reaches numbers
+    // the normaliser crushes everything else to zero against.
     static constexpr Milli kFreqCeiling = toMilli(1000000);
     std::unordered_map<const clang::FunctionDecl *, Milli> calleeFrequency;
     Milli frequency = kMilli;
-    // Busiest point anywhere in this body, call site or not. A leaf that
-    // sweeps an array repeats on its own, and crediting only call sites
-    // rates it as though it ran once.
+    // Busiest point and deepest nesting anywhere in this body, call site or
+    // not. A leaf that sweeps an array repeats on its own, and crediting only
+    // call sites rates it as though it ran once.
     Milli ownFrequency = kMilli;
-    // Deepest loop nesting anywhere in this body, call or not. A leaf that
-    // sweeps an array repeats on its own; crediting only call sites scored
-    // it zero, which is backwards.
     unsigned ownLoopDepth = 0;
 
     template <typename Node, typename Base>
@@ -345,7 +337,6 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         auto fit = visitor.calleeFrequency.find(callee);
         if (fit != visitor.calleeFrequency.end())
             edgeFrequency_[{canon, callee}] = fit->second;
-        ++edgeCount_;
     }
     for (const auto *entry : visitor.threadEntries)
         threadEntries_.insert(threadRoleNodeName(entry, ctx_));
@@ -370,7 +361,6 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         } else {
             calleeMap_[canon].insert(opCanon);
             callerMap_[opCanon].insert(canon);
-            ++edgeCount_;
         }
     }
     for (const auto &L : visitor.lambdas)

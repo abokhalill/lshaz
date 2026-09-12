@@ -1,9 +1,8 @@
 // Known-positive canaries for detection paths that exist only in C.
 //
-// The registry gate asks whether a rule fires on some canary, and both
-// fixtures here were C++. A rule matching only C++ spellings therefore
-// satisfied the gate while reporting nothing on any C codebase, which is
-// how FL013 came to miss every spin loop in redis.
+// The registry gate asks whether a rule fires on some canary. With C++
+// fixtures alone, a rule matching only C++ spellings satisfies that gate
+// while reporting nothing on any C codebase.
 #include <pthread.h>
 #include <stdatomic.h>
 
@@ -17,9 +16,8 @@ typedef struct {
 
 static canary_io_thread canary_io_threads[4];
 
-// FL013. Bare spin on a C11 _Atomic through atomic_load_explicit, which
-// Clang models as an AtomicExpr and not a CallExpr. Shape taken from
-// redis pauseIOThreadsRange.
+// FL013. Bare spin on a C11 _Atomic through atomic_load_explicit, which Clang
+// models as an AtomicExpr and not a CallExpr.
 __attribute__((hot))
 void canary_wait_paused(int id) {
     int paused = CANARY_PAUSING;
@@ -34,11 +32,10 @@ void canary_release(int id) {
 }
 
 // FL003. Owner-indexed striping. The subscript is a field of an object the
-// caller handed in, so it names the client's owning thread and not the one
-// executing the write; one thread can drive every slot. redis
-// io_threads_clients_num has exactly this shape and is written only from the
-// main thread. Grades below canary.cpp's g_thread_bytes, which subscripts on
-// its own parameter and so names its writer.
+// caller handed in, so it names that object's owning thread and not the one
+// executing the write, and a single thread can drive every slot. Grades below
+// canary.cpp's g_thread_bytes, which subscripts on its own parameter and so
+// names its writer.
 typedef struct {
     int tid;
 } canary_client;
@@ -85,8 +82,8 @@ int canary_drain_pending(int id) {
     return n;
 }
 
-// FL012 again, through a wrapper. nginx reaches 48 of its 50 locks this way
-// and postgres uses LWLockAcquire, so the pthread names above are the case
+// FL012 again, through a wrapper. A tree that takes nearly every lock through
+// its own name reaches none of the pthread names above, so those are the case
 // that does not occur in the codebases the rule is aimed at.
 typedef struct { volatile long lock; } canary_shmtx_t;
 void canary_shmtx_lock(canary_shmtx_t *m);

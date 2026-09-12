@@ -9,19 +9,13 @@
 
 namespace lshaz {
 
-// Codebases that wrap atomics in an opaque struct or typedef -- kernel
-// atomic_t and spinlock_t, nginx ngx_atomic_t -- are invisible to the
-// std::atomic / _Atomic tests, so `atomic_type_names` in config names them.
+// Codebases that wrap atomics in an opaque struct or typedef are invisible to
+// the std::atomic and _Atomic tests, so `atomic_type_names` in config names
+// them. Every rule that reasons about atomics goes through this one predicate,
+// or the ones that never build a CacheLineMap silently ignore the option.
 //
-// That remedy only ever reached rules that happened to construct a
-// CacheLineMap, because the names were passed to its constructor and
-// nowhere else. FL010, FL011, FL013, FL040 and FL060 all reason about
-// atomics and all ignored the configuration: on exactly the C codebases
-// the option exists for, five rules stayed blind while four saw. One
-// predicate, so a rule cannot silently opt out of a documented feature.
-//
-// Deliberately name-based and pre-canonicalization: the wrapper is opaque
-// by construction, so the spelling is the only evidence available.
+// Name-based and pre-canonicalization by necessity: the wrapper is opaque, so
+// the spelling is the only evidence there is.
 inline bool isConfiguredAtomic(clang::QualType QT,
                                const std::vector<std::string> &names) {
     if (QT.isNull() || names.empty())

@@ -134,12 +134,12 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
         for (size_t idx : group) {
             if (idx == best)
                 continue;
-            // The winner is chosen on confidence, but two TUs can legitimately
-            // disagree because one saw the writers and the other did not. Since
-            // the loser's reasoning is merged in regardless, keeping only the
-            // winner's severity shipped an escalation arguing for a grade the
-            // finding no longer carried. Take the strongest of the group, and
-            // its claims with it, or the claims gate clamps straight back.
+            // The winner is chosen on confidence, but two TUs legitimately
+            // disagree when one saw the writers and the other did not, and the
+            // loser's reasoning is merged in regardless. Keep the strongest
+            // severity of the group and its claims with it, or the finding
+            // carries an escalation arguing for a grade the claims gate then
+            // clamps away.
             if (static_cast<uint8_t>(diagnostics[idx].severity) >
                 static_cast<uint8_t>(merged.severity)) {
                 merged.severity = diagnostics[idx].severity;

@@ -170,17 +170,14 @@ public:
                "asserts an alignment the source never established. On x86-64 "
                "a LOCK-prefixed operation spanning two cache lines cannot "
                "lock one line, so the core falls back to a serializing path "
-               "costing ~2400 cycles: 3007ns against 6.0ns aligned on Coffee "
-               "Lake (500x), 710ns against 2.21ns on Zen 3 (321x). The cost is "
-               "borne by the issuing core. A neighbour running its own atomics "
-               "measured 1.03x on Zen 3, under a control that moved further, "
-               "so the socket-wide stall this rule used to claim is withdrawn "
-               "on AMD and untested on Intel. On ARM64 the exclusive and LSE "
-               "atomics require natural alignment, so the same source raises "
-               "an alignment fault and the process takes SIGBUS. A packed "
-               "_Atomic field is a different shape: Clang diagnoses it under "
-               "-Watomic-alignment and lowers it to a libatomic call, so it "
-               "never reaches either path.";
+               "costing orders of magnitude more than the aligned operation. "
+               "The cost is borne by the issuing core and does not extend to "
+               "unrelated cores on the socket. On ARM64 the "
+               "exclusive and LSE atomics require natural alignment, so the "
+               "same source raises an alignment fault and the process takes "
+               "SIGBUS. A packed _Atomic field is a different shape: Clang "
+               "diagnoses it under -Watomic-alignment and lowers it to a "
+               "libatomic call, so it reaches neither path.";
     }
 
     void analyze(const clang::Decl *D,
@@ -255,8 +252,8 @@ public:
                       "slowdown.";
             else
                 hw << "On x86-64 a LOCK-prefixed operation spanning two lines "
-                      "serializes the issuing core, measured at 500x the "
-                      "aligned operation on Coffee Lake and 321x on Zen 3.";
+                      "serializes the issuing core, orders of magnitude "
+                      "slower than the aligned operation.";
             d.hardwareReasoning = hw.str();
 
             d.structuralEvidence = {
@@ -286,7 +283,7 @@ public:
                  "an atomic cast from a base narrower than the access", true,
                  Severity::Medium},
                 {isARM ? "alignment fault on a misaligned exclusive access"
-                       : "the issuing core serializes for ~2400 cycles",
+                       : "the issuing core serializes on the split lock",
                  "the access crosses a cache line under a realizable base "
                  "alignment",
                  s.splitsSometimes, Severity::Critical},

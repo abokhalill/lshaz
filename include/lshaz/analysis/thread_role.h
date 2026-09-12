@@ -69,18 +69,17 @@ struct ThreadRoleSummary {
             return standingWriteSites > handedWriteSites;
         }
 
-        // Same question, asked of the reads, because sometimes only the reads
-        // know. redis writes user::flags as u->flags from a setter and reads
-        // it as DefaultUser->flags on every command; the write side has no
-        // idea those touch one object.
+        // Same question, asked of the reads, because sometimes only the
+        // reads know: a setter writing through its parameter cannot tell that
+        // the command path reads the one global instance.
         bool standingReads() const {
             return standingReadSites > handedReadSites;
         }
 
-        // Presence, not majority. One load of DefaultUser->flags on the
-        // command path costs a transfer per store no matter how many other
-        // sites read some user handed in as a parameter. Majority still sets
-        // how much we trust it, above.
+        // Presence, not majority. One load of the shared instance on the
+        // command path costs a transfer per store however many other sites
+        // read an object handed in as a parameter. Majority still sets how
+        // much we trust it, above.
         bool anyStandingRead() const { return standingReadSites > 0; }
     };
     std::map<std::string, FieldAccessFacts> fieldAccess;
@@ -111,11 +110,8 @@ struct ThreadRoleSummary {
     std::map<std::string, std::set<std::string>> allocatorsOfType;
     std::map<std::string, std::set<std::string>> freersOfType;
 
-    // Raw structure for inferring the project's own allocator vocabulary,
-    // rather than being told it. Requiring a human to declare zmalloc,
-    // ngx_palloc, palloc, xmalloc or kmalloc before the rule can see anything
-    // is hardcoding with a config file in front of it, and it has to be
-    // rediscovered per codebase.
+    // Raw structure for inferring the project's own allocator vocabulary
+    // rather than being told it in config.
     //
     // returnForwards: F returns the result of calling G, so F allocates if G
     // does. paramForwards: F hands one of its own parameters to G, so F frees
@@ -137,12 +133,10 @@ struct ThreadRoleSummary {
     std::map<std::string, std::set<std::string>> allocSitesByCallee;
     std::map<std::string, std::set<std::string>> freeSitesByCallee;
 
-    // Seeds taken from the declaration rather than its spelling. A libc name
-    // list is defeated by one #define: redis builds jemalloc with
-    // "#define malloc(size) je_malloc(size)", so no seed name survives
-    // preprocessing anywhere in the tree. The attributes do survive, and an
-    // allocator carries them because the optimizer needs them, which is what
-    // makes this a seed rule no name list has to keep up with.
+    // Seeds taken from the declaration's attributes rather than its spelling.
+    // One `#define malloc(n) je_malloc(n)` defeats a name list everywhere in
+    // the tree; the attributes survive preprocessing, and an allocator carries
+    // them because the optimizer needs them.
     //
     // Produced only by the vocabulary prepass, which runs in the parent, so
     // these never cross the IPC boundary.
@@ -151,27 +145,24 @@ struct ThreadRoleSummary {
     std::set<std::string> declaredLocks;
     std::set<std::string> declaredUnlocks;
 
-    // A spin lock has no POSIX call and no attribute to find it by: nginx's
-    // ngx_shmtx_lock reaches the mutex through __sync_bool_compare_and_swap
-    // and nothing else. What it does have is a mechanism, which is the bar a
-    // rule is held to here. An acquire is an atomic read-modify-write whose
-    // loop exits when it succeeds; the release is the same RMW with no loop
-    // around it.
+    // A spin lock has no POSIX call and no attribute to find it by, only a
+    // mechanism: an acquire is an atomic read-modify-write whose loop exits
+    // when it succeeds, and the release is the same RMW with no loop.
     //
     // Keyed by the parameter's pointee type so the two sides can be paired.
-    // Pairing is what separates a lock from a lock-free retry loop, which
-    // executes the identical CAS: a queue push has no release counterpart
-    // taking the same type, and counting one as an acquire would leave
-    // FL012's nesting depth permanently raised.
+    // Pairing is what separates a lock from a lock-free retry loop executing
+    // the identical CAS: a queue push has no release counterpart on the same
+    // type, and counting one as an acquire leaves FL012's nesting depth
+    // permanently raised.
     std::map<std::string, std::set<std::string>> spinAcquireOfType;
     std::map<std::string, std::set<std::string>> spinReleaseOfType;
 
     // Types an atomic read-modify-write was performed on. A codebase wrapping
-    // its atomics in a plain typedef (atomic_t, spinlock_t, ngx_atomic_t) has
-    // no _Atomic and no std::atomic anywhere, so the fields simply do not
-    // exist as far as atomic detection is concerned, and the false-sharing
-    // rules read them as ordinary members. Being the operand of a lock-prefixed
-    // RMW is what makes a type atomic; the spelling never was.
+    // its atomics in a plain typedef has no _Atomic and no std::atomic
+    // anywhere, so those fields do not exist as far as atomic detection is
+    // concerned and the false-sharing rules read them as ordinary members.
+    // Being the operand of a lock-prefixed RMW is what makes a type atomic;
+    // the spelling never was.
     std::set<std::string> atomicTypes;
 
     // "F|i|G|j": inside F, the argument at position j of a call to G was
@@ -189,9 +180,9 @@ struct ThreadRoleSummary {
     std::set<std::string> builtinCallees;
 
     // Virtual methods some class actually overrides, qualified names. A call
-    // to a method absent here is monomorphic program-wide, which is the
-    // difference between paying ~1ns and ~9ns. Only the merged set can say,
-    // the override usually lives in another TU than the call.
+    // to a method absent here is monomorphic program-wide, so it pays the
+    // lost inline and not the mispredict. Only the merged set can say: the
+    // override usually lives in another TU than the call.
     std::set<std::string> overriddenVirtuals;
 
     void merge(const ThreadRoleSummary &other) {
@@ -326,17 +317,13 @@ struct ThreadRoleVerdicts {
         return mask;
     }
 
-    // Roles over the members we did attribute, ignoring the rest.
+    // Roles over the attributed members, ignoring the rest.
     //
-    // Use this for "does this set reach two roles", never for disjointness.
-    // An unattributed member can only add a role, so the attributed subset is
-    // a sound lower bound; rolesOf has to bail on it because proving two sets
-    // disjoint needs all of both.
-    //
-    // A field read from a hundred functions will never have all hundred
-    // attributed, so the strict form answers ROLE_NONE for exactly the
-    // widely-shared fields we care about. server.unixtime, redis's most
-    // contended line, failed on this and nothing else.
+    // For "does this set reach two roles", never for disjointness. An
+    // unattributed member can only add a role, so the subset is a sound lower
+    // bound, while proving two sets disjoint needs all of both. A field read
+    // from a hundred functions never has all hundred attributed, so the
+    // strict form answers ROLE_NONE for exactly the fields that matter.
     uint8_t knownRolesOf(const std::set<std::string> &fns) const {
         uint8_t mask = ROLE_NONE;
         for (const auto &f : fns)
@@ -378,11 +365,10 @@ struct ThreadRoleVerdicts {
 };
 
 // Closes the allocator and freer sets over the merged graph and turns the
-// recorded call sites into allocatorsOfType / freersOfType. Seeds are the libc
-// primitives only, so a project's own names are derived rather than declared.
-// extraAlloc / extraFree add configured patterns for the cases structure
-// cannot reach: an allocator whose result leaves through an out-parameter, or
-// one whose body this scan never saw.
+// recorded call sites into allocatorsOfType / freersOfType. Seeded from the
+// libc primitives only, so a project's own names are derived. extraAlloc adds
+// configured patterns for what structure cannot reach: an allocator returning
+// through an out-parameter, or one whose body this scan never saw.
 //
 // Mutates the two type maps in place; pure in its other inputs.
 void inferAllocatorVocabulary(ThreadRoleSummary &facts,
@@ -398,20 +384,20 @@ void inferMappingVocabulary(const ThreadRoleSummary &facts,
                             const std::vector<std::string> &extra,
                             std::set<std::string> &mappingsOut);
 
-// Acquire and release wrappers, closed over the strict forwarding edges from
-// the POSIX primitives. The two sets are computed separately because FL012
-// counts nesting depth: deriving the release side from the acquire spelling
-// desynchronizes the count on the first wrapper that does not say "unlock".
-// seededLock/seededUnlock report how many names came from the base case, so a
-// caller can say what this codebase contributed. Counting that in the reporter
-// meant a magic number there, and expanding the seed list silently turned it
-// into a claim of eleven derived names when none were.
 // Parameter positions carrying a thread identity, as "F|i". Seeded from every
 // parameter of every thread entry, since that is what the spawn passed, then
 // closed over the argument-flow edges.
 void inferThreadIdentParams(const ThreadRoleSummary &facts,
                             std::set<std::string> &out);
 
+// Acquire and release wrappers, closed over the strict forwarding edges from
+// the POSIX primitives. The two sets are computed separately because FL012
+// counts nesting depth: deriving the release side from the acquire spelling
+// desynchronizes the count on the first wrapper that does not say "unlock".
+//
+// seededLock/seededUnlock report how many names came from the base case, so a
+// caller can subtract them and say what this codebase contributed without
+// hardcoding the seed count.
 void inferLockVocabulary(const ThreadRoleSummary &facts,
                          const std::vector<std::string> &extraLock,
                          const std::vector<std::string> &extraUnlock,
@@ -421,23 +407,20 @@ void inferLockVocabulary(const ThreadRoleSummary &facts,
                          size_t *seededUnlock = nullptr);
 
 // Wrappers whose verdict turned on a callee with no definition in this scan.
-// redis reaches je_free_with_usize this way, and the 236 zfree sites behind
-// it look exactly like a clean result. Ordered by how many distinct callers
-// the wrapper has, since that is what decides whether naming it is worth a
-// config line.
+// Every site behind such a wrapper looks exactly like a clean result, so the
+// boundary has to be named. Ordered by how many distinct callers the wrapper
+// has, since that is what decides whether naming it is worth a config line.
 std::vector<std::string> unresolvedVocabularyBoundaries(
     const ThreadRoleSummary &facts,
     const std::set<std::string> &allocators,
     const std::set<std::string> &freers);
 
-// BFS role propagation over the merged call graph. Roots: "main" (plus
-// mainPatterns matches) seed ROLE_MAIN; threadEntries (plus entryPatterns
-// matches, fnmatch globs against every known function name) seed
-// ROLE_WORKER. Pure function of its inputs.
+// BFS role propagation over the merged call graph. "main" and mainPatterns
+// seed ROLE_MAIN; threadEntries and entryPatterns seed ROLE_WORKER, both
+// fnmatch globs against every known function name. Pure in its inputs.
 //
-// Known limitation: Function-pointer dispatch (event-loop handler tables) breaks
-// the chain; entryPatterns exist so codebases like that can name their
-// worker roots explicitly in config.
+// Function-pointer dispatch breaks the chain, which is what entryPatterns are
+// for: an event-loop handler table has to name its worker roots in config.
 ThreadRoleVerdicts computeThreadRoles(
     const ThreadRoleSummary &facts,
     const std::vector<std::string> &entryPatterns,

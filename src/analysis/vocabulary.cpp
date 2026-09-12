@@ -26,12 +26,12 @@ namespace {
 //
 // Sites whose pointee type cannot be named are dropped, so FL020's conjunct
 // fails closed rather than guessing.
-// A locked read-modify-write written as inline assembly. nginx reaches every
-// one of its shared-memory mutexes this way: ngx_atomic_cmp_set is a
-// "lock cmpxchgl" in an __asm__ block, so neither AtomicExpr nor a __sync_
-// builtin appears anywhere in the tree. These are ISA mnemonics, fixed by
-// Intel and ARM, and a lock-prefixed RMW is the coherence event FL012 grades
-// rather than a proxy for it.
+
+// A locked read-modify-write written as inline assembly. A codebase whose
+// shared-memory mutexes are hand-written "lock cmpxchgl" in an __asm__ block
+// has neither an AtomicExpr nor a __sync_ builtin anywhere in the tree. These
+// are ISA mnemonics fixed by Intel and ARM, and a lock-prefixed RMW is the
+// coherence event FL012 grades rather than a proxy for it.
 bool asmIsLockedRMW(llvm::StringRef a) {
     for (const char *m : {"cmpxchg", "xchg", "xadd", "lock bts", "lock btr",
                           "ldrex", "strex", "ldaxr", "stlxr", "casal", "cas ",
@@ -42,8 +42,8 @@ bool asmIsLockedRMW(llvm::StringRef a) {
 }
 
 // Functions whose body performs one. A caller spinning on one of these is
-// spinning on the RMW itself, and nginx's lock is exactly that shape: the
-// primitive is a static inline in a header, the loop is in ngx_shmtx_lock.
+// spinning on the RMW itself, which is the usual shape: the primitive is a
+// static inline in a header and the loop is in the acquire wrapper.
 class RMWPrimitiveFinder
     : public clang::RecursiveASTVisitor<RMWPrimitiveFinder> {
 public:
@@ -175,9 +175,9 @@ public:
         if (g.empty())
             return true;
         noteSite(out_.allocSitesByCallee, g, pointee(BO->getLHS()->getType()));
-        // redis returns "ptr = extend_to_usable(ptr, n)" through a variable
-        // declared from an earlier call, so tracking only the declaration
-        // loses the source that carries the alloc_size attribute.
+        // An allocator wrapper routinely reassigns a variable declared from
+        // an earlier call, so tracking only the declaration loses the source
+        // that carries the alloc_size attribute.
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(
                 BO->getLHS()->IgnoreParenImpCasts()))
             if (const auto *VD =
@@ -201,14 +201,15 @@ public:
                 if (it != varSource_.end())
                     srcs = it->second;
             }
-        // Several sources means several branches reached this return. A
-        // function allocates if any path through it does, which is also the
-        // direction a hazard detector should err in.
-        // A generic allocator is type-agnostic by construction; a constructor
-        // that happens to allocate returns its own type, and its allocation is
-        // already a direct site in its body. Propagating through both made the
-        // closure transitively true and useless: zzlDelete reaches zrealloc in
-        // four hops, which put FL020 at 633 findings on the wrong lines.
+        // Several sources means several branches reached this return, and a
+        // function allocates if any path through it does.
+        //
+        // Constructors are excluded. A generic allocator is type-agnostic by
+        // construction, while a constructor that happens to allocate returns
+        // its own type and its allocation is already a direct site in its
+        // body. Propagating through both makes the closure transitively true
+        // and useless, since almost anything reaches an allocator in a few
+        // hops.
         const bool generic = fn_->getReturnType()
                                  .getCanonicalType()->isVoidPointerType();
         for (const auto &g : srcs) {
@@ -275,10 +276,10 @@ public:
         if (clang::QualType pt = pointee(a0->getType()); !pt.isNull())
             noteSite(out_.freeSitesByCallee, g, pt);
         // Any pointer argument, and the parameter may be reached through
-        // arithmetic or a local. valkey releases through
-        // "prefix = (unsigned char *)ptr - PREFIX_SIZE" and frees the prefix,
-        // which is the same release; requiring a bare parameter reference saw
-        // neither that nor the local it is assigned to first.
+        // arithmetic or a local: a wrapper that backs up to a header prefix
+        // and frees that is performing the same release, and requiring a bare
+        // parameter reference sees neither it nor the local it passes
+        // through.
         bool relaxed = false, strict = false;
         for (unsigned i = 0; i < E->getNumArgs(); ++i) {
             const clang::Expr *a = E->getArg(i)->IgnoreImpCasts();

@@ -261,16 +261,14 @@ public:
 
     std::string_view getHardwareMechanism() const override {
         return "Every atomic RMW takes the line in Modified state, so two "
-               "cores writing it trade ownership. The LOCK-prefixed operation "
-               "itself costs ~4-6ns uncontended and is paid at every "
-               "ordering. The transfer on top of that is spacing-dependent "
-               "within a socket: +22ns when the writes land 8ns apart, "
-               "+0.3ns at 125ns, and nothing measurable past ~1us, since the "
-               "line has to still be resident in a peer core's L1 to be "
-               "stolen. Across sockets it does not decay at all, measuring "
-               "32-52ns flat from ~670ns of spacing out to 85us, because "
-               "ownership is a round trip to the remote home agent on the "
-               "critical path of the LOCK.";
+               "cores writing it trade ownership. The LOCK prefix costs the "
+               "same uncontended at every ordering; the ownership transfer on "
+               "top is what scales, and it needs the line still resident in a "
+               "peer core's L1 to be stolen. Within a coherence domain the "
+               "cost therefore decays as the writes move apart in time. "
+               "Across domains it does not decay, because ownership is a "
+               "round trip to the remote home agent on the critical path of "
+               "the LOCK.";
     }
 
     void analyze(const clang::Decl *D,

@@ -11,7 +11,7 @@ PrecisionBudget::PrecisionBudget() {
     // Function-level heuristic rules get tighter budgets.
     auto add = [&](const char *id, unsigned maxEmit, double minConf,
                    Severity maxSev) {
-        policies_[id] = {id, maxEmit, minConf, maxSev, 0.30};
+        policies_[id] = {id, maxEmit, minConf, maxSev};
     };
 
     // Struct-level rules: proven by layout, unlimited emission.
@@ -51,10 +51,6 @@ PrecisionBudget::PrecisionBudget() {
     // Unapplied in-tree mitigation: inherits an attributed FL002, so the
     // component's floor already applies; keep parity with FL091.
     add("FL092", 0, 0.60, Severity::Critical);
-}
-
-void PrecisionBudget::setPolicy(const RulePrecisionPolicy &policy) {
-    policies_[policy.ruleID] = policy;
 }
 
 const RulePrecisionPolicy *PrecisionBudget::getPolicy(

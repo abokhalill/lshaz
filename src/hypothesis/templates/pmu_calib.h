@@ -199,11 +199,10 @@ inline std::vector<lshaz_pmu_candidate> lshaz_pmu_candidates() {
 // The measured thread writes offset 0 in every arm, so its instruction stream
 // is bit-identical across strides and only the peer's target moves.
 //
-// One peer is sufficient and correct: the measured thread's own fill count
-// saturates at a single continuous writer (measured 41.6k/37.4k/49.6k/45.2k/
-// 52.7k for 1..5 peers). Additional peers change which core steals the line,
-// not how often this one loses it. Per-thread attribution is what makes the
-// count saturate; a whole-process counter would scale with writers instead.
+// One peer is sufficient: the measured thread's own fill count saturates at a
+// single continuous writer, because additional peers change which core steals
+// the line rather than how often this one loses it. Per-thread attribution is
+// what makes it saturate; a whole-process counter scales with writers.
 inline bool lshaz_pmu_arm(uint64_t cfg, long stride, int peer_cpu,
                           uint64_t ops, uint64_t *out) {
     alignas(4096) static char region[8192];
@@ -269,18 +268,15 @@ lshaz_pmu_calibrate(uint64_t line_bytes, int peer_cpu, lshaz_pmu_status *st) {
         any_opened = true;
         if (lshaz_pmu_ratio_lb(t, i) < 8.0) continue;
 
-        // Stage 2: the mechanism signature. A two-point ratio shows only that
-        // a counter separates the arms, and the arms also differ in prefetch,
-        // store-buffer occupancy and page locality, so counters sensitive to
-        // those pass stage 1. Requiring the collapse at the line size is what
-        // lets calibration REJECT a discriminating non-coherence event; a test
-        // that can only confirm is not a test.
+        // Stage 2: the mechanism signature. A two-point ratio shows only
+        // that a counter separates the arms, which prefetch, store-buffer
+        // occupancy and page locality also do, so stage 1 passes counters
+        // sensitive to those. Requiring the collapse at the line size is what
+        // lets calibration reject a discriminating non-coherence event.
         //
-        // Median of repeats, because one sample per stride lets a single
-        // descheduled window invent or erase a collapse, and the shape test
-        // is the only thing standing between a wrong counter and the verdict,
-        // so it must be sampled at least as carefully as the measurement it
-        // gates.
+        // Median of repeats: one sample per stride lets a single descheduled
+        // window invent or erase the collapse, and this shape test is the
+        // only thing between a wrong counter and the verdict.
         std::vector<uint64_t> curve(strides.size(), 0);
         bool ok = true;
         for (size_t k = 0; k < strides.size() && ok; ++k) {

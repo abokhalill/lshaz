@@ -236,7 +236,6 @@ int runFeedbackCommand(int argc, const char **argv) {
     auto findingId    = obj->getString("finding_id").value_or("");
     auto hypothesisId = obj->getString("hypothesis_id").value_or("");
     auto hazardStr    = obj->getString("hazard_class").value_or("");
-    auto evidenceStr  = obj->getString("evidence_tier").value_or("");
     auto mde          = obj->getNumber("minimum_detectable_effect").value_or(0.05);
 
     if (findingId.empty() || hypothesisId.empty()) {

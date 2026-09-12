@@ -122,11 +122,6 @@ bool HotPathOracle::matchesProfileFunction(
     return false;
 }
 
-void HotPathOracle::markHot(const clang::FunctionDecl *FD) {
-    if (FD)
-        record(FD->getCanonicalDecl(), HotnessSource::Declared);
-}
-
 bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
     for (const auto *A : FD->attrs()) {
         // [[clang::annotate("lshaz_hot")]]

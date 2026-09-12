@@ -22,16 +22,14 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "A line written by many cores serialises: per-operation cost "
-               "grows about linearly with writer count, ~18ns per added "
-               "thread, reaching 31x the uncontended cost at 14, so "
-               "aggregate throughput stays flat and extra cores buy nothing. "
-               "That is the scalability collapse, and it needs the writes "
-               "close together in time: the cost vanishes entirely once they "
-               "are ~1us apart at 14 threads, or ~125ns apart at 2, since "
-               "more writers keep the line contended longer. On multi-socket "
-               "targets the remote access adds ~40ns (1.25x), which is a "
-               "separate and much smaller term than the contention itself.";
+        return "A line written by many cores serializes: per-operation cost "
+               "grows roughly linearly with writer count, so aggregate "
+               "throughput stays flat and extra cores buy nothing. That is "
+               "the scalability collapse, and it needs the writes close "
+               "together in time, since more writers keep the line contended "
+               "longer and the cost vanishes once they are far enough apart. "
+               "On a multi-socket target the remote access adds a separate "
+               "and much smaller term than the contention itself.";
     }
 
     void analyze(const clang::Decl *D,
@@ -52,8 +50,8 @@ public:
         bool hasAtomics = false;
 
         // getAsRecordDecl, not getAsCXXRecordDecl: the latter is null for a
-        // C struct, so a C global holding _Atomic fields was graded High
-        // instead of Critical with its concurrency claim unestablished.
+        // C struct, which would leave a C global holding _Atomic fields with
+        // its concurrency claim unestablished.
         if (const auto *RD = QT->getAsRecordDecl())
             hasAtomics = escape.hasAtomicMembers(RD);
 
@@ -122,12 +120,13 @@ public:
            << "Accessible from any thread without confinement. ";
         if (concurrentWriters)
             hw << "Under multi-core write contention the line serialises: "
-               << "~18ns per added writer, reaching 31x the uncontended cost "
-               << "at 14, so extra cores buy no throughput. That needs the "
-               << "writes close together in time, and it vanishes past "
-               << "~125ns of spacing at 2 writers or ~1us at 14. On "
-               << "multi-socket targets remote access adds ~40ns (1.25x) on "
-               << "top, a separate and much smaller term.";
+               << "per-operation cost grows about linearly with writer count, "
+               << "so aggregate throughput stays flat and extra cores buy "
+               << "nothing. That needs the writes close together in time, and "
+               << "it vanishes once they are far enough apart, at a spacing "
+               << "that grows with the number of writers. On a multi-socket "
+               << "target remote access adds a separate and much smaller term "
+               << "on top.";
         else
             hw << "Concurrent access is not established here, so the NUMA "
                << "and coherence penalties are potential rather than "

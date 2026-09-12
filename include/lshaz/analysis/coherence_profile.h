@@ -7,14 +7,13 @@
 
 namespace lshaz {
 
-// What a machine actually did with the lines the analyzer reasoned about.
+// What a machine actually did with the lines the analyzer reasoned about:
+// shared lines, the source locations that touched them, and the coherence
+// transfers each one cost. Every cost term is an estimate of a hardware
+// event, and this is the event coming back.
 //
-// Every term in the cost model is an estimate of a hardware event, and until
-// something reports the event the model is a closed argument with itself.
-// This is the shape of the report coming back: shared lines, the source
-// locations that touched them, and how many coherence transfers each one
-// cost. Nothing here knows about the producer beyond the one parse function
-// named for its format.
+// Nothing here knows about the producer beyond the one parse function named
+// for its format.
 struct CoherenceAccess {
     std::string file;
     unsigned line = 0;

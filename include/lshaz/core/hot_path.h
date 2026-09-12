@@ -40,8 +40,7 @@ enum class HotnessSource : uint8_t {
 //   1. [[clang::annotate("lshaz_hot")]] or __attribute__((hot))
 //   2. Config-based function/file pattern matching
 //   3. Perf/LBR profile: function name exceeds sample threshold
-//   4. Manual markHot() calls during AST walk
-//   5. Structural inference: loop-depth-weighted reachability from the
+//   4. Structural inference: loop-depth-weighted reachability from the
 //      TU's entry points, which needs no per-project configuration
 class HotPathOracle {
 public:
@@ -52,8 +51,6 @@ public:
 
     // Why this function is hot. None when it is not.
     HotnessSource hotnessSource(const clang::FunctionDecl *FD) const;
-
-    void markHot(const clang::FunctionDecl *FD);
 
     // Propagate hotness transitively through a call graph.
     // All functions reachable from currently-hot roots within maxDepth

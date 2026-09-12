@@ -13,10 +13,11 @@ namespace lshaz {
 // scan. A scan that looked at a fraction of a codebase must not be
 // indistinguishable from one that found nothing.
 struct ScanCoverage {
-    // Summed over TUs, so a header-inline definition counts once per including
-    // TU. Fine as a ratio denominator against functionsHot, which is summed the
-    // same way, but not a program's function count: rocksdb's 354 TUs report
-    // 1.4M. distinctFunctions carries the deduplicated figure.
+    // Summed over TUs, so a header-inline definition counts once per
+    // including TU and the total runs far above the program's real function
+    // count. Fine as a ratio denominator against functionsHot, which is
+    // summed the same way; distinctFunctions carries the deduplicated
+    // figure.
     uint64_t functionsSeen = 0;  // non-system, non-dependent function decls
     // Map-phase verdict, so it counts Candidates the reduce phase has not
     // ruled on yet. Reporting it alone let a scan say "2 hot" on the line

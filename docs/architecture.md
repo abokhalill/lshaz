@@ -53,15 +53,17 @@ Key semantics:
   co-membership alone (fields whose shift ranges overlap in line index may
   never coexist at the same shift). A pair requires a realizable common
   shift placing both fields on one line, checked over all shifts in
-  record-alignment steps; degenerates to the exact same-line test at
-  alignment ≥ line size.
-- *Straddlers.* The per-field `straddles` flag is geometric (spans a boundary
-  under some shift). `straddlingFields()`. The API behind split load/store
-  penalty escalations. Additionally requires an access granule wider than
-  one byte: byte arrays span lines but cannot split a single access.
-- *Layout-intent signals.* `isCacheLineAligned()` (record alignment ≥ line)
-  and `hasTrailingLinePad()` (trailing byte-array pad reaching an exact line
-  multiple) feed the deliberate-layout demotion contract in FL001/FL002/FL090.
+  record-alignment steps; degenerates to the exact same-line test once
+  alignment reaches the line size.
+- *Straddlers.* The per-field `straddles` flag is geometric: it spans a
+  boundary under some shift. `straddlingFields()` is stricter and backs the
+  split load/store escalations, additionally requiring an access granule wider
+  than one byte, since byte arrays span lines but cannot split a single
+  access.
+- *Layout-intent signals.* `isCacheLineAligned()` (record alignment at or
+  above the line) and `hasTrailingLinePad()` (trailing byte-array pad reaching
+  an exact line multiple) feed the deliberate-layout demotion contract in
+  FL001/FL002/FL090.
 - *Atomic detection* covers `_Atomic`, `std::atomic`, volatile typedefs with
   "atomic" in the name, and user-configured wrapper types
   (`atomic_type_names`).
@@ -73,20 +75,19 @@ Key semantics:
 type may be accessed from multiple threads and quantifies expected contention.
 
 - *Escape signals* (eight): atomic members, sync-primitive members
-  (`std::mutex` family + POSIX types), `shared_ptr`/`weak_ptr` members,
-  volatile members, publication to `std::thread`/`std::jthread`/`std::async`,
-  storage in a non-`thread_local` mutable global, global-scope `shared_ptr`
-  pointees, and **direct thread writers**. A record written from ≥2 functions
-  one of which is spawned as a thread. Publication requires an address to
-  cross a thread boundary; a file-scope object written directly from two
-  thread bodies never does, and that is the striped-counter shape.
-  Conservative: uncertainty means escape.
+  (`std::mutex` family plus POSIX types), `shared_ptr` / `weak_ptr` members,
+  volatile members, publication to `std::thread` / `std::jthread` /
+  `std::async`, storage in a non-`thread_local` mutable global, global-scope
+  `shared_ptr` pointees, and **direct thread writers**, meaning a record
+  written from two or more functions one of which is spawned as a thread. That
+  last signal exists because publication requires an address to cross a thread
+  boundary, and a file-scope object written directly from two thread bodies
+  never does. Conservative throughout: uncertainty means escape.
 
-  All member-type predicates peel array extents first. A field declared
-  `_Atomic uint64_t c[N]` or `std::atomic<T> slots[N]` has field type
-  `ArrayType(element)`, so without peeling the atomic, sync and volatile
-  checks all see an array and nothing else, arrays of atomics, the dominant
-  striped-counter shape, were invisible to every rule gated on them.
+  Every member-type predicate peels array extents first. A field declared
+  `_Atomic uint64_t c[N]` has field type `ArrayType(element)`, so without
+  peeling the atomic, sync and volatile checks all see an array and nothing
+  else.
 
 - *Sharing route*. Escape means "threads can reach this type." False sharing
   needs the stronger "two cores can reach the **same object**," which
@@ -99,27 +100,26 @@ type may be accessed from multiple threads and quantifies expected contention.
                   || (hasGlobalInstance && anyWriterOnThread)
   ```
 
-  `hasGlobalInstance` (a file-scope instance of the type exists) is tracked
-  separately from `hasPublication`. Conflating them made every global look
-  published and, because `getAsCXXRecordDecl()` returns null for a C struct,
-  made publication evidence silently never fire on C at all.
+  `hasGlobalInstance`, meaning a file-scope instance of the type exists, is
+  tracked separately from `hasPublication`: conflating them makes every global
+  look published. Type queries here use `getAsRecordDecl`, since
+  `getAsCXXRecordDecl` returns null for a C struct and would disable the
+  signal on C entirely.
 
-- *Standing versus handed-over writes*. The discriminator writer counts
+- *Standing versus handed-over writes*, the discriminator a writer count
   cannot express. `g_stats.hits++` reaches a fixed object every thread can
   name; `io->len = n` operates on whatever the caller passed in, and a queue
-  hands each request to one owner at a instant. Both look identical to a
-  writer count, which is why per-request objects graded as contended.
-  `recordWrite` classifies each field write by walking its base expression to
-  the root declaration: global storage means standing access, a parameter
-  means the object arrived from elsewhere.
+  hands each request to one owner at a time. `recordWrite` classifies each
+  field write by walking its base expression to the root declaration: global
+  storage means a standing access, a parameter means the object arrived from
+  elsewhere.
 
 - *Pool roles*. Contention needs two **cores**, not two functions. A thread
   entry spawned inside a loop, or from more than one site, runs on several
   threads at once, so a single writer function already puts two cores on the
-  line. Requiring two distinct writer functions rejected the commonest
-  thread-pool shape outright. The loop usually sits around a spawner wrapper
-  rather than the `pthread_create` itself, so multiplicity is read one level
-  out through spawner resolution.
+  line. The loop usually sits around a spawner wrapper rather than the
+  `pthread_create` itself, so multiplicity is read one level out through
+  spawner resolution.
 - *Write-site collection* (one traversal over all TU function bodies):
   - **Global write counts** per `VarDecl`, across all write forms, plain
     assignment, `++`/`--`, member writes through the global, C11/GNU atomic
@@ -128,11 +128,11 @@ type may be accessed from multiple threads and quantifies expected contention.
   - **Field write evidence** per `FieldDecl`: write-site count and the set of
     writer functions. Constructor member-init lists are excluded,
     initialization is not contention. Feeds FL002's pair grading
-    (`pairHasDistinctWriters`: the union of two fields' writers has ≥2
-    members; for an intra-array self-pair this reduces to "this array is
-    written from ≥2 functions", which is the correct question).
-    Array subscripts are peeled: a write to `arr[i]` is a write to the field
-    `arr`, and without that every element write of every striped counter
+    (`pairHasDistinctWriters`: the union of two fields' writers has two or
+    more members; for an intra-array self-pair that reduces to "this array is
+    written from two or more functions", which is the right question).
+    Array subscripts are peeled, so a write to `arr[i]` is a write to the
+    field `arr`; without that every element write of a striped counter
     resolves to nothing and the array reads as never written.
 - *Lifecycle.* Instantiated fresh per TU inside `HandleTranslationUnit` and
   passed by reference into every rule. After rule execution,
@@ -176,16 +176,16 @@ first (`HotnessSource`):
 | `Declared` | `__attribute__((hot))`, `[[clang::annotate("lshaz_hot")]]`, config globs, or transitive propagation from such a root | none |
 | `InferredDeep` | nested loops or recursion on a path from an entry | one grade below the assigned severity |
 | `InferredShallow` | one loop level from an entry | two grades below |
-| `None` |, | rule does not fire |
+| `None` | nothing | rule does not fire |
 
 `record()` keeps the strongest source, so an inference can never downgrade an
 explicit signal.
 
 **Structural inference** (`inferFromCodeShape`, enabled by `infer_hot_paths`)
 exists because an unconfigured scan otherwise leaves every hot-path rule
-inert. Memcached reported 0 hot of 2219 functions, rocksdb 0 of 1.4M.
-Repetition is what makes a cache miss steady-state, and a loop is where
-repetition is written down:
+inert: with no profile and no configured patterns, nothing in a real codebase
+is hot. Repetition is what makes a cache miss steady-state, and a loop is
+where repetition is written down:
 
 ```
 seeds:     thread entry points (from CallGraph) and main
@@ -195,12 +195,13 @@ bound:     kMaxDepth = 4, so cycles settle rather than diverge
 grade:     own loop nesting >= 2 sharpens by one level
 ```
 
-No project symbol is named, so the inference cannot overfit to one codebase.
+No project symbol appears anywhere in the inference, so it cannot overfit to
+one codebase.
 
 > **A function's own loop nesting is not a seed.** It establishes cost per
-> call, not call frequency, and the two are independent. Seeding on it marked
-> every initializer hot: memcached's `extstore_init` contains six loops, and
-> half the codebase graded hot, which makes the label meaningless.
+> call, not call frequency, and the two are independent. Seeding on it marks
+> every initializer hot, since setup code is full of loops, and once half a
+> codebase grades hot the label means nothing.
 
 Inference is per-TU. A function looped over from another translation unit is
 invisible to it, so a library scanned without its application has thin
@@ -246,18 +247,16 @@ diagnostic's escalation trace, refinement is visible, never silent.
 
 ## Stage 3: Post-processing
 
-In execution order:
-
-The order below is load-bearing and is not declared anywhere in code: it is
-the call order inside `ScanPipeline::run`. A stage that reads a verdict an
-earlier stage sets must stay after it, and several do. When adding one, say
-here what it consumes and what it produces, because that is the only place the
+The order below is load-bearing and is declared nowhere in code: it is the
+call order inside `ScanPipeline::run`. A stage reading a verdict an earlier
+stage sets must stay after it, and several do. When adding one, record here
+what it consumes and what it produces, because this is the only place the
 dependencies are written down.
 
 1. **Canonical sort** of merged diagnostics (see Determinism).
 2. **FL040 reduce**. Sums per-TU write and loop-write counts per
    `(var, type)` and grades severity on the global aggregate (write
-   pressure, not site count; see [rules.md](rules.md#fl040--centralized-mutable-global-state)).
+   pressure, not site count; see [rules.md](rules.md#fl040-centralized-mutable-global-state)).
 3. **Cross-TU escape suppression**. Per-TU `EscapeSummary` maps are merged;
    diagnostics whose `type_name` shows no escape evidence in any TU are
    suppressed. Runs before dedup so all duplicate instances are reclassified
@@ -295,7 +294,7 @@ dependencies are written down.
    pairs/triples per the `InteractionEligibilityMatrix` produce compound
    findings; severity derives from the (post-demotion) parents. One compound
    per (template, participant set). Followed by the **FL092 precedent
-   join** (see [rules.md](rules.md#fl092--unapplied-in-tree-mitigation)).
+   join** (see [rules.md](rules.md#fl092-unapplied-in-tree-mitigation)).
    The thread-role reduce and the FL002/FL090 disjoint-writer escalation
    run earlier, between cross-TU escape suppression and dedup, so every
    duplicate instance is escalated consistently before the canonical
@@ -304,15 +303,16 @@ dependencies are written down.
    confidence floors, severity caps.
 12. **Calibration suppression**, then **PMU trace feedback**, with `--calibration-store`, findings whose
    10-dimension structural feature vector falls within Euclidean radius 0.25
-   of a pattern with ≥3 experimentally refuted instances are suppressed.
+   of a pattern with three or more experimentally refuted instances are
+   suppressed.
    Safety rail: Critical/High findings at Proven tier are never suppressed. A
    store path that exists but cannot be parsed is a hard error (exit 3),
    scanning with silently disabled calibration would misreport.
 13. **Mechanism-claim invariant gate**. Clamps any finding outranking the
-    claims it established. Runs last among grading stages by construction, so
-    a stage added after it can reintroduce the violation it exists to catch.
+    claims it established. Must remain last among the grading stages: a stage
+    added after it reintroduces the violation it exists to catch.
 14. **Header fingerprint (B001)**. Aggregates `FailedTU` error text; a header
-   missing in ≥3 TUs becomes a single B001 diagnostic naming the header,
+   missing in three or more TUs becomes a single B001 diagnostic naming it,
    converting systematic build breakage into one actionable finding.
 15. **Filter and final sort**. Suppressed findings drop; output orders by
    severity (Critical first), then file, then line, with a total-order
@@ -321,10 +321,10 @@ dependencies are written down.
 ## Evidence model
 
 Every diagnostic carries four signals (see
-[output-formats.md](output-formats.md)): severity (worst-case impact),
-confidence ∈ [0,1] (belief the hazard is real here), evidence tier
-(`proven` (layout-guaranteed; `likely`) strong structural signals;
-`speculative`), and **mechanism claims**.
+[output-formats.md](output-formats.md)): **severity**, the worst-case impact;
+**confidence** in [0,1], the belief that the hazard is real at this site;
+**evidence tier**, one of `proven` (layout-guaranteed), `likely` (strong
+structural signals) or `speculative`; and **mechanism claims**.
 
 ### Mechanism claims
 
@@ -356,25 +356,25 @@ result = min( max(established ordinary claims), min(all gating claims) )
 ```
 
 Hotness is the canonical gating claim: no mechanism costs anything in code
-that never runs. This distinction is load-bearing rather than decorative, a
-cap combined with `max` is a no-op, which is exactly what the first
-implementation did.
+that never runs. The distinction is load-bearing, not decorative. Folding a
+gating claim into the `max` makes it a no-op.
 
 `scan_test` gates the contract shut: every emitted finding must declare
 its claims, and severity may never outrank an established one.
 
 ### Grading principles
 
-- **Claims are downgraded to what the evidence supports.** Sub-line-aligned
-  records cannot prove co-residency → `likely`, not `proven`. No observed
-  writers in the TU → "structural evidence only," capped severity.
+- **Claims are downgraded to what the evidence supports.** A sub-line-aligned
+  record cannot prove co-residency, so it grades `likely` rather than
+  `proven`. No observed writers in the TU reports as structural evidence only,
+  at capped severity.
 - **Mitigation intent is respected.** Explicit line alignment or pad-to-line
   layout caps FL001/FL002/FL090 at Medium with the reason stated. Compounds
   never outrank their mitigation-adjusted components.
 - **A claim being constant is not a defect.** A rule's own entry condition is
   legitimately always true and supports only the floor grade. What matters is
-  that the claim is *computed*, which a gate cannot verify, see
-  `regress/claim_discrimination.py`.
+  that the claim is *computed* from the finding, which no static gate can
+  verify for you.
 
 ## Determinism
 
@@ -388,23 +388,24 @@ is a hard invariant with specific machinery behind it:
   `waitpid()`.
 - Merged diagnostics are sorted by the canonical key
   `(ruleID, file, line, column, functionName)` **before any order-dependent
-  pass**. Key collisions (e.g., two TUs defining distinct same-line symbols
-  via macro pasting. The jemalloc `je_`-prefix pattern) fall through to
-  `diagnosticContentLess`, a total order over severity, confidence, tier,
-  function, title, evidence, escalations, and mitigation. No comparison ends
-  in "equal" for distinct content.
-- Rules never cache per-TU state; `EscapeAnalysis` is constructed per TU.
-  Heap-address reuse across TUs in forked children has caused real
-  non-determinism; dependency injection is the fix, not discipline.
+  pass**. Collisions, which macro pasting produces when two TUs define
+  distinct same-line symbols, fall through to `diagnosticContentLess`: a total
+  order over severity, confidence, tier, function, title, evidence,
+  escalations and mitigation. No comparison ends in "equal" for distinct
+  content.
+- Rules never cache per-TU state, and `EscapeAnalysis` is constructed per TU.
+  A rule member written during `analyze` leaks across TUs in an order the
+  scheduler picks, and heap-address reuse in forked children makes that
+  observable. Dependency injection is the fix, not discipline.
 - Cross-TU aggregation is map/reduce (FL040 write counts, escape summaries):
   children emit facts, the parent computes verdicts. No per-TU partial
   verdicts.
 - Locations are resolved via `getFileLoc()` so Clang `<scratch space>`
   token-paste artifacts map back to physical files.
 - The per-shard memory cap derives from **total** system memory, not
-  available. Available memory fluctuates with ambient load, so deriving from
-  it would make output depend on what else the machine was doing, a safety
-  valve must not breach the invariant it protects.
+  available. Available memory fluctuates with ambient load, which would make
+  output depend on what else the machine was doing: a safety valve must not
+  breach the invariant it protects.
 
 The only run-varying output field is `metadata.timestamp`.
 
@@ -415,16 +416,17 @@ translation unit it owned marked failed with a reason. Anything else converts
 a lost shard into silently missing coverage that reads identically to a clean
 scan.
 
-Four paths could previously drop a shard while exiting 0, `fork()` failure,
-a child whose IPC write failed, a signalled child whose partial IPC still
-parsed, and unparseable IPC. All now report. Records are written one per TU
-and flushed as each completes, so a shard that dies mid-way surrenders only
-the translation unit it died on rather than everything it had finished.
+Four paths would otherwise drop a shard while the scan exits 0: `fork()`
+failure, a child whose IPC write failed, a signalled child whose partial IPC
+still parses, and unparseable IPC. Each reports. Records are written one per
+TU and flushed as each completes, so a shard that dies mid-way surrenders
+only the translation unit it died on rather than everything it had
+finished.
 
-`LSHAZ_FAULT_KILL_SHARD=<shard>[:<n>]` kills a shard deterministically,
-before any TU, or after `n` of them, because the realistic trigger (the OOM
-killer) cannot be summoned on demand, and a silent-failure guard that cannot
-be made to fail is not a guard.
+`LSHAZ_FAULT_KILL_SHARD=<shard>[:<n>]` kills a shard deterministically, before
+any TU or after `n` of them. The realistic trigger, the OOM killer, cannot be
+summoned on demand, and a silent-failure guard that cannot be made to fail is
+not a guard.
 
 ## Latency model
 
@@ -464,14 +466,14 @@ static findings and hardware measurements. See
   and SynthesizedInteraction emit editable stubs.
 - **`lshaz feedback`** ingests binary sample files and the recorded
   environment (`results/env.json`), runs Welch's t-test, computes achieved
-  power (two-sample z at the achieved sample sizes), and writes a verdict
-  into the versioned calibration store (atomic temp+rename). Quality gates:
-  labels below 0.60 quality demote to unlabeled; refutations require power
-  ≥ 0.80; environment penalties for missing confound controls (turbo −0.15,
-  governor −0.10, pinning −0.20). Bundles without structural features are
-  refused.
+  power (two-sample z at the achieved sample sizes), and writes a verdict into
+  the versioned calibration store by atomic temp and rename. Quality gates:
+  labels below 0.60 quality demote to unlabeled, refutations require power at
+  or above 0.80, and missing confound controls carry environment penalties
+  (turbo −0.15, governor −0.10, pinning −0.20). A bundle without structural
+  features is refused.
 
-Refuted patterns suppress structurally similar findings on subsequent scans
-(post-processing step 7). PMU trace feedback (`--pmu-trace`, `--pmu-priors`)
-provides a parallel ingestion path from production `perf stat` data with
-Bayesian per-class priors.
+Refuted patterns suppress structurally similar findings on subsequent scans,
+at the calibration-suppression stage above. PMU trace feedback
+(`--pmu-trace`, `--pmu-priors`) is a parallel ingestion path from production
+`perf stat` data with Bayesian per-class priors.

@@ -138,15 +138,14 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "std::function uses type-erased callable storage, with three "
-               "costs of very different size. The prevented inline is ~1ns "
-               "and is always paid. Misprediction adds up to ~8ns, but only "
-               "when the stored target varies unpredictably, a call site "
-               "holding one callable costs the same as one holding eight in "
-               "a predictable cycle, so BTB capacity is not the mechanism. "
-               "Construction may heap-allocate when the callable exceeds the "
-               "small-buffer (~16-32B), which is the largest term and the "
-               "only one an allocator can make worse.";
+        return "std::function stores its callable type-erased, with three "
+               "costs of very different size. The prevented inline is always "
+               "paid. Misprediction is added only when the stored target "
+               "varies unpredictably, so a site holding one callable costs "
+               "what a predictable cycle over several costs, which rules out "
+               "BTB capacity as the mechanism. Construction may heap-allocate "
+               "when the callable exceeds the small-buffer, which is the "
+               "largest term and the only one an allocator can make worse.";
     }
 
     void analyze(const clang::Decl *D,

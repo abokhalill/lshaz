@@ -57,8 +57,6 @@ struct IRFunctionProfile {
     // Basic block / loop structure
     unsigned basicBlockCount = 0;
     unsigned loopCount = 0;
-
-    bool hasProfile() const { return !mangledName.empty(); }
 };
 
 } // namespace lshaz

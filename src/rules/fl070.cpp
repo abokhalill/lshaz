@@ -141,14 +141,15 @@ public:
 
 private:
     // "name" or "name:N", N being the zero-based size parameter. The index is
-    // required rather than inferred: ngx_memalign takes (alignment, size, log)
-    // and a first-integer-wins rule would grade the alignment as the mapping.
+    // required rather than inferred: an aligned-allocation wrapper takes the
+    // alignment first, and a first-integer-wins rule would grade that as the
+    // mapping size.
     bool matchWrapper(llvm::StringRef n, clang::CallExpr *E) {
         std::string name = n.str();
         // Derived names carry no index, so the largest constant integer
-        // argument is the length. Largest rather than first for the reason
-        // below: ngx_memalign's alignment precedes its size, and an alignment
-        // big enough to win here is a huge-page request anyway.
+        // argument is taken as the length: an alignment argument precedes the
+        // size, and an alignment big enough to win here is a huge-page
+        // request anyway.
         if (derived_ && derived_->count(name)) {
             uint64_t len = 0;
             for (unsigned i = 0; i < E->getNumArgs(); ++i) {
@@ -211,19 +212,18 @@ public:
     bool requiresHotPath() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "A working set spanning more base pages than the dTLB "
-               "covers (~64 L1 / ~1-2K L2 entries at 4KB) turns strided "
-               "access into page walks, 4-level lookups, each a potential "
-               "cache-miss chain (dtlb_load_misses.walk_completed). The walk "
-               "costs ~8-24ns per access. It bites hardest when the working "
-               "set fits in cache but outruns TLB reach, there the access "
-               "itself is cheap and the walk is most of the latency, doubling "
-               "it; past last-level cache the same walk is a smaller share of "
-               "a DRAM hit. Size alone therefore points the wrong way: the "
-               "largest structures are where the effect is proportionally "
-               "smallest. A 2MB hugepage entry covers 512x the reach; "
-               "khugepaged can only collapse 2MB-aligned extents, so base "
-               "alignment gates the whole mitigation.";
+        return "A working set spanning more base pages than the dTLB covers "
+               "turns strided access into page walks: four-level lookups, "
+               "each a potential cache-miss chain "
+               "(dtlb_load_misses.walk_completed). It bites hardest when the "
+               "working set fits in cache but outruns TLB reach, because "
+               "there the access itself is cheap and the walk is most of the "
+               "latency; past last-level cache the same walk is a smaller "
+               "share of a DRAM hit. Size alone therefore points the wrong "
+               "way, since the largest structures are where the effect is "
+               "proportionally smallest. One 2MB hugepage entry covers 512 "
+               "base pages, and khugepaged collapses only 2MB-aligned "
+               "extents, so base alignment gates the whole mitigation.";
     }
 
     void analyze(const clang::Decl *D,

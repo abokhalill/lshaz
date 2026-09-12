@@ -179,7 +179,7 @@ def main():
     s.add_argument("scan")
     s.add_argument("worksheet")
     s.add_argument("--per-stratum", type=int, default=8)
-    s.add_argument("--seed", default="lshaz-p2")
+    s.add_argument("--seed", default="lshaz")
     s.set_defaults(fn=cmd_sample)
 
     c = sub.add_parser("score")

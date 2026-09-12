@@ -274,7 +274,7 @@ std::optional<LabeledRecord> CalibrationFeedbackStore::ingest(
         label = LabelValue::Unlabeled; /* reject noisy labels */
 
     if (result.power < 0.80 && label == LabelValue::Negative)
-        label = LabelValue::Unlabeled; /* underpowered refutation → inconclusive */
+        label = LabelValue::Unlabeled; /* underpowered refutation -> inconclusive */
 
     auto now = std::chrono::system_clock::now();
     uint64_t timestamp = static_cast<uint64_t>(
@@ -316,28 +316,6 @@ std::optional<LabeledRecord> CalibrationFeedbackStore::ingest(
     }
 
     return record;
-}
-
-std::vector<LabeledRecord> CalibrationFeedbackStore::queryByHazardClass(
-    HazardClass hc) const {
-
-    std::vector<LabeledRecord> result;
-    for (const auto &r : records_) {
-        if (r.hazardClass == hc)
-            result.push_back(r);
-    }
-    return result;
-}
-
-std::vector<LabeledRecord> CalibrationFeedbackStore::queryBySKU(
-    const std::string &skuFamily) const {
-
-    std::vector<LabeledRecord> result;
-    for (const auto &r : records_) {
-        if (r.skuFamily == skuFamily)
-            result.push_back(r);
-    }
-    return result;
 }
 
 bool CalibrationFeedbackStore::isKnownFalsePositive(

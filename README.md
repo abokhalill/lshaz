@@ -18,7 +18,7 @@ lshaz: 172/172 TU(s) parsed, 41 diagnostic(s)
 lshaz: coverage 16947 function(s), 20526 record(s), 170 hot
 
 [CRITICAL] FL002, False Sharing Candidate
-  src/server.h:2041  (struct redisServer)
+  src/connection.h:214  (struct ConnPool)
   Two independently-written fields share cache line 0. Each write by one
   core invalidates the line in every other core's L1/L2, forcing an RFO
   round trip on the next access from those cores.
@@ -26,9 +26,9 @@ lshaz: coverage 16947 function(s), 20526 record(s), 170 hot
   Fix: separate the fields onto different cache lines with alignas(64).
 ```
 
-Every finding names a specific hardware mechanism. That is, cache geometry, MESI
-coherence, the store buffer, the TLB, NUMA, or the allocator. If a rule can't
-name one, it doesn't fire.
+Every finding names a specific hardware mechanism: cache geometry, MESI
+coherence, the store buffer, the TLB, NUMA, or the allocator. A rule that
+can't name one doesn't fire.
 
 ## Install
 
@@ -90,6 +90,9 @@ report, not missing from your code.
 | FL001 | Struct spans more cache lines than it needs to |
 | FL002 | Two threads write different fields of the same cache line |
 | FL003 | Per-thread array slots packed several to a line |
+| FL004 | A loop that reads every per-thread slot other cores own |
+| FL005 | A store that rewrites a value that was already there |
+| FL006 | One field written by one thread and read by another |
 | FL010 | `seq_cst` where a weaker ordering is free |
 | FL011 | Atomic hammered from a hot path |
 | FL012 | Lock in a hot path |
@@ -106,9 +109,12 @@ report, not missing from your code.
 | FL061 | Everything funnels through one dispatcher |
 | FL070 | Access pattern that thrashes the TLB |
 | FL090 | Several of the above on one struct, compounding |
+| FL091 | Two eligible hazards landing on the same entity |
+| FL092 | A struct missing the line-isolation idiom the tree uses elsewhere |
+| C002 | A loop-invariant load the compiler declined to hoist |
 
-Plus `B001`, which isn't a hazard; it means the scan itself was unsound
-(usually a project that needs building first), so a clean result next to it
+Plus `B001`, which isn't a hazard: it means the scan itself was unsound,
+usually a project that needs building first, so a clean result next to it
 means nothing.
 
 `lshaz explain <ID>` gives you the mechanism and the fix for any of them.
@@ -132,18 +138,19 @@ Read Critical as *worth measuring*, not *known to be slow*.
 
 For measuring, `tools/wattr/` records which threads actually wrote which cache
 line at runtime and joins that against a scan. That confirms the sharing is
-real. Whether it costs anything is a separate question with a much higher bar:
-a counter written 235k times a second by two threads still produced no
-measurable coherence traffic, because the writes were microseconds apart.
+real. Whether it costs anything is a separate question with a much higher bar,
+and a heavily written shared counter can produce no measurable coherence
+traffic at all if the writes never land close enough together.
 
 ## Good to know
 
-- **Output is byte-identical regardless of `--jobs`.** 
+- **Output is byte-identical regardless of `--jobs`**, which is what makes
+  `lshaz diff` usable as a CI gate.
 - **Third-party trees are skipped** by default. `--include-vendored` if you
   want them.
-- **Codebases that hide atomics behind a typedef**, kernel `atomic_t`, nginx
-  `ngx_atomic_t`. Need those names in `atomic_type_names`, or lshaz can't
-  see they're atomic.
+- **Codebases that hide atomics behind a typedef** (`atomic_t`,
+  `ngx_atomic_t`) need those names in `atomic_type_names`, or lshaz can't see
+  the fields are atomic at all.
 - **x86-64 is the default model** (64-byte lines, TSO). `--target-arch arm64`
   changes the severity model, since a `seq_cst` load is free under TSO and
   costs `LDAR` on ARM64.

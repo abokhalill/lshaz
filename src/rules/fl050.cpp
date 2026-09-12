@@ -104,13 +104,13 @@ public:
 
     std::string_view getHardwareMechanism() const override {
         return "Deeply nested conditionals and large switches widen the "
-               "branch misprediction surface. A missed branch costs ~26 "
-               "cycles; a predicted one is free. "
-               "Target count does not matter: a predictable indirect branch "
-               "costs the same at 4096 targets as at 2, so BTB capacity is "
-               "not the mechanism and case count is not a severity signal. "
-               "Cost requires the outcome to be data-dependent, which is a "
-               "runtime property, hence Medium without a profile.";
+               "branch misprediction surface. A predicted branch is free, so "
+               "target count does not matter: a predictable indirect branch "
+               "costs the same at thousands of targets as at two, which rules "
+               "out BTB capacity as the mechanism and case count as a "
+               "severity signal. Cost requires the outcome to be "
+               "data-dependent, which is a runtime property, hence Medium "
+               "without a profile.";
     }
 
     void analyze(const clang::Decl *D,
@@ -151,7 +151,7 @@ public:
                 escalations.push_back(
                     "Switch with " + std::to_string(site.switchCases) +
                     " non-trivial arms: an indirect jump the predictor must "
-                    "resolve; costs ~26 cycles only when the selector is "
+                    "resolve, which costs only when the selector is "
                     "data-dependent");
             } else {
                 if (site.depth >= 6) {
@@ -178,11 +178,11 @@ public:
                 hw << "switch statement with " << site.switchCases
                    << " cases in hot function '"
                    << FD->getQualifiedNameAsString()
-                   << "'. Non-constexpr switch generates an indirect jump. The "
-                   << "cost is misprediction, ~26 cycles, and it is flat in "
-                   << "target count: a predictable indirect branch costs the "
-                   << "same at 4096 targets as at 2. Case count therefore does "
-                   << "not indicate severity. "
+                   << "'. Non-constexpr switch generates an indirect jump. "
+                   << "The cost is misprediction, and it is flat in target "
+                   << "count: a predictable indirect branch costs the same at "
+                   << "thousands of targets as at two. Case count therefore "
+                   << "does not indicate severity. "
                    << "[Requires: the selector varies unpredictably at runtime, "
                    << "not established statically]";
             } else {

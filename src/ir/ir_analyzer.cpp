@@ -33,7 +33,7 @@ void IRAnalyzer::mergeFrom(IRAnalyzer &&other) {
         if (it == profiles_.end()) {
             profiles_.emplace(std::move(name), std::move(profile));
         } else {
-            // Keep the richer profile (more basic blocks → more IR info).
+            // Keep the richer profile (more basic blocks -> more IR info).
             if (profile.basicBlockCount > it->second.basicBlockCount)
                 it->second = std::move(profile);
         }

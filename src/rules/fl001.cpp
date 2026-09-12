@@ -24,18 +24,12 @@ public:
     std::string_view getHardwareMechanism() const override {
         return "Footprint expansion. A record needing two lines where one "
                "would do doubles the cache it occupies, so an array of them "
-               "outruns a given cache level at half the element count. Cost "
-               "is nil while the working set still fits, measured +2% at "
-               "256KB, and grows sharply as it stops: +36% at 4MB, +123% "
-               "once the spread form exceeds last-level cache and the packed "
-               "form does not, on a 12MB Coffee Lake. Both the threshold and "
-               "the size of the step belong to the deployment's cache, not to "
-               "the layout: the same sweep against a 32MB Zen 3 L3 reaches "
-               "+38% only at 128MB versus 256MB. Extra lines per access are "
-               "not themselves a "
-               "cost: touching two resident lines measures the same as one. "
-               "The variable is total footprint against cache size, so "
-               "instance count matters as much as layout.";
+               "outruns a given cache level at half the element count. Extra "
+               "lines per access are not themselves a cost: touching two "
+               "resident lines is as cheap as touching one. The variable is "
+               "total footprint against cache size, which makes instance "
+               "count matter as much as layout, and puts the threshold in the "
+               "deployment's cache rather than in the record.";
     }
 
     void analyze(const clang::Decl *D,
@@ -92,11 +86,10 @@ public:
         if (minLines >= 3) {
             if (writerLines == 0) {
                 // Not Critical: seeing no writes is absence of evidence, not
-                // evidence that the writes are clustered, so it cannot outrank
-                // the case where they were observed and counted. It used to,
-                // which made severity fall as evidence arrived and then shipped
-                // both the Critical rationale and "clamped from Critical" in
-                // one finding, since the claim needs writerLines >= 3 anyway.
+                // evidence that the writes are clustered, so it must not
+                // outrank the case where they were observed and counted.
+                // Otherwise severity falls as evidence arrives, and the claim
+                // needs writerLines >= 3 anyway.
                 sev = Severity::High;
                 escalations.push_back(
                     "occupies " + std::to_string(minLines) +

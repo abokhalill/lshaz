@@ -103,15 +103,16 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Indirect branch via vtable pointer, with two separable costs. "
-               "The inlining barrier is ~1ns and is always paid: the callee "
-               "cannot be specialised into the caller. Misprediction adds up "
-               "to ~8ns but only when the receiver type varies unpredictably; "
-               "a monomorphic site, or a predictable cycle over eight types, "
-               "costs the same as one type. Candidate-type count is not the "
-               "signal. The dynamic distribution is, and it is not visible "
-               "in the AST. Fixes differ: devirtualize (final, CRTP) for the "
-               "barrier, type-partition the data for the misprediction.";
+        return "An indirect branch through the vtable pointer, with two "
+               "separable costs. The inlining barrier is always paid: the "
+               "callee cannot be specialised into the caller. Misprediction "
+               "is added only when the receiver type varies unpredictably, so "
+               "a monomorphic site, or a predictable cycle over several "
+               "types, costs what one type costs. Candidate-type count is not "
+               "the signal; the dynamic distribution is, and it is not "
+               "visible in the AST. The fixes differ: devirtualize (final, "
+               "CRTP) for the barrier, type-partition the data for the "
+               "misprediction.";
     }
 
     void analyze(const clang::Decl *D,
@@ -163,10 +164,10 @@ public:
                << "' in hot function '" << FD->getQualifiedNameAsString()
                << "'. Requires vtable pointer dereference (potential L1D miss "
                << "if vtable is cold) followed by indirect branch. The cost "
-               << "splits in two: the lost inline is ~1ns and is always "
-               << "paid; misprediction adds up to ~8ns but only when the "
-               << "receiver type varies unpredictably. Monomorphic dispatch "
-               << "costs the same at 8 candidate types as at 1. "
+               << "splits in two: the lost inline is always paid, while "
+               << "misprediction is added only when the receiver type varies "
+               << "unpredictably, so monomorphic dispatch costs the same at "
+               << "eight candidate types as at one. "
                << "[Requires, for the larger term: polymorphic and "
                << "data-dependent receivers, not established statically]";
             diag.hardwareReasoning = hw.str();
@@ -187,7 +188,7 @@ public:
             diag.escalations = std::move(escalations);
             diag.mechanismClaims = {
                 {"an inlining barrier: the callee cannot be specialised or "
-                 "folded into the caller, costing ~1ns per call",
+                 "folded into the caller",
                  "a virtual call on a hot path", true, Severity::High},
                 {"the barrier is paid once per iteration, so cost scales with "
                  "trip count",

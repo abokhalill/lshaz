@@ -168,9 +168,8 @@ def main():
         # Two threads touching a line is not contention. Coherence traffic
         # is bounded by the QUIETER side: a granule written 27,000 times by
         # one thread and three times by another costs three invalidations,
-        # not 27,000. memcached's itemstats looks exactly like that, and
-        # grading it on thread count alone would have produced a confident
-        # patch for a non-problem.
+        # not 27,000. A per-class statistics array looks exactly like that,
+        # and grading it on thread count alone reports a non-problem.
         #
         # Per-thread write counts are not in the trace (that would need 64
         # counters per granule). Grouping granules by their writer mask and

@@ -101,14 +101,12 @@ bool mentions(const clang::Stmt *S, const clang::ValueDecl *target) {
     return m.found;
 }
 
-// Any early exit ahead of the store bounds how often it runs, by a
-// condition this rule cannot read. nginx returns on `tp->sec == sec` and
-// then stores cached_gmtoff derived from the same second, so the store is
-// already once-per-second while nothing tests cached_gmtoff itself.
-// Requiring the condition to name the destination missed that and reported
-// it. Any guarded predecessor is treated as a rate bound instead, which
-// costs findings where the exit is unrelated and is the direction that does
-// not invent them.
+// Any early exit ahead of the store bounds how often it runs, by a condition
+// this rule cannot read: a function that returns when the second has not
+// changed and then stores a value derived from that second is already
+// guarded, though nothing tests the destination itself. So any guarded
+// predecessor counts as a rate bound. That costs findings where the exit is
+// unrelated, which is the direction that does not invent them.
 bool escapesEarlier(const clang::CompoundStmt *CS, const clang::Stmt *before) {
     for (const auto *child : CS->body()) {
         if (child == before) return false;
@@ -171,9 +169,8 @@ public:
         return true;
     }
 
-    // C11 atomic_store_explicit is an AtomicExpr, not a call, and it is what
-    // redis stores server.unixtime through. Matching assignments alone sees
-    // nothing on the site this rule was built from.
+    // C11 atomic_store_explicit is an AtomicExpr, not a call, so matching
+    // assignments alone sees nothing in a C codebase.
     bool VisitAtomicExpr(clang::AtomicExpr *AE) {
         switch (AE->getOp()) {
         case clang::AtomicExpr::AO__c11_atomic_store:
@@ -244,14 +241,9 @@ public:
                "whatever value it writes: the line is taken Exclusive and "
                "invalidated in every sharer, and each of them re-fetches on "
                "its next read. Storing a value that did not change pays that "
-               "in full and buys nothing. Found on redis 8.9.241, whose "
-               "updateCachedTimeWithUs stores server.unixtime, microseconds "
-               "divided down to seconds, once per command: 52,304,853 stores "
-               "in one 20s run, 22 of which changed the value, on the line "
-               "carrying 12.3% of the process's HITM. Guarding the store "
-               "removed that line from the profile. Note that it did not move "
-               "throughput on that target, so the wasted traffic is certain "
-               "and its endpoint value is not.";
+               "in full and buys nothing. What is removed is coherence "
+               "traffic; whether that reaches latency depends on whether the "
+               "invalidation was on the critical path.";
     }
 
     void analyze(const clang::Decl *D,

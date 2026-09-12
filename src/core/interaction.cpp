@@ -30,16 +30,6 @@ std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID) {
     return std::nullopt;
 }
 
-std::string diagnosticSiteKey(const Diagnostic &d) {
-    /* file:line preferred; fall back to functionName. */
-    if (!d.location.file.empty() && d.location.line > 0) {
-        return d.location.file + ":" + std::to_string(d.location.line);
-    }
-    if (!d.functionName.empty())
-        return "fn:" + d.functionName;
-    return d.ruleID + ":" + d.title;
-}
-
 void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
     const auto &matrix = InteractionEligibilityMatrix::instance();
 
@@ -144,7 +134,7 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 Diagnostic compound;
                 compound.ruleID = "FL091";
                 compound.title = "Synthesized Interaction: " +
-                    std::string(hazardClassName(entries[i].hc)) + " × " +
+                    std::string(hazardClassName(entries[i].hc)) + " x " +
                     std::string(hazardClassName(entries[j].hc));
                 compound.severity = std::max(dA.severity, dB.severity);
                 compound.confidence = std::min(dA.confidence, dB.confidence)
@@ -244,8 +234,8 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 Diagnostic compound;
                 compound.ruleID = "FL091";
                 compound.title = "Synthesized Interaction: " +
-                    std::string(hazardClassName(tmpl.components[0])) + " × " +
-                    std::string(hazardClassName(tmpl.components[1])) + " × " +
+                    std::string(hazardClassName(tmpl.components[0])) + " x " +
+                    std::string(hazardClassName(tmpl.components[1])) + " x " +
                     std::string(hazardClassName(tmpl.components[2]));
                 compound.severity = Severity::Critical;
                 compound.confidence = std::min({dA.confidence, dB.confidence,

@@ -225,11 +225,11 @@ public:
         return true;
     }
 
-    // C11/GNU atomics never pass through CXXMemberCallExpr: atomic_*()
-    // macros and __atomic_* builtins are AtomicExpr; ++/--/=/op= on an
-    // _Atomic lvalue are plain operators with implicit seq_cst; __sync_*
-    // resolve to builtin CallExprs (full barrier). every C codebase was
-    // invisible to this rule.
+    // C11 and GNU atomics never pass through CXXMemberCallExpr, so a C
+    // codebase is invisible without this arm: atomic_*() macros and
+    // __atomic_* builtins are AtomicExpr, ++/--/=/op= on an _Atomic lvalue
+    // are plain operators with implicit seq_cst, and __sync_* resolve to
+    // builtin CallExprs carrying a full barrier.
     bool VisitAtomicExpr(clang::AtomicExpr *E) {
         using AE = clang::AtomicExpr;
         auto op = E->getOp();
@@ -352,11 +352,13 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "On x86-64 TSO: seq_cst stores lower to XCHG (implicit LOCK, "
-               "store buffer drain). seq_cst loads lower to plain MOV (no "
-               "additional cost over acquire). seq_cst RMW lowers to LOCK-prefixed "
-               "instruction (same as acq_rel RMW). The actionable cost is on "
-               "stores where release ordering would emit plain MOV.";
+        return "Under x86-64 TSO a seq_cst store lowers to XCHG, an implicit "
+               "LOCK and a store-buffer drain, where a release store is a "
+               "plain MOV. Loads are already MOV and RMWs are LOCK-prefixed "
+               "at every ordering, so neither weakens into different machine "
+               "code and the actionable cost is on stores. On ARM64 seq_cst "
+               "costs real barriers on every operation class, loads "
+               "included.";
     }
 
     void analyze(const clang::Decl *D,
@@ -503,13 +505,13 @@ public:
                 if (isStore) {
                     diag.mitigation =
                         "Use memory_order_release for stores where total order is "
-                        "not required. On ARM64, release stores emit STLR (no "
-                        "preceding DMB barrier), saving ~10-20ns per operation.";
+                        "not required. On ARM64, release stores emit STLR "
+                        "with no preceding DMB barrier.";
                 } else if (isLoad) {
                     diag.mitigation =
                         "Use memory_order_acquire for loads where total order is "
-                        "not required. On ARM64, acquire loads emit LDAR without "
-                        "trailing DMB barrier, saving ~10-20ns per operation.";
+                        "not required. On ARM64, acquire loads emit LDAR "
+                        "with no trailing DMB barrier.";
                 } else {
                     diag.mitigation =
                         "Use memory_order_acq_rel for RMW if total order is not "
@@ -552,10 +554,9 @@ public:
                  isARM ? "an atomic op whose relaxed form emits fewer barriers"
                        : "a seq_cst store on x86-64",
                  true, sev},
-                // Says repetition within one call, which a loop does
-                // establish. Phrased as frequency it restated the hotness
-                // claim beside it, which is separately unestablished, so
-                // one finding asserted the same thing true and false.
+                // Repetition within one call, which the loop establishes.
+                // Phrasing it as frequency would restate the hotness claim
+                // beside it, which is separately unestablished.
                 {"the barrier is paid once per iteration, not once per call",
                  "the write sits inside a loop", site.inLoop != 0,
                  Severity::Critical},

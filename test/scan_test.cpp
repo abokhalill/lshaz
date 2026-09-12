@@ -181,7 +181,7 @@ void testEveryRuleHasCanary(const std::string &bin,
 
 // The gate above asks only whether a rule fired somewhere, and both fixtures
 // were C++, so a rule matching C++ spellings alone stayed green while
-// reporting nothing in C. That hid FL012 and FL013 on all of redis.
+// reporting nothing in C, which hides those rules on every C codebase.
 void testCLanguageCanary(const std::string &bin,
                          const std::string &canaryFixture) {
     std::cerr << "test: language-specific rules fire on a C translation unit\n";
@@ -228,7 +228,8 @@ void testCLanguageCanary(const std::string &bin,
 }
 
 // arr[c->tid] carries the owner's id, so one thread can drive every slot:
-// redis writes io_threads_clients_num only from main and it graded High.
+// A per-connection array subscripted by an owner id is written from one
+// thread only, so the subscript alone must not carry High.
 // Both shapes sit in the canary so the grades are compared to each other.
 void testStripeIndexIdentity(const std::string &bin,
                              const std::string &canaryFixture) {
@@ -334,9 +335,8 @@ void testOptRemarkChannel(const std::string &bin,
           "no remark container failed to parse");
 }
 
-// Every serious C codebase reaches libc through a wrapper, so a rule that
-// matches only the libc names sees none of its allocations: redis has 1310
-// z* calls against 503 raw ones and FL020 reported 3.
+// Every serious C codebase reaches libc through a wrapper, so a rule matching
+// only the libc names sees almost none of its allocations.
 void testAllocatorWrapperNames(const std::string &bin,
                                const std::string &canaryFixture) {
     std::cerr << "test: FL020 sees allocations through a project wrapper\n";
@@ -718,7 +718,7 @@ void testReducePhaseRulesAreAccountedFor(const std::string &bin,
 // DoStmt in the AST like any other. Counted as a loop it makes a global
 // written twice at startup look like one written in a loop, which is the
 // difference between a lifecycle signal and sustained coherence traffic.
-// Every atomic in redis, nginx and the kernel is written through such a
+// Every atomic in a wrapper-using C codebase is written through such a
 // macro, so this was not an edge case: it kept redisAsciiArt, which prints
 // a banner once, graded as an allocation on a hot path.
 void testMacroWrapperIsNotALoop(const std::string &bin) {
@@ -873,9 +873,9 @@ void testVocabularyIsJobsInvariant(const std::string &bin) {
 
 // ===== Compile DB resolution tests =====
 
-// init used to print "no recognized build system found" and then "ready. Run:
-// lshaz scan <dir>" and exit 0, sending the user at a scan that cannot read
-// anything.
+// init must not report success when it produced no compile database: "ready,
+// run lshaz scan" after "no build system found" sends the user at a scan that
+// cannot read anything.
 void testInitWithoutBuildSystem(const std::string &bin) {
     std::cerr << "test: init fails when it produced no compile database\n";
     auto tmp = fs::temp_directory_path() /
@@ -1189,7 +1189,7 @@ void testCombinedFilters(const std::string &bin, const std::string &fixture) {
     auto tmp = isolateFixture(fixture, "combo");
     auto project = (tmp / "project").string();
 
-    // Include *.cpp, exclude *main*, max 2 → should get 2 of the 3 remaining.
+    // Include *.cpp, exclude *main*, max 2 -> should get 2 of the 3 remaining.
     auto r = run(bin + " scan " + project +
                  " --include \"*.cpp\" --exclude \"*main*\" --max-files 2 --no-ir");
     check(contains(r.err, "2 translation unit"), "2 TUs after combined filters");
@@ -1265,7 +1265,7 @@ void testLostShardIsNotACleanScan(const std::string &bin,
     // Records are written per TU, so a shard that dies partway still hands
     // back what it finished. Without that, one fatal TU discards every TU the
     // shard already completed. The difference between 3/4 and 2/4 here was
-    // 354/354 and 0/354 on rocksdb.
+    // every TU or none of them on a large project.
     auto midKill = run("LSHAZ_FAULT_KILL_SHARD=0:1 " + scan);
     check(contains(summary(midKill.err), "3/4") &&
           contains(summary(midKill.err), "1 failed"),

@@ -75,14 +75,14 @@ bool headerValue(const std::string &line, const char *label, uint64_t &out) {
     return true;
 }
 
-// The Source:Line column, whether or not the compiler left anything in it.
-// A stripped library reports ??:0 and still occupies the column, so finding
-// the column and reading it are separate questions: the first bounds the
-// symbol, the second decides whether the access can be joined at all.
+// The Source:Line column, whether or not the compiler left anything in it: a
+// stripped library reports ??:0 and still occupies the column, so locating
+// the column bounds the symbol and reading it decides whether the access can
+// be joined at all.
 //
-// Only the basename survives. The profiler sees whatever path DWARF holds,
-// which is the build directory, and the analyzer sees the path it was
-// pointed at; the basename is the part both agree on.
+// Only the basename survives. DWARF holds the build directory and the
+// analyzer holds the path it was pointed at; the basename is the part both
+// agree on.
 bool isSourceColumn(const std::string &t) {
     const auto colon = t.rfind(':');
     return colon != std::string::npos && colon + 1 < t.size() &&

@@ -1,37 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <algorithm>
-#include <string>
-#include <vector>
-
 namespace lshaz {
-
-struct ConfidenceAdjustment {
-    std::string factor;     // named evidence factor
-    double delta;           // signed adjustment magnitude
-    double floor = 0.10;    // never push below this
-    double ceiling = 0.98;  // never push above this
-};
-
-// Apply a sequence of named adjustments to a base confidence value.
-// Returns the clamped result and appends human-readable trace entries.
-inline double applyAdjustments(double base,
-                               const std::vector<ConfidenceAdjustment> &adjs,
-                               std::vector<std::string> &trace) {
-    double c = base;
-    for (const auto &a : adjs) {
-        double prev = c;
-        c = std::clamp(c + a.delta, a.floor, a.ceiling);
-        if (c != prev) {
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "confidence %+.2f (%.2f->%.2f): %s",
-                          a.delta, prev, c, a.factor.c_str());
-            trace.emplace_back(buf);
-        }
-    }
-    return c;
-}
 
 // Named evidence factors for IR refinement.
 namespace evidence {

@@ -37,8 +37,8 @@ public:
                 const std::vector<std::string> &unlockPats,
                 const std::set<std::string> *derivedLock = nullptr,
                 const std::set<std::string> *derivedUnlock = nullptr)
-        : ctx_(Ctx), lockPats_(lockPats), unlockPats_(unlockPats),
-          derivedLock_(derivedLock), derivedUnlock_(derivedUnlock) {}
+        : derivedLock_(derivedLock), derivedUnlock_(derivedUnlock), ctx_(Ctx),
+          lockPats_(lockPats), unlockPats_(unlockPats) {}
 
     bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *E) {
         const auto *MD = E->getMethodDecl();
@@ -243,14 +243,15 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Threads serialise on a contended mutex, converting parallel "
-               "execution to sequential: measured 7x the uncontended cost at "
-               "two cores. The lock itself is ~14ns uncontended, about 8ns "
-               "over an atomic doing the same work. A futex sleep and context "
-               "switch costs microseconds, but modern mutexes spin adaptively "
-               "and only block when the critical section is long enough to "
-               "make spinning wasteful, so that term applies to the length of "
-               "the section held, not to the presence of a lock.";
+        return "Threads serialize on a contended mutex, converting parallel "
+               "execution into sequential. The lock word is itself a "
+               "contended line, since the acquire is an atomic RMW, and it "
+               "costs more than an atomic doing the same work. A futex sleep "
+               "and context switch costs orders of magnitude more, but modern "
+               "mutexes spin adaptively and block only when the critical "
+               "section is long enough to make spinning wasteful, so that "
+               "term belongs to the length of the section held rather than to "
+               "the presence of a lock.";
     }
 
     void analyze(const clang::Decl *D,
@@ -293,8 +294,8 @@ public:
             }
 
             escalations.push_back(
-                "the convoy cost (futex wait and context switch, ~1-10us) "
-                "requires a second thread contending this lock, which is not "
+                "the convoy cost, a futex wait and context switch, requires "
+                "a second thread contending this lock, which is not "
                 "established here; severity reflects acquisition frequency "
                 "and critical-section width only");
 
@@ -311,12 +312,12 @@ public:
             std::ostringstream hw;
             hw << "'" << site.kind << "' in hot function '"
                << FD->getQualifiedNameAsString()
-               << "'. Acquisition costs ~14ns uncontended, about 8ns over an "
-               << "atomic doing the same work, since the LOCK-prefixed RMW on "
-               << "the lock word drains the store buffer. Contention at two "
-               << "cores measured 7x that. A futex sleep costs microseconds, "
-               << "but glibc spins adaptively before blocking, so that term "
-               << "is set by how long the section is held and not by the lock "
+               << "'. Acquisition costs more than an atomic doing the same "
+               << "work, since the LOCK-prefixed RMW on the lock word drains "
+               << "the store buffer, and contention multiplies it. A futex "
+               << "sleep costs orders of magnitude more, but glibc spins "
+               << "adaptively before blocking, so that term is set by how "
+               << "long the section is held and not by the lock "
                << "being on this path. "
                << "[Assumes: lock is contended under production load]";
             diag.hardwareReasoning = hw.str();

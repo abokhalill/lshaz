@@ -43,7 +43,7 @@ struct HazardPrior {
     uint32_t refutedHazards = 0;
 };
 
-/* Above confirm → positive, below refute → negative, between → inconclusive. */
+/* Above confirm -> positive, below refute -> negative, between -> inconclusive. */
 struct CounterThreshold {
     std::string counterName;
     double confirmThreshold = 0.0;
@@ -64,9 +64,6 @@ public:
                            const std::vector<double> &featureVector);
 
     const HazardPrior *getPrior(HazardClass hc) const;
-    const std::unordered_map<std::string, HazardPrior> &allPriors() const {
-        return priors_;
-    }
 
     double adjustConfidence(double baseConfidence, HazardClass hc) const;
     bool savePriors(const std::string &path) const;

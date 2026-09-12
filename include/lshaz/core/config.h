@@ -12,7 +12,7 @@ namespace lshaz {
 
 enum class TargetArch : uint8_t {
     X86_64,     // 64B cache lines, TSO, MESI coherence
-    ARM64,      // 64B cache lines (Graviton), weak ordering
+    ARM64,      // 64B cache lines, weak ordering
     ARM64Apple, // 128B cache lines (M-series P-cores), weak ordering
 };
 
@@ -21,8 +21,8 @@ struct Config {
     TargetArch targetArch       = TargetArch::X86_64;
 
     // Deployment runs with SMT/Hyper-Threading enabled. Reported in FL013's
-    // evidence only. It used to move that rule's severity a notch, until
-    // sync_cost measured 0.0% sibling recovery on two vendors.
+    // evidence only, and deliberately not in its severity: sibling recovery
+    // measured 0.0% on both vendors it has been tested on.
     bool smtEnabled             = true;
 
     // Cache model
@@ -32,10 +32,10 @@ struct Config {
 
     size_t stackFrameWarnBytes  = 2048; // FL021 threshold
 
-    // FL020 escalation, set at glibc's tcache_max. At or below it a request is
-    // served from the per-thread cache; above it the arena path costs 2.8x
-    // (19.3ns to 55.4ns, Zen 3). The previous 256 graded a curve that is flat
-    // from 32B to 1032B. tcmalloc and jemalloc draw the line elsewhere.
+    // FL020 escalation, set at glibc's tcache_max. At or below it a request
+    // is served from the per-thread cache; above it the arena path costs
+    // several times as much. The curve is flat below the boundary, so a lower
+    // threshold grades nothing. tcmalloc and jemalloc draw it elsewhere.
     size_t allocSizeEscalation  = 1032;
 
     unsigned branchDepthWarn    = 4;    // FL050 threshold
@@ -75,8 +75,9 @@ struct Config {
     unsigned numaSockets = 0;
 
     // Last-level-cache domains on the target, which is not socket count: a
-    // 5950X is one socket, one NUMA node, two CCDs. FL002's density decay
-    // holds only within a domain. 0 is unknown and declines to demote.
+    // chiplet part is one socket and one NUMA node with several domains.
+    // FL002's density decay holds only within a domain. 0 is unknown and
+    // declines to demote.
     unsigned coherenceDomains = 0;
 
     // Rule enable/disable
@@ -168,12 +169,12 @@ struct Config {
     std::string cacheDir;
     unsigned cacheMaxMB = 4096;
 
-    // Lock wrappers (fnmatch) added to FL012's POSIX set. nginx reaches its
-    // mutexes through ngx_shmtx_lock at 48 sites and pthread_mutex_lock at 2,
-    // so without these the rule sees 4% of the locks in that tree. Acquire and
-    // release are separate lists because nesting depth is a count: guessing
-    // the release side from the spelling desynchronizes it on the first
-    // wrapper that does not say "unlock".
+    // Lock wrappers (fnmatch) added to FL012's POSIX set, for a codebase that
+    // reaches its mutexes through its own names and leaves only a handful of
+    // direct pthread_mutex_lock calls. Acquire and release are separate lists
+    // because nesting depth is a count: guessing the release side from the
+    // spelling desynchronizes it on the first wrapper that does not say
+    // "unlock".
     std::vector<std::string> lockFunctionPatterns;
     std::vector<std::string> unlockFunctionPatterns;
 

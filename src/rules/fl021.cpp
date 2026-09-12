@@ -27,11 +27,11 @@ public:
     bool requiresHotPath() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "A large frame does not cost to touch: a 512KB frame reads "
-               "and writes at the same ~2ns per line as a 1KB one, because "
-               "the stack is sequential and prefetches cleanly. The cost is "
-               "displacement. The frame occupies cache and TLB entries that "
-               "the rest of the working set then loses, and it is paid by "
+        return "A large frame does not cost to touch: the stack is sequential "
+               "and prefetches cleanly, so a large frame reads and writes at "
+               "the same rate per line as a small one. The cost is "
+               "displacement. The frame occupies cache and TLB entries the "
+               "rest of the working set then loses, and it is paid by "
                "whatever else was resident rather than by the function "
                "holding the frame. Size alone therefore does not grade it; "
                "what matters is what else is live across the call.";

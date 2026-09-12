@@ -12,17 +12,15 @@
 
 namespace lshaz {
 
-// Name-keyed thread-role facts need one naming convention shared by every
-// producer (call edges, entries, field writers) or attribution silently
-// misses joins. Lambdas are the hard case: every call operator in a
-// function stringifies as "(anonymous class)::operator()", collapsing
-// distinct lambdas into one node. Line:col disambiguates; source-stable,
-// TU-local (lambdas never need cross-TU joining).
+// One naming convention shared by every producer of thread-role facts (call
+// edges, entries, field writers), or attribution silently misses joins.
+// Lambdas are the hard case: every call operator stringifies as
+// "(anonymous class)::operator()", collapsing distinct lambdas into one node.
+// Line:col disambiguates, and is source-stable and TU-local.
 //
-// A use outside any function (namespace-scope initializer, default member
-// initializer) has no thread-role node. That is a legitimate AST state, so
-// callers must filter it; returning a placeholder here would insert a bogus
-// node and silently corrupt writer attribution instead of crashing.
+// A use outside any function has no thread-role node. Callers must filter
+// that: a placeholder would insert a bogus node and corrupt writer
+// attribution rather than fail.
 inline std::string threadRoleNodeName(const clang::FunctionDecl *FD,
                                       const clang::ASTContext &Ctx) {
     if (!FD) {

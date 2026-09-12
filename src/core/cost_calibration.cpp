@@ -13,9 +13,8 @@ namespace lshaz {
 namespace {
 
 // One observation per line, tab separated, integers in milli-units. A line
-// format rather than a parser dependency: the harness that writes these is a
-// shell script on a rented box, and anything it can produce with printf is
-// one less thing to get wrong at three in the morning.
+// format rather than a parser dependency, so a shell script can append to the
+// store with printf.
 //
 //   mechanism \t machine \t workload \t predicted_milli \t measured_milli
 //       [\t site [\t instrument]]

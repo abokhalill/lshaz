@@ -12,21 +12,15 @@ namespace lshaz {
 
 // Expected executions of each function per unit of the target's work.
 //
-// A hotness enum answers "does this run often", which is not the question a
-// cost model asks. It asks "how many times", and the difference is the
-// whole gap between a hazard existing and a hazard mattering: on redis a
-// store executing 1.05 times per operation and the same store executing
-// once per connection differ by four orders of magnitude and grade
-// identically today.
+// A hotness enum answers "does this run often"; a cost model needs "how many
+// times". A store on the per-operation path and the same store on the
+// per-connection path differ by orders of magnitude and both read as hot.
 //
-// Rates are relative, normalised so the busiest function in the program is
-// 1.0. Absolute counts would need a workload; relative ones need only the
-// call graph, and every term in the cost expression is a ratio anyway.
-//
-// The apex form of this reads LLVM BlockFrequencyInfo, which carries real
-// branch probabilities. This propagates over the merged call graph with a
-// fixed multiplier per loop level instead, which is wrong by a bounded
-// factor rather than unboundedly, and needs no IR.
+// Rates are relative, normalised so the busiest function is 1.0. Absolute
+// counts would need a workload; relative ones need only the call graph, and
+// every term in the cost expression is a ratio anyway. Loop levels supply a
+// fixed multiplier in place of real branch probabilities, which bounds the
+// error rather than eliminating it.
 struct RateModel {
     std::map<std::string, Milli> perOp;
 
@@ -49,13 +43,10 @@ struct RateModel {
     // Functions the merged call graph reaches through at least one loop, so
     // they run more than once per program entry. Startup code is absent.
     //
-    // Deliberately not derived from perOp. That is normalised against the
-    // busiest function so it can be read as a share of an operation, and a
-    // function six decades below the peak floors to the minimum whatever its
-    // structure. Recurrence is a structural yes or no and must not depend on
-    // what else the program happens to contain: a store in an event loop
-    // recurs whether or not some unrelated startup routine sweeps a million
-    // element array.
+    // Not derived from perOp: that is normalised against the busiest
+    // function, so anything far below the peak floors to the minimum whatever
+    // its structure. Recurrence is structural and must not depend on what
+    // else the program happens to contain.
     std::set<std::string> repeated;
 
     bool recurrent(const std::set<std::string> &fns) const {

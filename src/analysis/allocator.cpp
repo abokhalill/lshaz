@@ -67,7 +67,7 @@ AllocatorClass AllocatorTopology::classify(const std::string &calleeName,
     }
 
     // STL container constructors: delegate to their allocator.
-    // Default std::allocator → same as malloc.
+    // Default std::allocator -> same as malloc.
     if (calleeName.find("std::vector") == 0 ||
         calleeName.find("std::map") == 0 ||
         calleeName.find("std::unordered_map") == 0 ||
@@ -87,10 +87,6 @@ AllocatorClass AllocatorTopology::classify(const std::string &calleeName,
     }
 
     return AllocatorClass::Unknown;
-}
-
-void AllocatorTopology::registerPoolAllocator(const std::string &funcName) {
-    poolAllocators_.insert(funcName);
 }
 
 void AllocatorTopology::setLinkedAllocator(const std::string &allocatorLib) {

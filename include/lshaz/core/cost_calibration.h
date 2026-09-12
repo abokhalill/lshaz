@@ -20,13 +20,12 @@ struct CostObservation {
     std::string machine;
     std::string workload;
 
-    // The line, or empty when we measured the mechanism program-wide.
+    // The line, or empty when the mechanism was measured program-wide.
     //
-    // Sited rows are the only thing that ranks anything. Coherence cost is
-    // stores per operation times the cores holding the line; reads don't
-    // multiply it, so two fields both stored on the command path look
-    // identical to any static model. The machine put 372 samples on one of
-    // them and 3 on the other.
+    // Sited rows are the only thing that separates two lines the static model
+    // prices identically, which it does for a sound reason: coherence cost is
+    // stores per operation times the cores holding the line, and reads do not
+    // multiply it.
     std::string site;
 
     // Keep predicted comparable to whatever this instrument measured, or the
@@ -65,14 +64,12 @@ public:
     };
 
     // Median of measured/predicted, preferring the site's own rows. Median so
-    // one confounded run can't drag the correction, and because an integer
-    // median is exact and doesn't care what order the rows arrived in.
+    // one confounded run cannot drag the correction, and because an integer
+    // median is exact and order-independent.
     //
-    // Nothing matching returns nothing. A neutral factor of one would look
-    // like we had checked.
-    // `instrument` empty means take whatever is there, which is what every
-    // caller wanted before instruments were recorded. Pass one to restrict
-    // the median to rows measuring the same scope.
+    // Nothing matching returns nothing: a neutral factor of one would look
+    // like we had checked. An empty `instrument` matches any; pass one to
+    // restrict the median to rows measuring the same scope.
     std::optional<Factor> factorFor(const std::string &mechanism,
                                     const std::string &machine,
                                     const std::string &workload,
@@ -80,7 +77,6 @@ public:
                                     const std::string &instrument = {}) const;
 
     size_t size() const { return obs_.size(); }
-    const std::vector<CostObservation> &observations() const { return obs_; }
 
     // Under this a correction still applies but reports unestablished, so it
     // can retire a finding and never promote one. One run is a hint.

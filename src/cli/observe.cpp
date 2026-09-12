@@ -24,15 +24,11 @@ namespace lshaz {
 
 namespace {
 
-// Two terms have to come back out before we take a residual.
-//
-// exposed_share guesses how much of a transfer the machine hides behind other
-// misses; a profiler counts the transfer and never says whether the latency
-// reached the critical path. Leave it in and the residual quietly absorbs an
-// exposure error into a term about transfer cost.
-//
-// calibration is last round's correction. Measure against it and we apply it
-// twice, and the store converges on whatever that produced.
+// Two terms come back out before a residual is taken. exposed_share guesses
+// how much of a transfer the machine hides, and a profiler counts transfers
+// without saying whether the latency reached the critical path, so leaving it
+// in absorbs an exposure error into a term about transfer cost. calibration
+// is last round's correction, and measuring against it applies it twice.
 bool measuredByProfile(const std::string &term) {
     return term != "exposed_share" && term != "calibration";
 }
@@ -63,12 +59,12 @@ struct CostedFinding {
 
     // Two sets, not one. The claim is that these groups meet on a line;
     // merged, it only tests that some named function touched something, which
-    // on redis matched 178 sites for one finding and measured the program.
+    // matches most of the program for any widely-accessed record.
     std::set<std::string> writers, readers;
 
     // basename:line of the stores, the only writer-side key that survives
-    // inlining. perf folds redis's static-inline writer of server.unixtime
-    // into `call`, so the symbol matches nothing and server.c:1380 is exact.
+    // inlining: a profiler reports a static-inline writer under whatever
+    // symbol it was inlined into, but its DWARF line is exact.
     std::set<std::string> writeSites;
 
     // The model disowned this number, so we can't learn from it.
@@ -366,11 +362,8 @@ int runObserveCommand(int argc, const char **argv) {
 
     // Join at line granularity, because the claim is at line granularity: a
     // sharing finding says a writing role and a reading role meet on one
-    // line, and a shared line in the profile is exactly the sites that met.
-    // So both role sets have to show up there, not just either name.
-    //
-    // Rules that report at the access site instead of a declaration match on
-    // their own file and line. FL005 takes that route.
+    // line, so both role sets have to appear there, not just either name.
+    // Rules reporting at the access site match on their own file and line.
     std::map<std::string, std::vector<CostedFinding *>> byName;
     for (auto &f : findings) {
         for (const auto &s : f.writers) byName[s].push_back(&f);
@@ -380,13 +373,13 @@ int runObserveCommand(int argc, const char **argv) {
     }
 
     // Which binary we were pointed at. Traffic inside a dependency is not our
-    // miss: scanning valkey's sources will never name a lock in glibc, and
-    // scoring it against us measures how much of the program's contention
-    // happens to live in libc. One glibc line on valkey carried 1953 of 4120
-    // transfers and dragged recall from 91% to 43%.
+    // miss: a scan of the project's own sources never names a lock inside
+    // libc, and a single hot allocator line can carry most of a run's
+    // transfers.
     //
-    // Vote by distinct lines, not samples, so one enormous dependency line
-    // can't win. Printed and overridable, since it decides a headline number.
+    // Vote by distinct lines rather than samples, so one enormous dependency
+    // line cannot win. Printed and overridable: it decides a headline
+    // number.
     std::map<std::string, unsigned> objectLines;
     for (const auto &line : prof.lines) {
         std::set<std::string> here;
@@ -880,13 +873,11 @@ int runObserveCommand(int argc, const char **argv) {
         store.observe(o);
     }
 
-    // One row per measured line as well as one per mechanism, and this is
-    // the half that ranks. The static model prices two lines identically
-    // whenever both are stored somewhere on the command path, and it is
-    // right to: reads do not multiply transfers, so the difference between
-    // them is how often each is actually stored per operation, which no
-    // amount of source reading resolves. The machine resolves it, and a
-    // sited row is how the next scan keeps the answer.
+    // One row per measured line as well as one per mechanism. The sited rows
+    // are the half that ranks: the static model prices two lines identically
+    // whenever both are stored on the same path, correctly, because reads do
+    // not multiply transfers and how often each is stored per operation is a
+    // property of the run.
     unsigned sited = 0;
     const uint64_t total = prof.totalHitmSamples();
     for (const auto &f : findings) {
@@ -915,9 +906,8 @@ int runObserveCommand(int argc, const char **argv) {
                          << " sample(s)\n";
     }
     // Zero is a measurement. Without these the store only ever learns about
-    // lines that turned out to cost something, so every scan repeats the
-    // same false positives at the same grade however many times the machine
-    // has shown them silent.
+    // lines that cost something, so a line the machine has repeatedly shown
+    // silent is reported at the same grade every scan.
     unsigned zeroed = 0;
     for (const auto *f : executedSilent) {
         CostObservation o;

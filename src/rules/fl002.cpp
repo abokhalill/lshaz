@@ -22,9 +22,14 @@ public:
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
     std::string_view getHardwareMechanism() const override {
-        return "MESI invalidation ping-pong across cores due to shared "
-               "cache line writes. Each write by one core forces invalidation "
-               "of the line in all other cores' L1/L2, triggering RFO traffic.";
+        return "MESI invalidation ping-pong. Two cores writing distinct "
+               "fields on one line each force a Request-For-Ownership that "
+               "invalidates the line in every other core's private cache: "
+               "independent data, serialized by geometry. The cost needs the "
+               "writes close enough in time to catch the line resident in a "
+               "peer's L1, and only decays with spacing while both writers "
+               "share a last-level cache. Across coherence domains it does "
+               "not decay at all.";
     }
 
     void analyze(const clang::Decl *D,
@@ -130,9 +135,7 @@ public:
                 // One field stored, the other read from a function that is
                 // not the writer. The store invalidates the line and the
                 // reader re-fetches, which is the same coherence miss a
-                // second writer pays. redis's hottest static line is this:
-                // call() stores real_cmd->calls at offset 0x30 while the key
-                // specs at 0x00-0x10 are read by getKeysFromCommandWithSpecs.
+                // second writer pays.
                 level = kWriterReader;
                 if (wev < kWriterReader) {
                     const auto &wn = aStores ? p.a->name : p.b->name;
@@ -163,8 +166,8 @@ public:
         // is per-TU, so a header-defined struct written from another TU shows
         // none. An atomic field is a declaration of intent to share and is
         // the signal that survives that blindness. Requiring writes here
-        // trades this rule's FP class for a cross-TU false-negative class,
-        // which is the worse trade (verify: fl002_unwritten, mitigated_*).
+        // would trade this rule's false-positive class for a cross-TU
+        // false-negative class, which is the worse trade.
 
         // Refcount-only structs: single atomic refcount field sharing a line
         // with immutable data.  No real false sharing.
@@ -176,12 +179,12 @@ public:
         // for most-but-not-all base alignments the allocator may pick.
         bool exactLayout = map.isCacheLineAligned();
 
-        // explicit line alignment / trailing pad-to-line = the author
-        // already reasons in cache lines; co-located atomics under that
-        // idiom are typically single-writer by design (IOThread,
-        // used_memory_entry). structurally true, so report, but not at
-        // strike severity. FL041 deliberately exempt: head/tail naming
-        // implies multi-writer roles where this idiom IS the bug.
+        // Explicit line alignment or a trailing pad-to-line says the author
+        // already reasons in cache lines, and co-located atomics under that
+        // idiom are usually single-writer by design. Structurally true, so
+        // report it, but not at strike severity. FL041 is deliberately
+        // exempt: head/tail naming implies the multi-writer roles for which
+        // this idiom is itself the bug.
         bool deliberateLayout =
             exactLayout ||
             CacheLineMap::hasTrailingLinePad(RD, Ctx, Cfg.cacheLineBytes);
@@ -309,18 +312,17 @@ public:
         if (sparsePair && !densePair && !decayApplies)
             escalations.push_back(
                 "writers are sparse, but the target has more than one "
-                "last-level-cache domain (or the count is unset): cross-domain "
-                "sharing costs ~51ns per write and does not decay with "
-                "spacing, so sparseness earns no demotion here. Set "
-                "coherence_domains: 1 if both writers provably share an LLC");
+                "last-level-cache domain (or the count is unset): "
+                "cross-domain sharing does not decay with spacing, so "
+                "sparseness earns no demotion here. Set coherence_domains: 1 "
+                "if both writers provably share an LLC");
         else if (sparsePair)
             escalations.push_back(
-                "every writer of this pair calls out to a body this TU cannot "
-                "see, and none writes in a loop: the writes are separated by a "
-                "syscall or external call and are microseconds apart. "
-                "Contended-RMW cost collapses ~75x once spacing exceeds "
-                "~119ns under one last-level cache, so the co-location is "
-                "real but the "
+                "every writer of this pair calls out to a body this TU "
+                "cannot see, and none writes in a loop: the writes are "
+                "separated by a syscall or external call and are microseconds "
+                "apart. Contended-RMW cost collapses as spacing grows under "
+                "one last-level cache, so the co-location is real and the "
                 "ping-pong is not");
 
         const auto &SM = Ctx.getSourceManager();

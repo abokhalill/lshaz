@@ -6,16 +6,12 @@
 
 namespace lshaz {
 
-// Which hardware event confirms a rule.
+// Which hardware event confirms a rule. Every rule names a mechanism; this
+// says what would have to be counted to see it.
 //
-// Every rule gets in here by naming a hardware mechanism, and until this
-// table we could only ever check one of them. FL050 has graded on branch
-// misprediction since the day it landed without anyone once holding it next
-// to a branch-miss profile.
-//
-// The family belongs with the rule; the event name does not. Linux calls it
-// branch-misses on this box and something else on the next one, so the
-// operator names the event and this says what it has to measure.
+// The family belongs with the rule, the event name does not: the counter a
+// rule needs is spelled differently on every microarchitecture, so the
+// operator supplies the name and this supplies what it has to measure.
 enum class EvidenceFamily {
     None,            // structural claim, nothing to count at runtime
     Coherence,       // c2c gives us the richer per-line path

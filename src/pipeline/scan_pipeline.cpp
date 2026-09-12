@@ -80,9 +80,8 @@ void ScanPipeline::report(const std::string &stage,
 
 namespace {
 
-// GCC-only flags that Clang doesn't understand. These cause IR emission
-// failures on GCC-compiled codebases (postgres, Linux kernel, nginx, etc.).
-// We strip them before invoking clang for IR generation.
+// GCC-only flags Clang rejects. A GCC-configured compile database carries
+// them, and clang fails the whole IR emission rather than ignoring them.
 bool isGCCOnlyFlag(llvm::StringRef arg) {
     // Exact matches
     static const llvm::StringSet<> exactFlags = {
@@ -178,11 +177,8 @@ std::vector<std::string> sanitizeForClangIR(
     result.push_back("-Wno-unknown-attributes");
     result.push_back("-Wno-ignored-attributes");
 
-    // start at 1: args[0] is the DB compiler path. leaking it into the
-    // input list "worked" for directory scans only because an existing
-    // path is classified as an object input and -S skips the link; the
-    // FixedCompilationDatabase placeholder does not exist, so single-file
-    // IR emission failed on every invocation.
+    // From 1: args[0] is the compiler path, and passing it on as an input
+    // makes clang treat it as an object file.
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string &arg = args[i];
 
@@ -197,10 +193,8 @@ std::vector<std::string> sanitizeForClangIR(
         if (arg == srcPath)
             continue;
 
-        // Strip the TU's own -O flags: the tool's --ir-opt is prepended,
-        // and clang's last-flag-wins meant any release-configured compile
-        // DB silently overrode it; every "O0" emission on such a project
-        // actually ran at the project's level.
+        // --ir-opt is prepended, and clang takes the last -O flag, so the
+        // TU's own level would silently win.
         if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O' &&
             (arg.size() == 2 || arg == "-O0" || arg == "-O1" ||
              arg == "-O2" || arg == "-O3" || arg == "-Os" || arg == "-Oz" ||
@@ -477,18 +471,10 @@ static void runIRPass(
         std::vector<std::pair<size_t, IRResult>> jobResults;
     };
 
-    // A fixed pool pulling shard indices, not one task per shard. std::async
-    // with launch::async is required to start a thread immediately, and the
-    // semaphore throttled execution rather than creation: at the default batch
-    // size of one that is a thread per translation unit, so a large project
-    // exhausted the thread limit and the resulting std::system_error escaped
-    // uncaught.
-    //
-    // The pool also removes the permit that used to leak. parseIRFile and
-    // analyzeModule run on whole-program IR and can throw, and the release
-    // sat after them, so one bad module left a permit held forever while the
-    // unwind blocked in ~future waiting on threads parked in acquire(). A
-    // hang inside a destructor is the worst shape that failure can take.
+    // A fixed pool pulling shard indices, not a task per shard: at the
+    // default batch size of one that is a thread per translation unit, which
+    // a large project cannot create. The pool also has no permit to leak when
+    // parseIRFile or analyzeModule throws on a bad module.
     std::vector<std::unique_ptr<ShardResult>> results(shards.size());
     std::vector<std::string> shardErrors(shards.size());
     {
@@ -580,7 +566,6 @@ static void runIRPass(
 }
 
 static unsigned applyCalibrationSuppression(
-        const FeedbackOptions &fb,
         std::vector<Diagnostic> &diagnostics,
         CalibrationFeedbackStore &store) {
     unsigned suppressed = 0;
@@ -687,13 +672,13 @@ static void applyPMUFeedback(
         feedbackLoop.savePriors(fb.pmuPriorsPath);
 }
 
-// Cross-TU thread-role escalation. FL002 joins at pair granularity via
+// Cross-TU thread-role escalation. FL002 joins at pair granularity through
 // its pair_fields evidence; FL090's claim is struct-wide, so any two
-// attributed fields of the type with disjoint roles evidence its
-// concurrency assumption. Confidence-only by design: severity caps from
-// the deliberate-layout demotion contract stay intact, and a demoted
-// struct whose flagged pair still attributes to disjoint threads is
-// exactly the "mitigation exists but missed this pair" signal.
+// attributed fields with disjoint roles evidence its concurrency assumption.
+//
+// Confidence only, never severity: that leaves the deliberate-layout demotion
+// intact, and a demoted struct whose flagged pair still attributes to
+// disjoint threads is exactly the "mitigation missed this pair" signal.
 static const char *roleMaskName(uint8_t mask) {
     switch (mask) {
         case ROLE_MAIN:   return "main-thread";
@@ -877,10 +862,9 @@ static unsigned emitStripedArrayFindings(
             continue;
         if (v.slotsPerLine < 2)
             continue;
-        // Writers all on the main thread: the slots are packed, but no two
-        // cores ever write them. The role join was previously consulted only
-        // in the direction that raises severity, so this shape reported High
-        // on the strength of its subscript alone.
+        // Packed slots that no two cores ever write. The role join has to be
+        // consulted in the direction that lowers severity as well as the one
+        // that raises it, or a thread-identity subscript alone carries High.
         if (v.mainThreadOnly)
             continue;
         applyStripeROI(v, s, lineBytes, l1dSizeBytes, alignedOwnerAvailable);
@@ -1069,7 +1053,6 @@ static unsigned emitStripedArrayFindings(
 // downgrading its owner out of Modified and costing that owner an Exclusive
 // re-acquire on its next write. Padding cannot fix it and increases the line
 // count, so the correctly padded array FL003 skips is where this lives.
-// Measured second on redis under load, 64 of 1198 HITM.
 static constexpr const char *kSweepMechanism = "coherence_sweep";
 
 // Which call sites the estimate was built from, in a form a profile can be
@@ -1274,7 +1257,6 @@ static unsigned emitAggregationSweepFindings(
 // can tell that from one reached per command. FL005 ships its repetition
 // claim unestablished for exactly that reason; this settles it against the
 // merged graph and drops the finding where the store provably runs once.
-// Without it the rule reported redis's initServer, which runs at startup.
 static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
                                       const ThreadRoleSummary &facts) {
     // Callers per callee, and whether any of those edges sits in a loop.
@@ -1366,10 +1348,7 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
 
     // Total read rate, not the busiest reader's. A line read once per
     // operation from forty places on the command path is re-fetched far more
-    // often than one read from two, and the maximum reports both as the
-    // same. That flattening is why 87 of redis's 161 single-field findings
-    // priced to the identical number while the machine measured a 20x spread
-    // between the top line and the next.
+    // often than one read from two, and a maximum prices both the same.
     //
     // Saturating at once per operation, because a rate model built on four
     // loop-depth buckets cannot defend a claim above that, and an unbounded
@@ -1383,18 +1362,13 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     }
     const Milli rRate = rKnown ? rSum : kMilli;
 
-    // Cores that can be holding the line. Source cannot count these: the
-    // thread-entry count is how many bodies exist, not how many run at once
-    // on this object, and using it charged redis sixteen sharers for a line
-    // two roles touch. Disjoint writer and reader roles prove two.
-    // Configured beats inferred. One sharer means no line is ever held
-    // elsewhere and the whole expression is zero, which is the right answer
-    // and one no amount of source reading reaches.
-    // Cores that pay, which is one fewer than the cores that touch: the
-    // store's own core does not invalidate itself. A single-sharer
-    // deployment therefore prices to zero, which is what redis with
-    // io-threads 1 measured, and what the previous form got wrong by
-    // charging it one full transfer per store.
+    // Cores that pay, one fewer than the cores that touch the line: the
+    // store's own core does not invalidate itself, so a single-sharer
+    // deployment prices to zero.
+    //
+    // Source cannot count sharers. The thread-entry count is how many bodies
+    // exist, not how many run at once on this object, so a configured count
+    // beats any inference and disjoint writer/reader roles prove two.
     const auto payers = [](int64_t touching) {
         return toMilli(touching > 1 ? touching - 1 : 0);
     };
@@ -1431,7 +1405,7 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     // and no term is added: a neutral factor of one that looked established
     // would claim the model had been verified here when it has not.
     //
-    // A sited factor is the only thing that ranks two lines the static model
+    // A sited factor is the only thing separating two lines the static model
     // prices identically, and it prices them identically for a sound reason:
     // coherence cost is stores per operation times the cores holding the
     // line, reads do not multiply it, and how often a line is actually
@@ -1469,24 +1443,17 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         if (d.suppressed)
             continue;
         // Every line-sharing finding gets costed, not only the ones the
-        // cross-TU join built. Wiring it to that join alone left the model
-        // touching one finding of 1580 on redis, which is a demonstration
-        // rather than a verdict. The pair the rule already flagged carries
-        // the field names, and the merged facts carry who touches them.
+        // cross-TU join built: the pair the rule already flagged carries the
+        // field names, and the merged facts carry who touches them.
         if (d.cost.empty() && (d.ruleID == "FL002" || d.ruleID == "FL041")) {
             auto tn = d.structuralEvidence.find("type_name");
             auto pf = d.structuralEvidence.find("pair_fields");
             if (tn != d.structuralEvidence.end() &&
                 pf != d.structuralEvidence.end() && !pf->second.empty()) {
                 // Every pair on the list, not the first one. A finding
-                // describes as many lines as it lists pairs, and its cost is
-                // the worst of them. Pricing only the head made redis report
-                // redisServer at 0.081 cycles per operation from
-                // shutdown_asap|crashing, a pair that runs at shutdown,
-                // while unixtime|daylight_active sat at position 27 of 28
-                // and carried 18.6% of the machine's measured coherence
-                // traffic. The order of that list is a rule's enumeration
-                // order and means nothing about cost.
+                // describes as many lines as it lists pairs and its cost is
+                // the worst of them; the list is in the rule's enumeration
+                // order, which says nothing about cost.
                 static const std::set<std::string> kNone;
                 const auto setFor =
                     [&](const std::map<std::string, std::set<std::string>> &m,
@@ -1557,19 +1524,11 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
             continue;
         }
 
-        // Every unestablished term carries its cost-maximising value, so the
-        // product is an upper bound whether or not the estimate is complete.
-        // An upper bound below the threshold is a sound dismissal, which is
-        // the asymmetry the whole model turns on: dismissal is cheap,
-        // promotion is not. As a gating claim this can only lower a grade,
-        // so a high estimate on guessed terms promotes nothing.
         // An estimate above the whole per-operation budget is arithmetic,
-        // not a finding: the hazard cannot cost more than the operation
-        // does. It means a term is wrong, and grading Critical on it would
-        // launder a modelling error into a verdict. Report the number, say
-        // it is implausible, and do not let it carry a grade.
-        if (workload.known() &&
-            d.cost.cyclesPerOp > toMilli(workload.cyclesPerOp)) {
+        // not a finding: a hazard cannot cost more than the operation does,
+        // so a term is wrong. Report the number, say it is implausible, and
+        // do not let it carry a grade.
+        if (d.cost.cyclesPerOp > toMilli(workload.cyclesPerOp)) {
             // Marked structurally as well as in prose, so a measurement
             // ingest can refuse to learn a residual from a number the model
             // has already disowned without parsing an escalation string.
@@ -1596,12 +1555,9 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         }
         d.escalations.push_back(
             "estimated cost " + milliToText(d.cost.cyclesPerOp) +
-            " cycles per operation" +
-            (workload.known()
-                 ? " against a " + std::to_string(workload.cyclesPerOp) +
-                       " cycle budget"
-                 : ", ungraded with no workload budget configured") +
-            " on " + machine.name + " (" + terms + ")" +
+            " cycles per operation against a " +
+            std::to_string(workload.cyclesPerOp) + " cycle budget on " +
+            machine.name + " (" + terms + ")" +
             (d.cost.complete ? "" : "; terms marked ? are cost-maximising "
                                     "stand-ins, so this is an upper bound"));
         ++graded;
@@ -1609,16 +1565,13 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
     return graded;
 }
 
-// Give type-level findings the symbols that touch them.
+// Give type-level findings the symbols that touch them. A layout finding
+// reports at a struct declaration and names no function, so a per-symbol
+// hardware profile has no key to look it up under.
 //
-// A layout finding reports at a struct declaration and names no function, so
-// there is no key to look it up under in a per-symbol profile. That left 499
-// FL001 findings on redis unjudgeable and the whole cache-miss family
-// unmeasured, not for want of a machine but for want of a name.
-//
-// Capped: a popular record has hundreds of accessors and all we ask of the
-// set is whether any of them ran and whether the event landed on any. Ordered
-// so the cap cuts the same ones every time.
+// Capped, since all the set is asked is whether any of them ran and whether
+// the event landed on any. Ordered so the cap cuts the same ones every
+// time.
 static unsigned attachAccessSymbols(std::vector<Diagnostic> &diagnostics,
                                     const ContentionGraph &graph) {
     constexpr size_t kMaxSymbols = 64;
@@ -1692,12 +1645,8 @@ struct TrueSharingGates {
 //
 // FL002 covers two distinct fields colliding on a line, where padding fixes
 // it because they never needed to be neighbours. Here the readers want the
-// value, so padding just relocates the transfer. Different fix, different
-// sentence.
-//
-// server.unixtime is why this exists: 372 of 2026 sampled HITM events on
-// redis, every one at the same byte offset, so no pair of fields and nothing
-// in the rule set that could say it.
+// value, so padding only relocates the transfer. Different fix, different
+// sentence, and no pair of field names to describe it with.
 static unsigned emitTrueSharingFindings(
         std::vector<Diagnostic> &diagnostics,
         const ContentionGraph &graph,
@@ -1751,10 +1700,10 @@ static unsigned emitTrueSharingFindings(
 
             // Writes through a handed-in pointer move with the object and
             // contend with nothing; without this we fire on every field of
-            // every per-request struct. The reads answer the same question
-            // and sometimes they're the only side that can: redis writes
-            // user::flags as u->flags and reads it as DefaultUser->flags.
-            // Weaker, so it lands in the claim rather than passing silently.
+            // every per-request struct. Sometimes only the reads can tell:
+            // a setter writes through its parameter while the command path
+            // reads the one global instance. Weaker, so it lands in the claim
+            // rather than passing silently.
             const bool standingWrites = r.access.standing();
             const bool oneObject = standingWrites || r.access.standingReads();
             if (!standingWrites && !r.access.anyStandingRead()) {
@@ -1762,16 +1711,11 @@ static unsigned emitTrueSharingFindings(
                 continue;
             }
 
-            // Tried and refused, twice, so don't reach for either again.
-            // Gating on object freshness dropped client::flags (874 samples,
-            // the biggest line in the run): an object handed between threads
-            // is contended on exactly the fields they hand it with. Gating on
-            // writer hotness moved precision 17 to 12 to 17 and silenced the
-            // canary, because FL006 inherited the hotness verdict's own
-            // thresholds. Both survive below as evidence.
-            //
-            // What's left: the store has to recur, or the line settles into
-            // Shared after the first read and stops costing anything.
+            // The store has to recur, or the line settles into Shared after
+            // the first read and stops costing anything. Object freshness and
+            // writer hotness are deliberately not gates here: an object
+            // handed between threads is contended on exactly the fields they
+            // hand it with. Both survive below as evidence.
             const bool loopWrite = r.loopWritten();
             bool writerHot = false;
             for (const auto &fn : r.writers)
@@ -1920,10 +1864,9 @@ static unsigned emitTrueSharingFindings(
 
 // A store to one field invalidates the whole line, so a core reading a
 // neighbouring field re-fetches and pays what a second writer would. FL002
-// only sees that when both halves compile together, and they often don't:
-// redis stores redisCommand::calls in server.c while db.c reads the key specs
-// off the same line. Layout is a program fact and the access sets merge, so
-// the join lives here.
+// only sees that when the store and the read compile together, and routinely
+// they do not. Layout is a program fact and the access sets merge, so the
+// join lives here.
 static unsigned emitCrossTUSharedLineFindings(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &escape,
@@ -1940,13 +1883,11 @@ static unsigned emitCrossTUSharedLineFindings(
         return 0;
 
 
-    // A type already reported takes the pair as added evidence. A second
-    // finding would land on the same record location and be collapsed by
-    // dedup, which drops the cross-TU half rather than merging it.
-    //
-    // Every instance, not the first: this runs before dedup, and on redis a
-    // type carries up to 75 of them. Marking one leaves the evidence on
-    // whichever copy dedup happens not to keep.
+    // A type already reported takes the pair as added evidence: a second
+    // finding lands on the same record location and dedup drops the cross-TU
+    // half rather than merging it. Every instance, not the first, since this
+    // runs before dedup and a header-declared type carries one per including
+    // TU.
     std::map<std::string, std::vector<Diagnostic *>> reported;
     for (auto &d : diagnostics) {
         if (d.suppressed || (d.ruleID != "FL002" && d.ruleID != "FL041"))
@@ -2088,9 +2029,9 @@ static unsigned emitCrossTUSharedLineFindings(
         }
         if (hits.empty())
             continue;
-        // Field order is alphabetical, and on a 572-field record the first
-        // pairs found say nothing. Rank by mechanism, then by how many
-        // functions carry it; the name tail only keeps the order total.
+        // Field order is alphabetical, so on a wide record the first pairs
+        // found say nothing. Rank by mechanism, then by how many functions
+        // carry it; the name tail only keeps the order total.
         std::sort(hits.begin(), hits.end(), [](const Hit &x, const Hit &y) {
             // A never-written neighbour outranks a second writer. Two writers
             // trade the line and each pays once per alternation; one writer
@@ -2363,13 +2304,11 @@ static unsigned emitOptRemarkFindings(
     return emitted;
 }
 
-// FL092: unapplied in-tree mitigation. Synthesized when an FL002 with
-// cross-thread writer attribution sits in a codebase that demonstrably
-// applies cache-line isolation to other types. The precedent join is the
-// merge-shaped evidence: the codebase itself validates both the hazard
-// class and the fix idiom; this struct just never received it. Runs
-// post-dedup (one compound per surviving component); never outranks the
-// component's mitigation-adjusted severity.
+// FL092: unapplied in-tree mitigation. Synthesized when an attributed FL002
+// sits in a codebase that already line-isolates other types, so the codebase
+// itself validates both the hazard class and the fix idiom and this struct
+// simply never received it. Post-dedup, one compound per surviving component,
+// never outranking the component's mitigation-adjusted severity.
 static unsigned synthesizeUnappliedMitigation(
         std::vector<Diagnostic> &diagnostics,
         const EscapeSummary &globalEscape) {
@@ -2749,9 +2688,9 @@ ScanResult ScanPipeline::run(
     llvm::CrashRecoveryContext::Enable();
 
     // Pass one. Parses each TU and records structure only, so the parent can
-    // close the project's allocator vocabulary before any rule runs. zmalloc's
-    // body is in zmalloc.c and every caller is elsewhere, so no per-TU pass can
-    // reach it; requiring it in config made a human rediscover it per codebase.
+    // close the project's allocator vocabulary before any rule runs. A
+    // wrapper's body and its callers are in different TUs, so no per-TU pass
+    // can resolve one.
     Config analysisConfig = request.config;
     {
         ThreadRoleSummary vocabFacts;
@@ -2797,9 +2736,9 @@ ScanResult ScanPipeline::run(
             return clean;
         };
 
-        // Served from cache in the parent, before any fork. Children cannot
-        // report their hit counts back without extending the protocol, and a
-        // hit costs a file read, so paying it here also shrinks the shards.
+        // Served in the parent, before any fork: a child cannot report its
+        // hit count back without extending the protocol, and a hit costs only
+        // a file read.
         std::vector<std::string> toParse;
         for (const auto &src : sources) {
             std::string rec;
@@ -2819,9 +2758,9 @@ ScanResult ScanPipeline::run(
                 if (prescanOne(src, vocabFacts))
                     ++parsed;
         } else {
-            // Same sharding and fork isolation the analysis pass uses, for the
-            // same reason: ClangTool's global state is not thread-safe. On
-            // rocksdb the sequential prepass dominated the scan.
+            // Same sharding and fork isolation the analysis pass uses, for
+            // the same reason: ClangTool's global state is not thread-safe.
+            // Sequential, this prepass dominates a large scan.
             std::vector<std::vector<std::string>> vshards(jobs);
             for (size_t i = 0; i < toParse.size(); ++i)
                 vshards[i % jobs].push_back(toParse[i]);
@@ -2829,11 +2768,9 @@ ScanResult ScanPipeline::run(
             std::vector<std::pair<pid_t, std::string>> kids;
             for (unsigned j = 0; j < jobs; ++j) {
                 if (vshards[j].empty()) continue;
-                // Created here with O_EXCL and a random component, and the
-                // descriptor is inherited rather than reopened by name. The
-                // old path was predictable and opened with a plain truncating
-                // stream, so anyone on a shared build host could pre-place a
-                // symlink and have the scan clobber its target.
+                // O_EXCL with a random component, and the child inherits the
+                // descriptor rather than reopening by name: a predictable path
+                // opened for truncation is a symlink clobber on a shared host.
                 int ipcFD = -1;
                 llvm::SmallString<128> p;
                 if (llvm::sys::fs::createTemporaryFile("lshaz-vocab", "json",
@@ -3066,13 +3003,11 @@ ScanResult ScanPipeline::run(
                    std::to_string(totalTUs));
         }
     } else {
-        // Parallel path: fork-based process isolation.
-        //
-        // ClangTool uses global mutable state (llvm::cl option tables,
-        // CrashRecoveryContext signal handlers, FileManager stat caches)
-        // that is not thread-safe. We fork() per shard so each child
-        // gets its own address space via COW. Children serialize results
-        // to temp files; parent reads them back after waitpid().
+        // Fork per shard, not threads: ClangTool's global mutable state
+        // (llvm::cl option tables, CrashRecoveryContext signal handlers,
+        // FileManager stat caches) is not thread-safe, and a separate address
+        // space is the only isolation that holds. Children serialize to temp
+        // files the parent reads after waitpid().
         std::vector<std::vector<std::string>> shards(jobs);
         for (size_t i = 0; i < work.size(); ++i)
             shards[i % jobs].push_back(work[i]);
@@ -3089,8 +3024,8 @@ ScanResult ScanPipeline::run(
             if (shards[j].empty()) continue;
 
             // O_EXCL with a random component, and the child inherits the
-            // descriptor rather than reopening by name. The predictable path
-            // plus a truncating open was a symlink clobber on a shared host.
+            // descriptor rather than reopening by name: a predictable path
+            // opened for truncation is a symlink clobber on a shared host.
             int ipcFD = -1;
             llvm::SmallString<128> ipcPath;
             if (auto ec = llvm::sys::fs::createTemporaryFile(
@@ -3170,11 +3105,10 @@ ScanResult ScanPipeline::run(
                 }
                 llvm::CrashRecoveryContext::Enable();
 
-                // One record per TU, flushed as it completes. Writing only at
-                // the end meant a single fatal TU discarded every TU the shard
-                // had already finished, so one crash could lose an entire shard.
-                // Records are newline-delimited so a torn tail is discardable
-                // and the parent can name exactly which TUs went unreached.
+                // One record per TU, flushed as it completes, so a fatal TU
+                // costs only itself. Records are newline-delimited: a torn
+                // tail is discardable and the parent can name exactly which
+                // TUs went unreached.
                 llvm::raw_fd_ostream out(ipcFD, /*shouldClose=*/true);
 
                 int childRet = 0;
@@ -3411,10 +3345,8 @@ ScanResult ScanPipeline::run(
             if (it == fl040Agg.end()) continue;
 
             const auto &agg = it->second;
-            // Same logic as EscapeAnalysis::isWriteOnceGlobal, but on
-            // the global sum across all TUs instead of a single TU.
-            // One site inside a loop is one *site*, not one write,
-            // never write-once.
+            // On the global sum rather than a single TU's. One site inside a
+            // loop is one site, not one write, so it is never write-once.
             bool writeOnce = false;
             if (agg.loopWrites == 0) {
                 if (agg.anyHasInit && agg.totalWrites == 0)
@@ -3468,13 +3400,9 @@ ScanResult ScanPipeline::run(
         }
     }
 
-    // IR analysis pass. gating on toolRet==0 meant one broken TU anywhere
-    // silently disabled refinement for the entire scan, confidence on
-    // every finding shifted because of an unrelated file. refine what
-    // parsed; failures are already reported per-TU.
-    // Once per scan, after both passes have written. Content-keyed entries mean
-    // a survivor is never wrong, so this is a disk-space bound rather than a
-    // correctness mechanism.
+    // Cache pruning runs once per scan, after both passes have written.
+    // Entries are content-keyed, so a survivor is never stale and this is a
+    // disk-space bound rather than a correctness mechanism.
     if (tuCache.enabled() && request.config.cacheMaxMB)
         TUCache::prune(request.config.cacheDir,
                        static_cast<uint64_t>(request.config.cacheMaxMB) << 20);
@@ -3513,7 +3441,7 @@ ScanResult ScanPipeline::run(
     // parent's aggregate regardless of jobs count; children never see
     // enough of the graph to classify anything.
     // Derive the project's allocator vocabulary before anything consults it.
-    // Config patterns extend the libc seeds; they no longer carry the analysis.
+    // Config patterns extend the libc seeds rather than carrying the analysis.
     std::set<std::string> allocVocab, freeVocab;
     inferAllocatorVocabulary(result.threadRoleFacts,
                              request.config.allocatorFunctionPatterns,
@@ -3567,8 +3495,8 @@ ScanResult ScanPipeline::run(
             d.escalations.push_back(
                 "cross-TU: every allocation of '" + ty +
                 "' happens on one thread role and every free on another, so "
-                "the block returns to an arena owned by a different thread: "
-                "25x the same-thread round trip at 512B on glibc");
+                "the block returns to an arena owned by a different thread, "
+                "several times the cost of the same-thread round trip");
             ++xfree;
         }
         // Report the join's reach, not just its hits. Zero established reads
@@ -3611,13 +3539,11 @@ ScanResult ScanPipeline::run(
                    " FL020 finding(s) with cross-thread free established");
     }
 
-    // Resolve cross-TU hotness candidates. The map phase could not decide
-    // for any function in a TU holding no entry point, so it deferred rather
-    // than answering "cold" from facts it did not have. This is the only
-    // place the whole call graph exists.
-    // Hoisted out of the block below: the cross-TU line-sharing join also
-    // needs it, to tell a store on a hot path from one that runs twice at
-    // startup.
+    // Resolve cross-TU hotness candidates. A TU holding no entry point could
+    // not decide, so the map phase deferred rather than answering "cold" from
+    // facts it did not have, and this is the only place the whole call graph
+    // exists. Hoisted out of the block below because the cross-TU
+    // line-sharing join needs it too.
     const auto globalHot = inferGlobalHotness(
         result.threadRoleFacts, request.config.mainFunctionPatterns);
     {
@@ -3677,7 +3603,7 @@ ScanResult ScanPipeline::run(
 
     // Monomorphic virtual calls. Nothing overrides the callee anywhere in the
     // program, so the receiver cannot vary and the misprediction term is
-    // absent: ~1ns for the lost inline instead of ~9ns.
+    // absent, leaving only the lost inline.
     {
         unsigned mono = 0;
         for (auto &d : result.diagnostics) {
@@ -3690,9 +3616,9 @@ ScanResult ScanPipeline::run(
                 continue;
             ++mono;
             d.escalations.push_back(
-                "no override of '" + ev->second + "' anywhere in the program: "
-                "dispatch is monomorphic, so only the ~1ns inlining barrier "
-                "is paid");
+                "no override of '" + ev->second + "' anywhere in the "
+                "program: dispatch is monomorphic, so only the inlining "
+                "barrier is paid and not the mispredict");
             for (auto &c : d.mechanismClaims)
                 if (c.gating && c.effect.rfind("receiver type varies", 0) == 0)
                     c.supports = Severity::Medium;
@@ -3870,8 +3796,7 @@ ScanResult ScanPipeline::run(
 
     if (calStore) {
         result.suppressedByCalibration =
-            applyCalibrationSuppression(request.feedback,
-                                        result.diagnostics, *calStore);
+            applyCalibrationSuppression(result.diagnostics, *calStore);
     }
 
     // PMU trace feedback.
@@ -3892,8 +3817,8 @@ ScanResult ScanPipeline::run(
 
     // A finding may not outrank the mechanism claims it established. Rules
     // declaring no claims are unconstrained; where a rule does declare them
-    // this holds by construction at output, so the invariant cannot be
-    // reintroduced by a future rule the way it was by eleven past ones.4
+    // this holds by construction at output, so no future rule can reintroduce
+    // the violation.
     std::map<std::string, std::pair<unsigned, unsigned>> bindStats; // {bound, total}
     std::map<std::string, long> slackSum;
     for (auto &d : result.diagnostics) {

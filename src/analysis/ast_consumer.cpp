@@ -165,9 +165,9 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     escape.setAtomicTypeNames(config_.atomicTypeNames);
     escape.scanTranslationUnit(TU);
 
-    // Concurrency is a call-graph property, so it is injected rather than
-    // rediscovered: which writers run on several threads at once decides
-    // whether co-located fields can actually be written from two cores.
+    // Which writers run on several threads at once decides whether co-located
+    // fields can be written from two cores, and that is a call-graph property,
+    // so it is injected rather than recomputed here.
     {
         std::unordered_set<const clang::FunctionDecl *> pool;
         for (const auto *fn : cg.functions())

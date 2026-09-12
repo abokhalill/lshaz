@@ -11,7 +11,7 @@ _lshaz() {
     subcmd=""
     for ((i=1; i < COMP_CWORD; i++)); do
         case "${COMP_WORDS[i]}" in
-            scan|fix|hyp|exp|feedback|init|diff|explain|version|help)
+            scan|fix|hyp|exp|feedback|observe|init|diff|explain|version|help)
                 subcmd="${COMP_WORDS[i]}"
                 break
                 ;;
@@ -20,7 +20,7 @@ _lshaz() {
 
     # Top-level completion.
     if [[ -z "$subcmd" ]]; then
-        COMPREPLY=($(compgen -W "scan fix hyp exp feedback init diff explain version help" -- "$cur"))
+        COMPREPLY=($(compgen -W "scan fix hyp exp feedback observe init diff explain version help" -- "$cur"))
         return
     fi
 
@@ -100,7 +100,7 @@ _lshaz() {
             if [[ "$cur" == -* ]]; then
                 COMPREPLY=($(compgen -W "--list --help" -- "$cur"))
             else
-                COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+                COMPREPLY=($(compgen -W "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -- "$cur"))
             fi
             ;;
         hyp)
@@ -110,7 +110,7 @@ _lshaz() {
                     return
                     ;;
                 --rule)
-                    COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+                    COMPREPLY=($(compgen -W "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -- "$cur"))
                     return
                     ;;
             esac
@@ -127,7 +127,7 @@ _lshaz() {
                     return
                     ;;
                 --rule)
-                    COMPREPLY=($(compgen -W "FL001 FL002 FL010 FL011 FL012 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL090 FL091" -- "$cur"))
+                    COMPREPLY=($(compgen -W "FL001 FL002 FL003 FL004 FL005 FL006 FL010 FL011 FL012 FL013 FL014 FL020 FL021 FL030 FL031 FL040 FL041 FL050 FL060 FL061 FL070 FL090 FL091 FL092 C002 B001" -- "$cur"))
                     return
                     ;;
                 --sku)
@@ -151,6 +151,17 @@ _lshaz() {
                 COMPREPLY=($(compgen -W "--store --alpha --json --help" -- "$cur"))
             else
                 COMPREPLY=($(compgen -d -- "$cur"))
+            fi
+            ;;
+        observe)
+            case "$prev" in
+                --profile|--findings|--executed|--config|--store)
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--profile --findings --ops --hitm-events --sample-period --executed --object --config --machine --workload --store --write --top --help" -- "$cur"))
             fi
             ;;
     esac

@@ -119,7 +119,7 @@ std::optional<LatencyHypothesis> HypothesisConstructor::construct(
     hyp.verdict = ExperimentVerdict::Pending;
 
     hyp.controlDescription =
-        "Mitigated variant with structural hazard removed (see EXPERIMENT_SYNTHESIS.md §4.1)";
+        "Mitigated variant with the structural hazard removed";
     hyp.treatmentDescription =
         "Original code preserving the structural hazard as detected";
 

@@ -259,14 +259,16 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "The allocate/free round trip itself: 14.7ns at 64B, 55ns at "
-               "4KB, always paid. Arena lock contention is not a general cost: "
-               "same-thread alloc/free is flat in thread count, because tcache "
-               "and per-thread arenas keep it off shared state entirely. "
-               "It appears when a block is freed by a thread other than the "
-               "one that allocated it, returning it to the owning arena: 5-25x "
-               "under glibc, still 4-5x under jemalloc. Volume is not the "
-               "signal; cross-thread ownership transfer is.";
+        return "The allocate and free round trip is always paid, and grows "
+               "with request size. Arena lock contention is not a general "
+               "cost on top of it: same-thread alloc/free is flat in thread "
+               "count, because a thread cache and per-thread arenas keep it "
+               "off shared state. It appears when a block is freed by a "
+               "thread other than the one that allocated it and returns to "
+               "the owning arena, which costs several times the same-thread "
+               "trip under glibc and is still worse than flat under "
+               "jemalloc. Volume is not the signal; cross-thread ownership "
+               "transfer is.";
     }
 
     void analyze(const clang::Decl *D,
@@ -327,10 +329,10 @@ public:
                     sev = Severity::High;
             }
 
-            // Above glibc's tcache_max the request misses the per-thread cache
-            // and takes the arena path, 19.3ns to 55.4ns on Zen 3. tcmalloc and
-            // jemalloc draw their boundary elsewhere, so only allocators not
-            // already classified as thread-caching are graded on size.
+            // Above glibc's tcache_max the request misses the per-thread
+            // cache and takes the arena path. tcmalloc and jemalloc draw
+            // their boundary elsewhere, so only allocators not already
+            // classified as thread-caching are graded on size.
             const bool overThreadCache =
                 site.constBytes >= 0 &&
                 static_cast<size_t>(site.constBytes) > Cfg.allocSizeEscalation &&
@@ -455,8 +457,8 @@ public:
                  Severity::High},
                 // Established by the size alone: no runtime frequency
                 // assumption stands behind it, unlike the round-trip claim.
-                {"the request misses the thread cache for the arena path, "
-                 "2.8x the round trip",
+                {"the request misses the thread cache and takes the arena "
+                 "path, several times the thread-cache round trip",
                  "a constant request above the allocator's thread-cache "
                  "boundary",
                  overThreadCache, Severity::High},

@@ -10,31 +10,20 @@
 
 namespace lshaz {
 
-// Per-rule precision policy.
-//
-// Each rule has a configurable global max emission count (applied to
-// the post-dedup diagnostic vector), minimum confidence floor, and
-// maximum severity cap. Rules exceeding their emission budget are
-// demoted to Informational. Rules below their confidence floor are
-// suppressed.
-//
-// Calibration feedback can lower a rule's severity cap if its
-// historical false positive rate exceeds the threshold.
+// Per-rule precision policy, applied to the post-dedup diagnostic vector.
+// Over budget demotes to Informational; under the confidence floor
+// suppresses.
 struct RulePrecisionPolicy {
     std::string ruleID;
-    unsigned maxEmissions       = 0;      // 0 = unlimited (global, post-dedup)
+    unsigned maxEmissions      = 0;      // 0 = unlimited (global, post-dedup)
     double minConfidence       = 0.0;    // suppress below this
     Severity maxSeverity       = Severity::Critical; // cap severity
-    double fpRateThreshold     = 0.30;   // auto-demote above this FP rate
 };
 
 class PrecisionBudget {
 public:
     // Load default policies for all known rules.
     PrecisionBudget();
-
-    // Override policy for a specific rule.
-    void setPolicy(const RulePrecisionPolicy &policy);
 
     // Apply precision governance to diagnostics.
     // - Suppress diagnostics below rule's confidence floor

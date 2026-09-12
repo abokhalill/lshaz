@@ -67,38 +67,6 @@ public:
 
 } // anonymous namespace
 
-NUMAPlacement NUMATopology::classifyGlobalVar(const clang::VarDecl *VD,
-                                               clang::ASTContext &Ctx) {
-    if (!VD)
-        return NUMAPlacement::Unknown;
-
-    // Check for NUMA placement hints in initializer.
-    if (hasNUMAPlacementHint(VD, Ctx))
-        return NUMAPlacement::Explicit;
-
-    // Thread-local storage: always local to the accessing thread's node.
-    if (VD->getTLSKind() != clang::VarDecl::TLS_None)
-        return NUMAPlacement::LocalInit;
-
-    // Static local variables: initialized by first caller.
-    // If in main() or constructor, likely main thread.
-    if (VD->isStaticLocal()) {
-        if (const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(
-                VD->getDeclContext())) {
-            if (isMainThreadInitializer(FD))
-                return NUMAPlacement::MainThread;
-        }
-        return NUMAPlacement::AnyThread;
-    }
-
-    // Global/namespace-scope variables: initialized before main() by
-    // the main thread on socket 0 (Linux default first-touch).
-    if (VD->hasGlobalStorage() && !VD->isStaticLocal())
-        return NUMAPlacement::MainThread;
-
-    return NUMAPlacement::Unknown;
-}
-
 NUMAPlacement NUMATopology::classifyStruct(const clang::RecordDecl *RD,
                                             clang::ASTContext &Ctx) {
     if (!RD)

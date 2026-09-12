@@ -62,13 +62,6 @@ unsigned parseUnsigned(const std::string &s, size_t &i) {
     return static_cast<unsigned>(parseNumber(s, i));
 }
 
-bool parseBool(const std::string &s, size_t &i) {
-    skipWS(s, i);
-    if (s.compare(i, 4, "true") == 0)  { i += 4; return true; }
-    if (s.compare(i, 5, "false") == 0) { i += 5; return false; }
-    return false;
-}
-
 // Skip any JSON value (string, number, object, array, bool, null).
 void skipValue(const std::string &s, size_t &i) {
     skipWS(s, i);

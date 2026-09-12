@@ -86,7 +86,6 @@ void account_indirect(int thread_id, uint64_t n) {
 
 // FL004. Correctly padded and aligned, so FL003 is right to stay silent, and
 // a loop that reads every slot still downgrades each owner out of Modified.
-// The shape measurement found second-most-expensive in redis.
 struct alignas(64) SweptSlot { uint64_t v; char pad[56]; };
 static SweptSlot g_swept[64];
 
@@ -99,10 +98,9 @@ uint64_t total_swept() {
     return t;
 }
 
-// FL002 read/write pair. A store to one field invalidates the line, so a
-// core reading a different field on it re-fetches and pays the same miss a
-// second writer would. Measured as redis's hottest static line: call()
-// stores real_cmd->calls beside key specs the lookup path reads.
+// FL002 read/write pair. A store to one field invalidates the line, so a core
+// reading a different field on it re-fetches and pays the same miss a second
+// writer would.
 struct DispatchEntry {
     uint64_t spec_a, spec_b, spec_c;   // read on the lookup path
     uint64_t calls;                    // stored on the dispatch path
@@ -170,10 +168,10 @@ void run() {
     b.join();
 }
 
-// A loop-swept subscript reached outside any enclosing function. The striped
-// array visitor keyed writer attribution on the current function without
-// filtering that state, which segfaulted the analyzer on rocksdb rather than
-// producing a finding. A crash is a silent recall loss for the whole TU.
+// A loop-swept subscript reached outside any enclosing function. Writer
+// attribution is keyed on the current function, which does not exist here, so
+// the state has to be filtered rather than dereferenced. A crash is a silent
+// recall loss for the whole TU.
 static constexpr int kSeedLen = 8;
 static int seed_table[kSeedLen] = {0, 1, 2, 3, 4, 5, 6, 7};
 struct SeedSum {
@@ -226,11 +224,10 @@ static void *produce_thread(void *) {
 
 void consume_on_main() { g_role_split.consumed++; }
 
-// FL005. A value coarsened by a literal divisor, stored unconditionally into
-// a shared global from a function that runs more than once. This is redis's
-// updateCachedTimeWithUs: server.unixtime is microseconds divided down to
-// seconds, stored about once per command, and 52,304,853 of 52,304,853
-// stores in a 20s run wrote a value that was already there.
+// FL005. A value coarsened by a literal divisor, stored unconditionally into a
+// shared global from a function that runs more than once. The canonical shape
+// is a cached clock: microseconds divided down to seconds and stored per
+// operation, so all but one store per second writes a value already there.
 struct TimeCache {
     unsigned long usec;
     unsigned long sec;

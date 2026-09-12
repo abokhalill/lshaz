@@ -13,18 +13,16 @@
 
 namespace lshaz {
 
-// Pass one of the scan. Parses each TU and records structure only: which
-// function forwards a call's result out, which hands a parameter onward, and
-// which types those calls produced or consumed. No rules, no layout, no escape
-// analysis, no IR.
+// Pass one of the scan. Records structure only: which function forwards a
+// call's result out, which hands a parameter onward, and which types those
+// calls produced or consumed. No rules, no layout, no escape analysis, no IR.
 //
 // It exists because a project's allocator, lock and mapping vocabulary is not
-// knowable inside one TU: zmalloc's body is in zmalloc.c and every caller is
-// somewhere else. Requiring the vocabulary in config instead made a human
-// rediscover it per codebase, and that trap has now cost five subsystems.
-// The one implementation both passes use. Pass one calls it from its own
-// consumer; pass two calls it inline until the shard driver is parameterised
-// on the action factory, at which point this call site goes away.
+// knowable inside one TU: a wrapper's body and its callers are in different
+// files.
+
+// The one implementation both passes use: pass one from its own consumer,
+// pass two inline.
 void collectAllocOwnership(clang::ASTContext &Ctx, ThreadRoleSummary &out);
 
 // Every file the preprocessor opened for this TU, which is what decides

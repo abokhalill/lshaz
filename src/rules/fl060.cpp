@@ -23,15 +23,14 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "On multi-socket systems memory is physically partitioned across "
-               "NUMA nodes, and a remote access pays the interconnect on the "
-               "critical path: roughly +40ns over local, about 1.25x. Latency is "
-               "the mechanism, not bandwidth. A single core cannot saturate "
-               "either link, so it reads local and remote memory at the same "
-               "rate. Placement and per-node replication help; widening the "
-               "structure does not. Large shared mutable structures allocated "
-               "without NUMA-aware placement are accessed remotely by at least "
-               "one socket.";
+        return "On a multi-socket system memory is physically partitioned "
+               "across NUMA nodes, and a remote access pays the interconnect "
+               "on the critical path. Latency is the mechanism, not "
+               "bandwidth: a single core cannot saturate either link, so it "
+               "reads local and remote memory at the same rate. Placement and "
+               "per-node replication help; widening the structure does not. "
+               "The penalty is one cache-miss-sized step rather than an order "
+               "of magnitude, so it cannot carry a top grade alone.";
     }
 
     void analyze(const clang::Decl *D,
@@ -106,8 +105,8 @@ public:
         if (hasAtomics) {
             escalations.push_back(
                 "Contains atomic fields: a cross-socket atomic RMW pays the "
-                "interconnect, measured 32-52ns flat across sockets and not "
-                "decaying with write spacing");
+                "interconnect on the critical path of the LOCK, and unlike "
+                "same-socket sharing it does not decay with write spacing");
         }
 
         if (mutableCount > 8) {
@@ -162,8 +161,8 @@ public:
            << "B, " << cacheLines << " cache lines) with "
            << mutableCount << " mutable field(s) and thread-escape evidence. "
            << "On multi-socket systems, at least one socket accesses this "
-           << "structure via remote NUMA interconnect. Each remote line "
-           << "fetch adds ~40ns over local, about 1.25x, and the cost is "
+           << "structure via remote NUMA interconnect. A remote line fetch "
+           << "costs one cache-miss-sized step over local, and the cost is "
            << "latency rather than bandwidth: one core reads both nodes at "
            << "the same rate. Atomic operations on remote lines additionally "
            << "pay ownership transfer to the remote home agent. "
@@ -192,9 +191,9 @@ public:
             {"a large shared mutable structure with no placement control",
              "size past the threshold, thread escape, mutable state", true,
              Severity::Medium},
-            // +40ns is one L3-miss-ish step, not the order of magnitude the
-            // old text implied, so it cannot carry Critical on its own.
-            {"remote-node access at ~+40ns over local, about 1.25x",
+            // One cache-miss-sized step, not an order of magnitude, so it
+            // cannot carry Critical on its own.
+            {"remote-node access costing one cache-miss step over local",
              "a multi-socket deployment (numa_sockets >= 2)",
              Cfg.numaSockets >= 2, Severity::High},
         };

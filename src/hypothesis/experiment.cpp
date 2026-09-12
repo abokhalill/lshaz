@@ -470,19 +470,19 @@ ExperimentFile ExperimentSynthesizer::generateReadme(
        << "## Statistical Parameters\n\n"
        << "- Minimum detectable effect: "
        << (hyp.minimumDetectableEffect * 100) << "%\n"
-       << "- Significance level (α): " << hyp.significanceLevel << "\n"
-       << "- Power (1-β): " << hyp.power << "\n"
+       << "- Significance level (alpha): " << hyp.significanceLevel << "\n"
+       << "- Power (1-beta): " << hyp.power << "\n"
        << "- Evidence tier: " << evidenceTierName(hyp.evidenceTier) << "\n\n"
        << "## Verdict\n\n"
-       << "`analyze` bootstraps the (1−α) percentile CI of the relative p99.9 "
+       << "`analyze` bootstraps the (1-alpha) percentile CI of the relative p99.9 "
        << "effect. Distribution-free, because latency is heavy-tailed and a "
        << "point compare of two tail quantiles cannot hold the false-positive "
-       << "rate at α. A within-control split-half drift CI first gates runs "
+       << "rate at alpha. A within-control split-half drift CI first gates runs "
        << "where machine drift is aliased with the arm label.\n\n"
        << "Exit codes (mirroring `ExperimentVerdict`): `0` confirmed (CI lower "
        << "bound > mde), `1` refuted (CI upper bound < mde), `2` error, `3` "
        << "inconclusive (CI straddles mde, under-powered at this sample count), "
-       << "`4` confounded (control tail drifted ≥ mde within the run).\n\n"
+       << "`4` confounded (control tail drifted >= mde within the run).\n\n"
        << "## Running\n\n"
        << "```bash\n"
        << "bash scripts/run_all.sh\n"
@@ -491,11 +491,10 @@ ExperimentFile ExperimentSynthesizer::generateReadme(
        << "## Limitations\n\n"
        << "Synthetic experiments cannot reproduce:\n"
        << "- Production traffic shape and microburst arrival patterns\n"
-       << "- Full system interaction (NIC → kernel → userspace → response)\n"
+       << "- Full system interaction (NIC -> kernel -> userspace -> response)\n"
        << "- Allocator fragmentation history\n"
        << "- OS scheduler interference beyond isolated cores\n"
-       << "- Thermal throttling under sustained load\n\n"
-       << "See BOUNDARIES.md for full epistemic limits.\n";
+       << "- Thermal throttling under sustained load\n";
 
     return {"README.md", os.str()};
 }
@@ -667,15 +666,12 @@ ExperimentFile ExperimentSynthesizer::generateAnalyze(
 }
 
 /*
- * Per-hazard-class kernel synthesis.
+ * Per-hazard-class kernel synthesis. Each (treatment, control) pair isolates
+ * one structural variable and compiles as separate TUs linked into one
+ * binary, so the compiler cannot optimize across the comparison boundary.
  *
- * Each pair (treatment, control) isolates exactly one structural variable.
- * Treatment reproduces the hazard; control removes it. Both are compiled
- * as separate TUs and linked into a single binary to prevent the compiler
- * from optimizing across the comparison boundary.
- *
- * Invariant: every kernel defines exactly {setup, teardown, kernel}.
- * The harness calls them via function pointer, no devirtualization.
+ * Every kernel defines exactly {setup, teardown, kernel}, called through a
+ * function pointer so nothing devirtualizes.
  */
 
 namespace {
@@ -696,8 +692,6 @@ std::string evidenceStr(const LatencyHypothesis &hyp, const char *key,
     if (it == hyp.structuralEvidence.end()) return fallback;
     return it->second;
 }
-
-unsigned padToLine(unsigned sz) { return ((sz + 63u) / 64u) * 64u; }
 
 } // anonymous namespace
 
@@ -788,8 +782,8 @@ static ExperimentFile genTreatmentFalseSharing(const LatencyHypothesis &hyp) {
        << "/* RMW, not store: a relaxed store retires into the store buffer and\n"
        << "   lfence does not drain it, so the rdtsc bracket never sees the RFO\n"
        << "   stall and treatment reads identical to control. A locked fetch_add\n"
-       << "   cannot retire until it owns the line. That exposes the invalidation\n"
-       << "   latency this finding is about. Measured +50% p99.9 on Zen4. */\n"
+       << "   cannot retire until it owns the line, which is what exposes the\n"
+       << "   invalidation latency this finding is about. */\n"
        << "void treatment_kernel(uint64_t /*iteration*/) {\n"
        << "    shared->a.fetch_add(1, std::memory_order_relaxed);\n"
        << "    lshaz_do_not_optimize(shared->a);\n"

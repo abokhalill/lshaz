@@ -15,9 +15,9 @@ namespace lshaz {
 //   - ThreadLocal: tcmalloc/jemalloc fast path, per-thread cache hit.
 //     Sub-100ns, no lock contention. Low hazard on hot path.
 //   - ArenaLock: glibc malloc default path, arena lock contention.
-//     100ns-10μs under contention. High hazard on hot path.
+//     100ns-10us under contention. High hazard on hot path.
 //   - Syscall: mmap/brk for large allocations (>128KB default).
-//     10μs-100μs, page fault risk. Critical hazard on hot path.
+//     10us-100us, page fault risk. Critical hazard on hot path.
 //   - PoolSlab: user pool/slab/arena allocator (custom or pmr).
 //     Fast path similar to ThreadLocal. Low hazard.
 //   - Unknown: cannot classify. Conservative: treat as ArenaLock.
@@ -62,9 +62,6 @@ public:
     // Classify a call site by callee name and optional allocation size.
     AllocatorClass classify(const std::string &calleeName,
                             size_t allocSize = 0) const;
-
-    // Register a custom pool/slab allocator function name.
-    void registerPoolAllocator(const std::string &funcName);
 
     // Register that the binary links against a specific allocator library.
     // Supported: "tcmalloc", "jemalloc", "mimalloc".

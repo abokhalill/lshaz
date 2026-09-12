@@ -18,9 +18,9 @@ class ThreadRoleVerdicts;
 
 // One cache line of one statically nameable region.
 //
-// Six places used to derive "who touches this memory, how often, from which
-// thread" separately, each with its own gates, and every new hazard shape
-// needed a seventh. The machine has one model: a line, an access set, a rate.
+// One model for "who touches this memory, how often, from which thread",
+// shared by every hazard shape that needs it. The machine has one: a line,
+// an access set, a rate.
 struct ContentionNode {
     std::string owner;      // record type, or file-scope global
     uint64_t lineIndex = 0; // which line of the region
@@ -48,10 +48,9 @@ struct ContentionNode {
         bool written() const { return !writers.empty(); }
         bool read() const { return !readers.empty(); }
 
-        // Site count is not recurrence: server.unixtime has one write site in
-        // all of redis and was the most contended line in the program. The
-        // other route is the writer's rate, which this node cannot see, so
-        // the query supplies it.
+        // Site count is not recurrence: the most contended line in a program
+        // routinely has a single write site. The other route is the writer's
+        // rate, which this node cannot see, so the query supplies it.
         bool loopWritten() const { return access.loopWriteSites > 0; }
     };
     std::vector<Resident> residents;

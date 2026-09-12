@@ -401,8 +401,8 @@ HypothesisTemplateRegistry::HypothesisTemplateRegistry() {
             confounds,
             false,
         },
-        // FL040/FL050/FL061 previously had no template: hyp/exp dropped
-        // their findings without attribution.
+        // Every rule needs a template here, or hyp and exp silently drop
+        // its findings.
         {
             HazardClass::GlobalState,
             "Concurrent writes to a centralized mutable global do not cause "

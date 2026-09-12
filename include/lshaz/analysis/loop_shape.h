@@ -48,16 +48,13 @@ constexpr uint64_t kDefaultTripCount = 10;
 // How many times a loop body runs, when the source says so.
 //
 // Loop nesting depth is a four-value proxy for a quantity the source often
-// states outright. `for (j = 0; j < 16; j++)` runs sixteen times and
-// `for (i = 0; i < server.dbnum; i++)` runs an unknown number, and treating
-// both as one nesting level is why a cost model built on depth cannot rank:
-// on redis it priced 87 of 161 findings identically while the machine
-// measured twenty to one between the top contended line and the next.
+// states outright: `for (j = 0; j < 16; j++)` runs sixteen times and
+// `for (i = 0; i < n; i++)` runs an unknown number. Treating both as one
+// nesting level is why a cost model built on depth cannot rank.
 //
 // Returns 0 for "not derivable", which the caller replaces with its own
-// default rather than this file inventing one. Everything here is folded by
-// Clang's own constant evaluator, so macros, enum constants, sizeof and
-// constexpr all resolve to the number the program actually uses.
+// default. Clang's constant evaluator folds the bound, so macros, enum
+// constants, sizeof and constexpr all resolve.
 inline uint64_t constantTripCount(const clang::Stmt *S,
                                   const clang::ASTContext &Ctx) {
     const auto *F = llvm::dyn_cast_or_null<clang::ForStmt>(S);

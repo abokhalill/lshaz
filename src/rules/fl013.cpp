@@ -377,15 +377,13 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "A tight poll loop without PAUSE speculates loads far ahead; "
-               "the other core's eventual write invalidates the line and the "
-               "pipeline takes a memory-order machine clear (full flush, "
-               "machine_clears.memory_ordering). PAUSE de-speculates the loop. "
-               "The sibling-starvation half of this does not reproduce: a "
-               "spinning logical core costs its SMT sibling nothing measurable "
-               "on Coffee Lake or Zen 3, 1.474 ns/op with and without PAUSE "
-               "and 0.0% recovered, so PAUSE is worth adding for the machine "
-               "clear rather than for sibling bandwidth.";
+        return "A tight poll loop without PAUSE speculates loads far ahead, "
+               "and the other core's eventual write invalidates the line and "
+               "costs the pipeline a memory-order machine clear, a full flush "
+               "(machine_clears.memory_ordering). PAUSE de-speculates the "
+               "loop. PAUSE is worth adding for the machine clear and not "
+               "for sibling bandwidth: the spin slowing its SMT sibling is a "
+               "separate claim, and this rule ships it unestablished.";
     }
 
     void analyze(const clang::Decl *D,
@@ -409,11 +407,9 @@ public:
         if (visitor.sites.empty())
             return;
 
-        // Reported as deployment context, no longer as a severity term.
-        // sync_cost places a spinner on the SMT sibling of the victim and
-        // measures 1.474 ns/op with and without PAUSE, 0.0% recovered, on
-        // Coffee Lake and again on Zen 3. The machine clear is the whole
-        // mechanism, and it does not care whether SMT is on.
+        // Deployment context only. The machine clear is the whole mechanism
+        // and it does not care whether SMT is on; see the withdrawn
+        // sibling-starvation claim below.
         bool smt = Cfg.smtEnabled;
 
         const auto &SM = Ctx.getSourceManager();
@@ -462,25 +458,24 @@ public:
                       "test_and_set (TTAS), with pause/umwait in the "
                       "read loop. If the bare TAS is the design: "
                       "// lshaz-suppress FL013."
-                    : "_mm_pause() measured 64 cycles on Zen 3 against the "
-                      "~140 widely cited for Skylake-derived cores, a vendor "
-                      "split this project has measured on one side only; for "
-                      "sub-microsecond signaling prefer a bounded bare spin "
-                      "then umwait/tpause where available, or yield/futex for "
-                      "longer waits. If the bare spin is the design, say "
-                      "so: // lshaz-suppress FL013.";
+                    : "PAUSE latency differs by roughly an order of "
+                      "magnitude between vendors, so a fixed spin count does "
+                      "not port. For sub-microsecond signaling prefer a "
+                      "bounded bare spin then umwait/tpause where available, "
+                      "or yield/futex for longer waits. If the bare spin is "
+                      "the design, say so: // lshaz-suppress FL013.";
 
             diag.mechanismClaims = {
                 {"memory-order machine clear when the peer's write lands",
                  "a tight poll loop with no pause or wait hint", true,
                  Severity::Medium},
-                // Kept so the verdict names what was tested and dropped.
-                // Measured 0.0% recovered on two vendors, so SMT being on is
-                // not evidence for it.
+                // Kept, unestablished, so the verdict names what was tested
+                // and dropped rather than silently omitting it.
                 {"sibling starvation: the spin holds issue slots the peer "
                  "needs to make the progress being waited on",
-                 "a spinning sibling measurably slowing its peer, which "
-                 "sync_cost does not reproduce", false, Severity::High},
+                 "a spinning sibling measurably slowing its peer, which did "
+                 "not reproduce on either vendor measured", false,
+                 Severity::High},
                 {"RFO ping-pong with the line held Modified",
                  "the spin writes each iteration (TAS) rather than reading",
                  s.tasForm, Severity::High},

@@ -13,11 +13,6 @@ namespace lshaz {
 // Maps rule IDs to hazard classes for interaction detection.
 std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID);
 
-// Site key for grouping diagnostics by location entity.
-// Struct-level rules group by (file, line).
-// Function-level rules group by functionName.
-std::string diagnosticSiteKey(const Diagnostic &d);
-
 // Post-analysis pass: correlate diagnostics from different rules at
 // the same site. When eligible interaction pairs/triples are found,
 // synthesize compound hazard diagnostics (FL091) with site-specific

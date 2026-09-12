@@ -32,9 +32,6 @@ public:
     // Get function names exceeding thresholdPct of total samples.
     std::unordered_set<std::string> hotFunctions(double thresholdPct) const;
 
-    const std::vector<ProfileEntry> &entries() const { return entries_; }
-    uint64_t totalSamples() const { return totalSamples_; }
-
 private:
     bool parseFlat(const std::string &content);
     bool parsePerfScript(const std::string &content);

@@ -8,24 +8,15 @@ namespace lshaz {
 
 namespace {
 
-/// Returns true if the argument is a compiler flag that takes a path as
-/// its value (either as -Ipath or -I path).  We handle both joined and
-/// separated forms in resolveCommand().
-bool isIncludePrefixFlag(llvm::StringRef arg) {
-    return arg.starts_with("-I") || arg.starts_with("-isystem") ||
-           arg.starts_with("-iquote") || arg.starts_with("-include") ||
-           arg.starts_with("-isysroot") || arg.starts_with("--sysroot");
-}
-
-/// Flags whose *next* argument is a path (separated form).
+// Flags whose next argument is a path (separated form).
+//
+// -include is deliberately absent: its argument resolves through the include
+// search path, not the working directory, so making it absolute breaks any
+// project that force-includes a generated config header found via -I.
 bool isSeparatedPathFlag(llvm::StringRef arg) {
     return arg == "-I" || arg == "-isystem" || arg == "-iquote" ||
            arg == "-isysroot" || arg == "--sysroot" ||
            arg == "-o";
-    // Note: -include is intentionally excluded.  Its argument is resolved
-    // via the compiler's include search path (-I paths), not relative to
-    // the working directory.  Resolving it as a path breaks codebases
-    // like DPDK where "-include rte_config.h" is found via -I../config.
 }
 
 } // anonymous namespace
@@ -62,7 +53,7 @@ AbsolutePathCompilationDatabase::resolveCommand(
             continue;
         }
 
-        // Separated form: -I /some/path → resolve the next argument.
+        // Separated form: -I /some/path -> resolve the next argument.
         if (isSeparatedPathFlag(arg) && i + 1 < args.size()) {
             resolved.CommandLine.push_back(arg);
             ++i;
@@ -71,7 +62,7 @@ AbsolutePathCompilationDatabase::resolveCommand(
             continue;
         }
 
-        // Joined form: -I../deps/hiredis → split prefix, resolve path.
+        // Joined form: -I../deps/hiredis -> split prefix, resolve path.
         // Handle -I, -isystem, -iquote, -include prefixes.
         bool handled = false;
         for (const char *prefix :

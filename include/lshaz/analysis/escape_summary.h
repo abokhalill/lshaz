@@ -25,10 +25,7 @@ struct FieldExtent {
 
     // Where the field was declared. Without it every finding about any field
     // of a record reports at the record's own line, and the dedup key
-    // (rule, file, line, column, function) collapses them into one. On redis
-    // that turned 141 single-field contention findings into 65 and lost
-    // server.unixtime, the line the machine measured as the most contended
-    // in the program.
+    // (rule, file, line, column, function) collapses them all into one.
     unsigned declLine = 0;
 };
 

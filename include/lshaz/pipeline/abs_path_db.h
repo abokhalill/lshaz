@@ -11,14 +11,10 @@
 
 namespace lshaz {
 
-/// Wrapper around a CompilationDatabase that resolves all relative paths
-/// (source files, -I/-isystem include directories, -o outputs) to absolute
-/// at construction time. This eliminates ClangTool's need to chdir() to
-/// the compile command's Directory, removing the process-global chdir()
-/// race that causes non-deterministic failures in parallel scans.
-///
-/// Downstream code sees only absolute paths and never needs to know about
-/// the original relative paths in compile_commands.json.
+// Resolves every relative path in a CompilationDatabase (sources, include
+// directories, outputs) to absolute at construction. ClangTool otherwise
+// chdir()s to each compile command's Directory, and chdir is process-global:
+// under parallel scans that races. Downstream code sees absolute paths only.
 class AbsolutePathCompilationDatabase
     : public clang::tooling::CompilationDatabase {
 public:

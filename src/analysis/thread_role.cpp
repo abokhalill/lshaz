@@ -94,9 +94,9 @@ const char *kAllocSeeds[] = {
 // The release side needs names where the allocation side does not: alloc_size
 // covers jemalloc, tcmalloc and mimalloc alike, and no deallocation attribute
 // is used in practice, so a free chain ending in a replacement allocator's ABI
-// terminates at a bare extern carrying no evidence. Published third-party ABIs
-// on the same footing as libc, not any scanned project's vocabulary. valkey
-// reaches je_sdallocx through zfree_internal.
+// terminates at a bare extern carrying no evidence. These are published
+// third-party ABIs, on the same footing as libc, and never a scanned
+// project's own vocabulary.
 const char *kFreeSeeds[] = {
     "free", "cfree", "munmap", "operator delete", "operator delete[]",
     "dallocx", "sdallocx", "je_dallocx", "je_sdallocx", "je_free",
@@ -232,16 +232,16 @@ void inferLockVocabulary(const ThreadRoleSummary &facts,
                          std::set<std::string> &unlocksOut,
                          size_t *seededLock,
                          size_t *seededUnlock) {
-    // POSIX and C11, on the same footing as the libc allocator seeds: frozen by
-    // the standards, identical in every codebase, never typed by a user. The
-    // base case a fixpoint needs, since "F forwards a parameter to G" has to
-    // terminate somewhere. Unlike allocation there is no attribute the
-    // toolchain synthesizes onto these, so the acquire side of the standard
-    // API is the one vocabulary that cannot be derived.
+    // POSIX and C11, on the same footing as the libc allocator seeds: frozen
+    // by the standards and never a user's vocabulary. The base case the
+    // fixpoint needs, since "F forwards a parameter to G" has to terminate.
+    // Unlike allocation there is no attribute the toolchain synthesizes here,
+    // so the standard acquire API is the one vocabulary that cannot be
+    // derived.
     //
     // A codebase whose locks are none of these is still reached: by the
-    // capability attributes if it annotates, and by the acquire/release
-    // pairing on an atomic RMW if it rolls its own.
+    // capability attributes if it annotates, and by acquire/release pairing
+    // on an atomic RMW if it rolls its own.
     for (const char *s : {"pthread_mutex_lock", "pthread_mutex_trylock",
                           "pthread_mutex_timedlock", "pthread_spin_lock",
                           "pthread_spin_trylock", "pthread_rwlock_rdlock",

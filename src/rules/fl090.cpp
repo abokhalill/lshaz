@@ -21,10 +21,11 @@ public:
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Multiple interacting latency multipliers on a single structure: "
-               "cache line spanning + atomic contention + cross-thread sharing. "
-               "Each hazard compounds under load. Coherence storms, store buffer "
-               "saturation, and TLB pressure interact to produce tail latency.";
+        return "Several latency multipliers on one structure: per-line RFO "
+               "ownership transfer, multi-line footprint, and cross-core "
+               "sharing. They compound rather than add, because each "
+               "additional occupied line is its own coherence unit and each "
+               "additional sharer pays for every one of them.";
     }
 
     void analyze(const clang::Decl *D,
@@ -47,7 +48,6 @@ public:
         EscapeVerdict ev = escape.escapeVerdict(RD);
 
         bool multiLine    = map.maxLinesSpanned() >= 3;
-        bool hasAtomics   = map.totalAtomicFields() > 0;
         bool escapeBeyondAtomics =
             ev.hasSyncPrims || ev.hasSharedOwner || ev.hasVolatile ||
             ev.hasSharingRoute;

@@ -209,7 +209,7 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
 
     v.contention = score > 1.0 ? 1.0 : score;
 
-    // Access pattern: atomics → RMW, volatile alone → read-heavy (MMIO/signal).
+    // Access pattern: atomics -> RMW, volatile alone -> read-heavy (MMIO/signal).
     if (v.hasAtomics)
         v.pattern = AccessPattern::ReadWrite;
     else if (v.hasVolatile && !v.hasSyncPrims)
@@ -220,10 +220,6 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
         v.pattern = AccessPattern::ReadOnly;
 
     return v;
-}
-
-bool EscapeAnalysis::mayEscapeThread(const clang::RecordDecl *RD) const {
-    return escapeVerdict(RD).escapes;
 }
 
 bool EscapeAnalysis::hasPublicationEvidence(const clang::RecordDecl *RD) const {
@@ -550,30 +546,6 @@ bool EscapeAnalysis::hasSharedOwnershipMembers(const clang::RecordDecl *RD) cons
             if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
                 if (hasSharedOwnershipMembers(baseRD))
                     return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-bool EscapeAnalysis::hasCallbackMembers(const clang::RecordDecl *RD) const {
-    if (!RD || !RD->isCompleteDefinition())
-        return false;
-
-    for (const auto *field : RD->fields()) {
-        if (field->getType()->isFunctionPointerType())
-            return true;
-
-        const clang::CXXRecordDecl *FRD = getUnderlyingRecord(field->getType());
-        if (isQualifiedNameOneOf(FRD, {"std::function"}))
-            return true;
-        if (FRD) {
-            if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(FRD)) {
-                if (auto *TD = CTSD->getSpecializedTemplate()) {
-                    if (TD->getQualifiedNameAsString() == "std::function")
-                        return true;
-                }
             }
         }
     }
@@ -1015,18 +987,6 @@ void EscapeAnalysis::setPoolRoleFunctions(
     poolRoleWriters_ = std::move(fns);
 }
 
-bool EscapeAnalysis::fieldHasPoolWriter(const clang::FieldDecl *FD) const {
-    if (!FD || poolRoleWriters_.empty())
-        return false;
-    auto it = fieldWrites_.find(
-        llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl()));
-    if (it == fieldWrites_.end())
-        return false;
-    for (const auto *w : it->second.writers)
-        if (poolRoleWriters_.count(w)) return true;
-    return false;
-}
-
 void EscapeAnalysis::appendFieldAccessNames(ThreadRoleSummary &out) const {
     for (const auto &[FD, rec] : fieldWrites_) {
         if (rec.writers.empty() && rec.readers.empty())
@@ -1089,35 +1049,6 @@ unsigned EscapeAnalysis::getGlobalLoopWriteCount(
         return 0;
     auto it = globalLoopWriteCounts_.find(VD->getCanonicalDecl());
     return (it != globalLoopWriteCounts_.end()) ? it->second : 0;
-}
-
-bool EscapeAnalysis::isWriteOnceGlobal(const clang::VarDecl *VD) const {
-    if (!VD || !VD->hasGlobalStorage())
-        return false;
-
-    const auto *canon = VD->getCanonicalDecl();
-
-    // Has a non-trivial initializer → one write at declaration.
-    bool hasInit = VD->hasInit() && !llvm::isa<clang::ImplicitValueInitExpr>(
-                                         VD->getInit()->IgnoreImplicit());
-
-    auto it = globalWriteCounts_.find(canon);
-    unsigned bodyCounts = (it != globalWriteCounts_.end()) ? it->second : 0;
-
-    // Zero writes in function bodies + has initializer → write-once.
-    if (hasInit && bodyCounts == 0)
-        return true;
-
-    // No initializer but exactly one write in function bodies → write-once.
-    if (!hasInit && bodyCounts <= 1)
-        return true;
-
-    // Has initializer and exactly one write → could be re-initialization, but
-    // still low contention. Accept as write-once.
-    if (hasInit && bodyCounts <= 1)
-        return true;
-
-    return false;
 }
 
 EscapeSummary EscapeAnalysis::buildEscapeSummary(

@@ -677,7 +677,8 @@ void StripedArrayAnalysis::catalogue(const std::vector<clang::Decl *> &decls) {
             // base; a line-aligned record with the array at a line
             // multiple is the only in-record head-alignment that counts.
             const uint64_t eff =
-                (layout.getAlignment().getQuantity() >= cfg_.cacheLineBytes &&
+                (static_cast<uint64_t>(layout.getAlignment().getQuantity()) >=
+                     cfg_.cacheLineBytes &&
                  offBytes % cfg_.cacheLineBytes == 0)
                     ? cfg_.cacheLineBytes
                     : ctx_.getTypeAlignInChars(F->getType()).getQuantity();

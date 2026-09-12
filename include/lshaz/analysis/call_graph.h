@@ -56,13 +56,9 @@ public:
     bool runsOnManyThreads(const clang::FunctionDecl *FD) const {
         return FD && poolReachable_.count(FD->getCanonicalDecl()) > 0;
     }
-    bool hasPoolRoles() const { return !poolReachable_.empty(); }
 
     // Every function with a body seen in this TU.
     std::vector<const clang::FunctionDecl *> functions() const;
-
-    size_t numFunctions() const { return calleeMap_.size(); }
-    size_t numEdges() const { return edgeCount_; }
 
     // Functions this TU passes to a thread-creation primitive. Collected
     // during the same CallExpr walk that builds the edges.
@@ -102,8 +98,6 @@ private:
     std::unordered_map<const clang::FunctionDecl *,
                        std::unordered_set<const clang::FunctionDecl *>>
         callerMap_;
-
-    size_t edgeCount_ = 0;
 
     std::set<std::string> threadEntries_;
 

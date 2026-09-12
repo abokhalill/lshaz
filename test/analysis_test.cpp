@@ -88,7 +88,7 @@ const lshaz::FieldLineEntry *findField(const lshaz::CacheLineMap &map,
 
 // Simple POD struct, no padding, no atomics.
 // struct Simple { int a; int b; char c; };
-// sizeof = 12 (with 0 padding between a,b,c, but trailing pad to 4 → 12)
+// sizeof = 12 (with 0 padding between a,b,c, but trailing pad to 4 -> 12)
 void testSimplePOD() {
     std::cerr << "test: simple POD struct layout\n";
     const char *src = R"(
@@ -122,7 +122,7 @@ void testSimplePOD() {
 
 // Struct with padding, natural alignment of double.
 // struct Padded { char x; double y; int z; };
-// x at 0 (1B), 7B pad, y at 8 (8B), z at 16 (4B), 4B tail pad → 24B
+// x at 0 (1B), 7B pad, y at 8 (8B), z at 16 (4B), 4B tail pad -> 24B
 void testPaddedStruct() {
     std::cerr << "test: padded struct layout\n";
     const char *src = R"(
@@ -148,7 +148,7 @@ void testPaddedStruct() {
 
 // Struct spanning 2 cache lines.
 // struct Wide { char data[65]; };
-// 65 bytes → spans lines 0 and 1.
+// 65 bytes -> spans lines 0 and 1.
 void testCacheLineSpanning() {
     std::cerr << "test: cache line spanning struct\n";
     const char *src = R"(
@@ -213,7 +213,7 @@ void testAtomicDetection() {
 // Inheritance, base class fields at base offset.
 // struct Base { int x; int y; };
 // struct Derived : Base { int z; };
-// Layout: x@0, y@4, z@8 → 12B
+// Layout: x@0, y@4, z@8 -> 12B
 void testInheritanceLayout() {
     std::cerr << "test: inheritance layout\n";
     const char *src = R"(
@@ -238,7 +238,7 @@ void testInheritanceLayout() {
 
 // Alignas. Forced alignment changes offset layout.
 // struct Aligned { char a; alignas(64) int b; };
-// a@0, b@64 → sizeof at least 128 (64-byte aligned b, then tail pad)
+// a@0, b@64 -> sizeof at least 128 (64-byte aligned b, then tail pad)
 void testAlignasLayout() {
     std::cerr << "test: alignas layout\n";
     const char *src = R"(
@@ -264,7 +264,7 @@ void testAlignasLayout() {
 // Nested struct, sub-fields are recursively collected.
 // struct Inner { int a; int b; };
 // struct Outer { Inner inner; int c; };
-// inner.a@0, inner.b@4, c@8 → 12B
+// inner.a@0, inner.b@4, c@8 -> 12B
 void testNestedStruct() {
     std::cerr << "test: nested struct recursive field collection\n";
     const char *src = R"(
@@ -295,7 +295,7 @@ void testNestedStruct() {
     });
 }
 
-// Mixed atomic/non-atomic on same line → false sharing candidate.
+// Mixed atomic/non-atomic on same line -> false sharing candidate.
 // struct MixedLine {
 //     std::atomic<int> counter;   // 0-3, line 0, atomic
 //     int               plain;    // 4-7, line 0, non-atomic mutable
@@ -936,9 +936,9 @@ void testInstrumentScopesDoNotBlend() {
     auto row = [&](Milli measured, const char *instrument) {
         CostObservation o;
         o.mechanism = "divide";
-        o.machine = "i9-9900K";
-        o.workload = "memtier-9to1";
-        o.site = "monotonic.c:81";
+        o.machine = "test-machine";
+        o.workload = "mixed-read-write";
+        o.site = "clock.c:81";
         o.predicted = toMilli(1);
         o.measured = measured;
         o.instrument = instrument;
@@ -948,8 +948,8 @@ void testInstrumentScopesDoNotBlend() {
     row(1080, "cycles-profile");
     row(1440, "throughput-ab");
 
-    auto any = c.factorFor("divide", "i9-9900K", "memtier-9to1",
-                           "monotonic.c:81");
+    auto any = c.factorFor("divide", "test-machine", "mixed-read-write",
+                           "clock.c:81");
     check(any.has_value(), "unfiltered query finds the rows");
     check(any->value == 1080, "unfiltered median is the middle scope");
     check(any->mixedInstruments,
@@ -959,8 +959,8 @@ void testInstrumentScopesDoNotBlend() {
         {"microbench", 710}, {"cycles-profile", 1080}, {"throughput-ab", 1440},
     };
     for (const auto &w : cases) {
-        auto f = c.factorFor("divide", "i9-9900K", "memtier-9to1",
-                             "monotonic.c:81", w.instrument);
+        auto f = c.factorFor("divide", "test-machine", "mixed-read-write",
+                             "clock.c:81", w.instrument);
         check(f.has_value(), "each instrument answers on its own");
         check(f->value == w.want, "and returns its own scope, not the median");
         check(!f->mixedInstruments, "a single instrument is not mixed");

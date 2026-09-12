@@ -53,15 +53,16 @@ std::string qualifiedFrom(llvm::StringRef mangled) {
 bool remarkIsReportable(llvm::StringRef pass, llvm::StringRef name) {
     // regalloc/LoopSpillReloadCopies is a backend pass and -S -emit-llvm
     // stops before codegen, so listing it would ship a class that cannot
-    // fire. gvn/LoadClobbered is 4822 of one file's 8264 missed remarks and
-    // reports imprecise alias analysis, not lost work.
+    // fire. gvn/LoadClobbered dominates the stream by volume and reports
+    // imprecise alias analysis rather than lost work.
     return pass == "licm" && name == "LoadWithLoopInvariantAddressInvalidated";
 }
 
 llvm::StringRef remarkPassFilter() {
     // Handed to -opt-record-passes so the compiler never serializes what the
-    // whitelist discards, cutting one redis TU 3.94 MB to 0.57 MB. Grow it
-    // with remarkIsReportable or the new kind is emitted and then dropped.
+    // whitelist below discards; a single TU's full remark stream runs to
+    // megabytes. Grow this with remarkIsReportable, or the new kind is
+    // emitted and then dropped.
     return "licm";
 }
 

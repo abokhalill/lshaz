@@ -293,7 +293,7 @@ void testEscapeSummaryIPCRoundTrip() {
     original["ns::Widget"].accessorCount = 42;
     original["Plain"] = {};
 
-    // Simulate serialize → deserialize by building JSON and re-parsing.
+    // Simulate serialize -> deserialize by building JSON and re-parsing.
     // Build the compact JSON format manually.
     std::string json = "{";
     bool first = true;
@@ -373,8 +373,8 @@ void testCrossTUSuppressionWithSummary() {
     std::cerr << "test: cross-TU suppression with EscapeSummary\n";
     using namespace lshaz;
 
-    // Type with no escape evidence in global summary → should be suppressed.
-    // Type with escape evidence → should survive.
+    // Type with no escape evidence in global summary -> should be suppressed.
+    // Type with escape evidence -> should survive.
     EscapeSummary globalEscape;
     globalEscape["EscapedType"].hasAtomics = true;
     // "LocalOnlyType" deliberately absent from summary.
@@ -714,9 +714,9 @@ void testMechanismClaimCeiling() {
 
 // --- PMU instrument election ---------------------------------------------
 //
-// Curves are recorded from a Zen4 host, strides {4,8,16,32,64,128,256}B, so
-// index 4 is the 64B line. Exercising the predicate against recorded data
-// keeps the gate testable on hosts with no PMU.
+// Recorded curves over strides {4,8,16,32,64,128,256}B, so index 4 is the 64B
+// line. Exercising the predicate against recorded data keeps the gate testable
+// on a host with no PMU.
 
 void testPMUCliffAtLineSize() {
     // PMCx043 umask 0x02 (local-CCX cache fill). A real coherence counter.
