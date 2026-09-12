@@ -56,6 +56,22 @@ std::set<std::string> ObjectAccess::readers() const {
     return out;
 }
 
+std::vector<std::string> MemoryModel::staticObjects() const {
+    std::vector<std::string> out;
+    for (const auto &[id, access] : objects)
+        if (obj::isStatic(id))
+            out.push_back(id);
+    return out;
+}
+
+std::vector<std::string> MemoryModel::multiWriterObjects() const {
+    std::vector<std::string> out;
+    for (const auto &[id, access] : objects)
+        if (access.writers().size() >= 2)
+            out.push_back(id);
+    return out;
+}
+
 PointsToSolution solvePointsTo(const std::set<Constraint> &constraints,
                                unsigned objectBudget) {
     PointsToSolution sol;

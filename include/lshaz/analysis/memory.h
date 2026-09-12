@@ -179,6 +179,17 @@ struct MemoryModel {
         return total == 0 ? 0.0
                           : static_cast<double>(resolvedAccesses) / total;
     }
+
+    // Objects that outlive any one call and that every reacher reaches the
+    // same copy of. Necessary for false sharing and the question the
+    // standing/handed majority vote was approximating: a per-request struct
+    // is a fresh object per call however many functions write it.
+    std::vector<std::string> staticObjects() const;
+
+    // Storage some offset of which more than one function writes. Object
+    // granularity is the point: two globals of one type are two answers here
+    // and were one answer when the key was the type name.
+    std::vector<std::string> multiWriterObjects() const;
 };
 
 // Resolve every pending access against the solution and bin by object.

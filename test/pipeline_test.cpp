@@ -985,6 +985,89 @@ void testMemorySummaryCrossesIPC() {
           "the reassembled constraints still solve");
 }
 
+// The case the type-name key provably cannot answer. Two globals of one type,
+// written by different functions: keyed by type they are a single node with
+// two writers, which reads as contention. Keyed by object they are two nodes
+// with one writer each, which is no mechanism at all.
+void testTwoGlobalsOfOneTypeStayApart() {
+    std::cerr << "test: two globals of one type are two objects\n";
+    using namespace lshaz;
+
+    MemorySummary m;
+    auto touch = [&](const char *object, const char *fn, uint64_t off,
+                     bool write) {
+        PendingAccess a;
+        a.base = object; a.offset = off; a.size = 8;
+        a.function = fn; a.site = "s.c:1"; a.isWrite = write;
+        a.fieldName = off == 0 ? "head" : "tail";
+        m.accesses.push_back(a);
+    };
+    // Same record type, two instances, one writer each.
+    touch(obj::global("g_rx").c_str(), "rxPoll", 0, true);
+    touch(obj::global("g_tx").c_str(), "txPush", 0, true);
+
+    auto sol = solvePointsTo(m.constraints);
+    auto model = buildMemoryModel(m, sol);
+
+    check(model.objects.size() == 2, "two instances are two objects");
+    check(model.multiWriterObjects().empty(),
+          "one writer each is not a multi-writer object");
+    check(model.staticObjects().size() == 2, "both are static storage");
+
+    // Now a genuine second writer on one of them.
+    touch(obj::global("g_rx").c_str(), "rxReset", 0, true);
+    auto shared = buildMemoryModel(m, solvePointsTo(m.constraints));
+    auto multi = shared.multiWriterObjects();
+    check(multi.size() == 1 && multi.front() == "g:g_rx",
+          "only the object with two writers is named");
+}
+
+// A heap block has no type-name identity at all, so the old key could not
+// represent it. Two allocation sites are two objects even when the pointee
+// type is identical.
+void testHeapObjectsAreDistinctPerSite() {
+    std::cerr << "test: allocation sites are distinct heap objects\n";
+    using namespace lshaz;
+
+    MemorySummary m;
+    m.constraints.insert({Constraint::Kind::AddrOf, "s:mkRx::p",
+                          obj::heap("net.c", 40), 0});
+    m.constraints.insert({Constraint::Kind::AddrOf, "s:mkTx::p",
+                          obj::heap("net.c", 90), 0});
+
+    PendingAccess a;
+    a.base = "s:mkRx::p"; a.size = 8; a.isWrite = true; a.function = "mkRx";
+    m.accesses.push_back(a);
+    a.base = "s:mkTx::p"; a.function = "mkTx";
+    m.accesses.push_back(a);
+
+    auto model = buildMemoryModel(m, solvePointsTo(m.constraints));
+    check(model.objects.count("h:net.c:40") == 1, "the first site is an object");
+    check(model.objects.count("h:net.c:90") == 1, "the second site is another");
+    check(model.staticObjects().empty(),
+          "heap blocks are not static storage and cannot false-share as one");
+}
+
+// Coverage, not silence. A model that resolved nothing must not present as a
+// model that found nothing to report.
+void testUnresolvedAccessesAreCounted() {
+    std::cerr << "test: unresolved accesses are counted, not absorbed\n";
+    using namespace lshaz;
+
+    MemorySummary m;
+    PendingAccess a;
+    a.base = obj::param("handle", 0);  // never resolved by any constraint
+    a.size = 8; a.function = "handle"; a.isWrite = true;
+    m.accesses.push_back(a);
+    m.unnameableAccesses = 3;
+
+    auto model = buildMemoryModel(m, solvePointsTo(m.constraints));
+    check(model.objects.empty(), "an unresolved cell becomes no object");
+    check(model.unresolvedAccesses == 1, "the access is counted as unresolved");
+    check(model.unnameableAccesses == 3, "unnameable accesses carry through");
+    check(model.resolutionRate() == 0.0, "and the rate says so");
+}
+
 void testLadderRankIsOrdinal() {
     std::cerr << "test: ladder rank is ordinal and never claims certainty\n";
     using namespace lshaz;
@@ -1147,6 +1230,9 @@ int main() {
 
     // PMU instrument election
     testMechanismClaimCeiling();
+    testTwoGlobalsOfOneTypeStayApart();
+    testHeapObjectsAreDistinctPerSite();
+    testUnresolvedAccessesAreCounted();
     testMemorySummaryCrossesIPC();
     testPointsToBasics();
     testPointsToLoadStore();
