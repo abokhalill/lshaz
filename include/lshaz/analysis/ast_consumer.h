@@ -8,6 +8,7 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/striped_array_summary.h"
 #include "lshaz/analysis/coverage.h"
+#include "lshaz/analysis/memory.h"
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -26,6 +27,7 @@ public:
                          ThreadRoleSummary &threadRoles,
                          StripedArraySummary &stripedArrays,
                          ScanCoverage &coverage,
+                         MemorySummary &memory,
                          const std::unordered_set<std::string> &profileHotFuncs = {});
 
     void HandleTranslationUnit(clang::ASTContext &Ctx) override;
@@ -38,6 +40,7 @@ private:
     ThreadRoleSummary &threadRoles_;
     StripedArraySummary &stripedArrays_;
     ScanCoverage &coverage_;
+    MemorySummary &memory_;
 };
 
 } // namespace lshaz

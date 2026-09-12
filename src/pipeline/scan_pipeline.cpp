@@ -3,6 +3,7 @@
 #include "shard_ipc.h"
 
 #include "lshaz/analysis/contention.h"
+#include "lshaz/analysis/memory.h"
 #include "lshaz/pipeline/abs_path_db.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/filter.h"
@@ -2776,7 +2777,7 @@ ScanResult ScanPipeline::run(
             if (vocabCache.enabled() && clean && !vf.deps().empty())
                 vocabCache.store(key, vf.deps(),
                                  serializeShardResult(0, {}, {}, {}, vf.facts(),
-                                                      {}, {}, src));
+                                                      {}, {}, {}, src));
             into.merge(vf.facts());
             return clean;
         };
@@ -2841,7 +2842,7 @@ ScanResult ScanPipeline::run(
                     for (const auto &src : vshards[j]) {
                         ThreadRoleSummary one;
                         int rc = prescanOne(src, one) ? 0 : 1;
-                        o << serializeShardResult(rc, {}, {}, {}, one, {}, {},
+                        o << serializeShardResult(rc, {}, {}, {}, one, {}, {}, {},
                                                   src) << "\n";
                         o.flush();
                     }
@@ -2975,6 +2976,7 @@ ScanResult ScanPipeline::run(
         failedTUsDetailed.insert(failedTUsDetailed.end(),
                                  r.failedTUs.begin(), r.failedTUs.end());
         mergeEscapeSummaries(result.escapeSummary, r.escapeSummary);
+        result.memory.merge(r.memory);
         result.threadRoleFacts.merge(r.threadRoles);
         mergeStripedArrays(result.stripedArrays, r.striped);
         result.coverage.merge(r.coverage);
@@ -3034,12 +3036,14 @@ ScanResult ScanPipeline::run(
                                       0, {}, tuDiags, factory.escapeSummary(),
                                       factory.threadRoles(),
                                       factory.stripedArrays(),
-                                      factory.coverage(), src));
+                                      factory.coverage(), factory.memory(),
+                                      src));
             }
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(tuDiags.begin()),
                 std::make_move_iterator(tuDiags.end()));
             mergeEscapeSummaries(result.escapeSummary, factory.escapeSummary());
+            result.memory.merge(factory.memory());
             result.threadRoleFacts.merge(factory.threadRoles());
             mergeStripedArrays(result.stripedArrays, factory.stripedArrays());
             result.coverage.merge(factory.coverage());
@@ -3187,7 +3191,7 @@ ScanResult ScanPipeline::run(
                     const std::string rec = serializeShardResult(
                         tuRet, tuFailed, tuDiags, factory.escapeSummary(),
                         factory.threadRoles(), factory.stripedArrays(),
-                        factory.coverage(), src);
+                        factory.coverage(), factory.memory(), src);
                     // Written by the child that produced it: the parent never
                     // sees the dependency list, and shipping it over IPC would
                     // pay for it twice.
@@ -3272,6 +3276,7 @@ ScanResult ScanPipeline::run(
                             rec.failedTUs.begin(), rec.failedTUs.end());
                         mergeEscapeSummaries(result.escapeSummary,
                                              rec.escapeSummary);
+                        result.memory.merge(rec.memory);
                         result.threadRoleFacts.merge(rec.threadRoles);
                         mergeStripedArrays(result.stripedArrays, rec.striped);
                         result.coverage.merge(rec.coverage);
@@ -3762,6 +3767,23 @@ ScanResult ScanPipeline::run(
     // specific part is compiled in, so a target with no measurements gets
     // stand-in terms and says so, rather than inheriting numbers measured
     // on hardware it has nothing to do with.
+
+    // Solve once, on the merged constraint set. Andersen's least fixed point
+    // is unique, so this answer does not depend on shard count or arrival
+    // order the way an order-controlled pass would.
+    result.pointsTo = solvePointsTo(result.memory.constraints);
+    result.memoryModel = buildMemoryModel(result.memory, result.pointsTo);
+    report("points_to",
+           std::to_string(result.memory.constraints.size()) +
+           " constraint(s) -> " +
+           std::to_string(result.pointsTo.objectsDiscovered) + " object(s); " +
+           std::to_string(result.memoryModel.objects.size()) +
+           " with accesses, " +
+           std::to_string(static_cast<int>(
+               result.memoryModel.resolutionRate() * 100)) +
+           "% of accesses resolved" +
+           (result.pointsTo.truncated
+                ? std::string(" (TRUNCATED: lower bound)") : std::string()));
 
     const ContentionGraph contention = buildContentionGraph(
         result.escapeSummary, result.threadRoleFacts,

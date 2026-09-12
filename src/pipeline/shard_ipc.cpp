@@ -15,6 +15,7 @@ std::string serializeShardResult(int exitCode,
                                  const ThreadRoleSummary &threadRoles,
                                  const StripedArraySummary &striped,
                                  const ScanCoverage &coverage,
+                                 const MemorySummary &memory,
                                  const std::string &src) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
@@ -368,6 +369,45 @@ std::string serializeShardResult(int exitCode,
     buf += ",\"cov\":{\"fs\":" + std::to_string(coverage.functionsSeen) +
            ",\"fh\":" + std::to_string(coverage.functionsHot) +
            ",\"rs\":" + std::to_string(coverage.recordsSeen) + "}";
+
+    // Points-to constraints and unresolved accesses. Partials by nature: the
+    // constraint that settles a parameter is in the caller's TU, so a shard
+    // that keeps these to itself makes the whole solve wrong rather than
+    // merely thinner.
+    buf += ",\"pc\":[";
+    {
+        bool first = true;
+        for (const auto &c : memory.constraints) {
+            if (!first) buf += ',';
+            buf += '[';
+            buf += std::to_string(static_cast<int>(c.kind));
+            buf += ",\""; buf += esc(c.lhs); buf += "\",\"";
+            buf += esc(c.rhs); buf += "\",";
+            buf += std::to_string(c.offset);
+            buf += ']';
+            first = false;
+        }
+    }
+    buf += "],\"pa\":[";
+    {
+        bool first = true;
+        for (const auto &a : memory.accesses) {
+            if (!first) buf += ',';
+            buf += '[';
+            buf += '"'; buf += esc(a.base); buf += "\",";
+            buf += std::to_string(a.offset) + ',';
+            buf += std::to_string(a.size) + ',';
+            buf += '"'; buf += esc(a.function); buf += "\",";
+            buf += '"'; buf += esc(a.site); buf += "\",";
+            buf += std::to_string(a.isWrite ? 1 : 0) + ',';
+            buf += std::to_string(a.inLoop ? 1 : 0) + ',';
+            buf += std::to_string(a.isAtomic ? 1 : 0) + ',';
+            buf += '"'; buf += esc(a.fieldName); buf += '"';
+            buf += ']';
+            first = false;
+        }
+    }
+    buf += "],\"pu\":" + std::to_string(memory.unnameableAccesses);
 
     buf += "}";
     return buf;
@@ -997,6 +1037,62 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                 else if (k == "rs") out.coverage.recordsSeen = v;
                 ipc::expect(json, i, ',');
             }
+        } else if (key == "pc") {
+            ipc::expect(json, i, '[');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == ']') {
+                    if (i < json.size()) ++i;
+                    break;
+                }
+                ipc::expect(json, i, '[');
+                Constraint c;
+                c.kind = static_cast<Constraint::Kind>(
+                    static_cast<int>(ipc::parseNum(json, i)));
+                ipc::expect(json, i, ',');
+                c.lhs = ipc::parseStr(json, i);
+                ipc::expect(json, i, ',');
+                c.rhs = ipc::parseStr(json, i);
+                ipc::expect(json, i, ',');
+                c.offset = static_cast<uint64_t>(ipc::parseNum(json, i));
+                ipc::expect(json, i, ']');
+                out.memory.constraints.insert(std::move(c));
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "pa") {
+            ipc::expect(json, i, '[');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == ']') {
+                    if (i < json.size()) ++i;
+                    break;
+                }
+                ipc::expect(json, i, '[');
+                PendingAccess a;
+                a.base = ipc::parseStr(json, i);
+                ipc::expect(json, i, ',');
+                a.offset = static_cast<uint64_t>(ipc::parseNum(json, i));
+                ipc::expect(json, i, ',');
+                a.size = static_cast<uint64_t>(ipc::parseNum(json, i));
+                ipc::expect(json, i, ',');
+                a.function = ipc::parseStr(json, i);
+                ipc::expect(json, i, ',');
+                a.site = ipc::parseStr(json, i);
+                ipc::expect(json, i, ',');
+                a.isWrite = ipc::parseNum(json, i) != 0;
+                ipc::expect(json, i, ',');
+                a.inLoop = ipc::parseNum(json, i) != 0;
+                ipc::expect(json, i, ',');
+                a.isAtomic = ipc::parseNum(json, i) != 0;
+                ipc::expect(json, i, ',');
+                a.fieldName = ipc::parseStr(json, i);
+                ipc::expect(json, i, ']');
+                out.memory.accesses.push_back(std::move(a));
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "pu") {
+            out.memory.unnameableAccesses =
+                static_cast<unsigned>(ipc::parseNum(json, i));
         } else {
             ipc::skipValue(json, i);
         }

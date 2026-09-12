@@ -7,6 +7,7 @@
 #include "lshaz/analysis/striped_array_summary.h"
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/core/diagnostic.h"
+#include "lshaz/analysis/memory.h"
 #include "lshaz/pipeline/scan_result.h"
 
 #include <string>
@@ -32,6 +33,7 @@ struct ShardIPC {
     ThreadRoleSummary threadRoles;
     StripedArraySummary striped;
     ScanCoverage coverage;
+    MemorySummary memory;
 };
 
 // Child exit status reserved for "analysis ran, IPC handoff failed". Distinct
@@ -50,6 +52,7 @@ std::string serializeShardResult(int exitCode,
                                  const ThreadRoleSummary &threadRoles,
                                  const StripedArraySummary &striped,
                                  const ScanCoverage &coverage,
+                                 const MemorySummary &memory,
                                  const std::string &src = {});
 
 bool deserializeShardResult(const std::string &json, ShardIPC &out);

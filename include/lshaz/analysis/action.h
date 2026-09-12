@@ -7,6 +7,7 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/striped_array_summary.h"
 #include "lshaz/analysis/coverage.h"
+#include "lshaz/analysis/memory.h"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/FrontendAction.h>
@@ -36,6 +37,7 @@ public:
                     ThreadRoleSummary &threadRoles,
                     StripedArraySummary &stripedArrays,
                     ScanCoverage &coverage,
+                    MemorySummary &memory,
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<FailedTU> &failedTUs,
                     std::vector<std::string> *deps);
@@ -55,6 +57,7 @@ private:
     ThreadRoleSummary &threadRoles_;
     StripedArraySummary &stripedArrays_;
     ScanCoverage &coverage_;
+    MemorySummary &memory_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
     std::vector<std::string> *deps_;
@@ -76,6 +79,7 @@ public:
     const ThreadRoleSummary &threadRoles() const { return threadRoles_; }
     const StripedArraySummary &stripedArrays() const { return stripedArrays_; }
     const ScanCoverage &coverage() const { return coverage_; }
+    const MemorySummary &memory() const { return memory_; }
     // Files the TU read, for keying a cached result against later edits.
     const std::vector<std::string> &deps() const { return deps_; }
 
@@ -86,6 +90,7 @@ private:
     ThreadRoleSummary threadRoles_;
     StripedArraySummary stripedArrays_;
     ScanCoverage coverage_;
+    MemorySummary memory_;
     std::vector<std::string> deps_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<FailedTU> failedTUs_;

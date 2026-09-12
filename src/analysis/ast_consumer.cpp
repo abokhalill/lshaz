@@ -3,6 +3,7 @@
 #include "lshaz/analysis/symbols.h"
 #include "lshaz/analysis/vocabulary.h"
 #include "lshaz/analysis/ast_consumer.h"
+#include "lshaz/analysis/constraints.h"
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/call_graph.h"
 #include "lshaz/analysis/escape.h"
@@ -51,10 +52,11 @@ LshazASTConsumer::LshazASTConsumer(
     ThreadRoleSummary &threadRoles,
     StripedArraySummary &stripedArrays,
     ScanCoverage &coverage,
+    MemorySummary &memory,
     const std::unordered_set<std::string> &profileHotFuncs)
     : config_(cfg), oracle_(cfg), diagnostics_(diagnostics),
       escapeSummary_(escapeSummary), threadRoles_(threadRoles),
-      stripedArrays_(stripedArrays), coverage_(coverage) {
+      stripedArrays_(stripedArrays), coverage_(coverage), memory_(memory) {
     if (!profileHotFuncs.empty())
         oracle_.loadProfileHotFunctions(profileHotFuncs);
 }
@@ -281,6 +283,11 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                 records.push_back(RD);
     }
     escapeSummary_ = escape.buildEscapeSummary(records);
+
+    // Constraints and unresolved accesses, both per-TU partials. Nothing here
+    // decides where a pointer points: the constraint that settles a parameter
+    // is in the caller's TU, which this shard may never compile.
+    memory_ = buildMemorySummary(Ctx, config_.allocatorFunctionPatterns);
 
     // Layout-intent annotation for the FL092 precedent join. Alignment
     // reads Clang's cached record layout; no recomputation.

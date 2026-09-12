@@ -8,6 +8,7 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/core/diagnostic.h"
 #include "lshaz/core/ladder.h"
+#include "lshaz/analysis/memory.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/repo.h"
 #include "lshaz/pipeline/filter.h"
@@ -570,7 +571,8 @@ void testShardIPCFieldAccessRoundTrip() {
     tr.fieldAccess["S::cold"].readSites = 2;
 
     const std::string wire = serializeShardResult(
-        0, {}, {}, EscapeSummary{}, tr, StripedArraySummary{}, ScanCoverage{});
+        0, {}, {}, EscapeSummary{}, tr, StripedArraySummary{}, ScanCoverage{},
+        MemorySummary{});
     ShardIPC parsed;
     check(deserializeShardResult(wire, parsed), "shard record parses");
 
@@ -783,6 +785,206 @@ void testMechanismClaimCeiling() {
 
 // Refutation is a verdict, not a low score. An evidence source that looked
 // for a precondition and found it absent retires the finding by name.
+// --- points-to ------------------------------------------------------------
+
+namespace pt {
+using namespace lshaz;
+
+Constraint addrOf(std::string p, std::string o, uint64_t off = 0) {
+    return {Constraint::Kind::AddrOf, std::move(p), std::move(o), off};
+}
+Constraint copy(std::string p, std::string q) {
+    return {Constraint::Kind::Copy, std::move(p), std::move(q), 0};
+}
+Constraint load(std::string p, std::string q, uint64_t off = 0) {
+    return {Constraint::Kind::Load, std::move(p), std::move(q), off};
+}
+Constraint store(std::string p, std::string q, uint64_t off = 0) {
+    return {Constraint::Kind::Store, std::move(p), std::move(q), off};
+}
+bool has(const lshaz::PointsToSolution &s, const std::string &p,
+         const std::string &o) {
+    return s.of(p).count(o) > 0;
+}
+} // namespace pt
+
+void testPointsToBasics() {
+    std::cerr << "test: points-to address, copy, transitive copy\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    std::set<Constraint> cs{
+        addrOf("a", obj::global("g_stats")),
+        copy("b", "a"),
+        copy("c", "b"),
+    };
+    auto sol = solvePointsTo(cs);
+    check(has(sol, "a", "g:g_stats"), "address-of seeds the set");
+    check(has(sol, "b", "g:g_stats"), "copy propagates one hop");
+    check(has(sol, "c", "g:g_stats"), "copy propagates transitively");
+    check(!sol.truncated, "a three-constraint program fits the budget");
+}
+
+void testPointsToLoadStore() {
+    std::cerr << "test: points-to through a load and a store\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    // box = &cell; *box = &target; out = *box;
+    std::set<Constraint> cs{
+        addrOf("box", obj::global("cell")),
+        addrOf("val", obj::global("target")),
+        store("box", "val"),
+        load("out", "box"),
+    };
+    auto sol = solvePointsTo(cs);
+    check(has(sol, "g:cell", "g:target"), "the store lands in the object");
+    check(has(sol, "out", "g:target"), "the load reads it back out");
+}
+
+void testPointsToFieldSensitivity() {
+    std::cerr << "test: points-to keeps distinct field offsets apart\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    // s.head = &a; s.tail = &b; two offsets on one object.
+    std::set<Constraint> cs{
+        addrOf("p", obj::global("s")),
+        addrOf("pa", obj::global("a")),
+        addrOf("pb", obj::global("b")),
+        store("p", "pa", 0),
+        store("p", "pb", 8),
+        load("readHead", "p", 0),
+        load("readTail", "p", 8),
+    };
+    auto sol = solvePointsTo(cs);
+    check(has(sol, "readHead", "g:a"), "offset 0 reads what offset 0 stored");
+    check(has(sol, "readTail", "g:b"), "offset 8 reads what offset 8 stored");
+    check(!has(sol, "readHead", "g:b"),
+          "a field-insensitive solver would merge these");
+    check(!has(sol, "readTail", "g:a"), "and merge them the other way too");
+}
+
+void testPointsToTerminatesOnCycles() {
+    std::cerr << "test: points-to terminates on a copy cycle\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    std::set<Constraint> cs{
+        addrOf("a", obj::global("o")),
+        copy("b", "a"), copy("c", "b"), copy("a", "c"),
+    };
+    auto sol = solvePointsTo(cs);
+    check(has(sol, "a", "g:o") && has(sol, "b", "g:o") && has(sol, "c", "g:o"),
+          "every node in the cycle sees the object");
+    check(!sol.truncated, "a cycle is a fixed point, not a budget overrun");
+}
+
+// The reason this analysis is in the reduce phase. The call is compiled in one
+// TU and the callee's body in another, so neither shard can resolve the
+// parameter alone and a per-TU solve would answer "unknown" for both.
+void testPointsToCrossesTheShardBoundary() {
+    std::cerr << "test: points-to resolves a parameter across two shards\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    // Shard A compiled the caller: update(&g_conn)
+    std::set<Constraint> shardA{
+        addrOf("tmp", obj::global("g_conn")),
+        copy(obj::param("update", 0), "tmp"),
+    };
+    // Shard B compiled the callee: void update(Conn *c) { c->n = ...; }
+    std::set<Constraint> shardB{
+        copy("c", obj::param("update", 0)),
+    };
+
+    auto alone = solvePointsTo(shardB);
+    check(!alone.resolves("c"), "the callee's shard cannot resolve it alone");
+
+    std::set<Constraint> merged = shardA;
+    merged.insert(shardB.begin(), shardB.end());
+    auto both = solvePointsTo(merged);
+    check(has(both, "c", "g:g_conn"),
+          "merged, the parameter resolves to the caller's object");
+
+    // Merge order is not an input to a least fixed point.
+    std::set<Constraint> other = shardB;
+    other.insert(shardA.begin(), shardA.end());
+    auto reversed = solvePointsTo(other);
+    check(reversed.pointsTo == both.pointsTo,
+          "the solution does not depend on which shard reported first");
+}
+
+void testPointsToBudgetIsReported() {
+    std::cerr << "test: points-to reports truncation instead of hiding it\n";
+    using namespace lshaz;
+    using namespace pt;
+
+    std::set<Constraint> cs;
+    for (int i = 0; i < 40; ++i)
+        cs.insert(addrOf("p", obj::global("o" + std::to_string(i))));
+    for (int i = 0; i < 40; ++i)
+        cs.insert(copy("q" + std::to_string(i), "p"));
+
+    auto full = solvePointsTo(cs);
+    check(!full.truncated, "the default budget covers this");
+    check(full.objectsDiscovered == 40, "all forty objects are distinct");
+
+    auto squeezed = solvePointsTo(cs, /*objectBudget=*/50);
+    check(squeezed.truncated, "a solution cut short says so");
+}
+
+// Constraints that stay in the child make the solve wrong rather than
+// thinner, and wrong only under --jobs > 1. The symptom this guards against
+// is the one the repo calls the worst kind.
+void testMemorySummaryCrossesIPC() {
+    std::cerr << "test: memory summary survives the shard boundary\n";
+    using namespace lshaz;
+
+    MemorySummary m;
+    m.constraints.insert({Constraint::Kind::AddrOf, "s:caller::t",
+                          obj::global("g_conn"), 0});
+    m.constraints.insert({Constraint::Kind::Copy, obj::param("update", 0),
+                          "s:caller::t", 0});
+    m.constraints.insert({Constraint::Kind::Load, "tmp", "s:cb::p", 24});
+    m.constraints.insert({Constraint::Kind::Store, "s:cb::p", "tmp", 8});
+    m.unnameableAccesses = 7;
+
+    PendingAccess a;
+    a.base = obj::global("g_conn");
+    a.offset = 16; a.size = 8;
+    a.function = "update"; a.site = "conn.c:42";
+    a.isWrite = true; a.inLoop = true; a.isAtomic = false;
+    a.fieldName = "bytes";
+    m.accesses.push_back(a);
+
+    const std::string wire = serializeShardResult(
+        0, {}, {}, EscapeSummary{}, ThreadRoleSummary{}, StripedArraySummary{},
+        ScanCoverage{}, m);
+    ShardIPC parsed;
+    check(deserializeShardResult(wire, parsed), "record with memory parses");
+
+    check(parsed.memory.constraints.size() == 4, "every constraint arrives");
+    check(parsed.memory.constraints == m.constraints,
+          "constraints arrive unchanged, kind and offset included");
+    check(parsed.memory.unnameableAccesses == 7,
+          "the unnameable count is not dropped on the floor");
+
+    check(parsed.memory.accesses.size() == 1, "the access arrives");
+    const auto &g = parsed.memory.accesses.front();
+    check(g.base == a.base && g.offset == 16 && g.size == 8,
+          "base and extent survive");
+    check(g.function == "update" && g.site == "conn.c:42",
+          "attribution survives");
+    check(g.isWrite && g.inLoop && !g.isAtomic, "the flags survive");
+    check(g.fieldName == "bytes", "the field name survives");
+
+    // The point of shipping them: merged, the parameter resolves.
+    auto sol = solvePointsTo(parsed.memory.constraints);
+    check(sol.of(obj::param("update", 0)).count("g:g_conn") == 1,
+          "the reassembled constraints still solve");
+}
+
 void testLadderRankIsOrdinal() {
     std::cerr << "test: ladder rank is ordinal and never claims certainty\n";
     using namespace lshaz;
@@ -945,6 +1147,13 @@ int main() {
 
     // PMU instrument election
     testMechanismClaimCeiling();
+    testMemorySummaryCrossesIPC();
+    testPointsToBasics();
+    testPointsToLoadStore();
+    testPointsToFieldSensitivity();
+    testPointsToTerminatesOnCycles();
+    testPointsToCrossesTheShardBoundary();
+    testPointsToBudgetIsReported();
     testLadderRankIsOrdinal();
     testRefutationWithdrawsTheFinding();
     testPMUCliffAtLineSize();

@@ -107,6 +107,8 @@ set(LSHAZ_SOURCES
     src/analysis/cache_line.cpp
     src/analysis/coherence_profile.cpp
     src/analysis/contention.cpp
+    src/analysis/points_to.cpp
+    src/analysis/constraints.cpp
     src/analysis/event_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
@@ -210,6 +212,7 @@ add_executable(pipeline_test
     src/pipeline/repo.cpp
     src/pipeline/shard_ipc.cpp
     src/analysis/contention.cpp
+    src/analysis/points_to.cpp
     src/analysis/event_profile.cpp
     src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
@@ -226,6 +229,8 @@ add_executable(analysis_test
     src/analysis/event_profile.cpp
     src/analysis/coherence_profile.cpp
     src/analysis/contention.cpp
+    src/analysis/points_to.cpp
+    src/analysis/constraints.cpp
     src/analysis/event_profile.cpp
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp

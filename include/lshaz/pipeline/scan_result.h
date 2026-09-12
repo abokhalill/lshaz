@@ -7,6 +7,7 @@
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/striped_array_summary.h"
 #include "lshaz/analysis/coverage.h"
+#include "lshaz/analysis/memory.h"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +34,13 @@ struct ScanResult {
 
     // Cross-TU aggregated escape summary. Merged from all per-TU summaries.
     EscapeSummary escapeSummary;
+
+    // Points-to constraints from every shard, and the whole-program object
+    // model solved from them. The constraints are partials and mean nothing
+    // per TU: the one that settles a parameter lives in the caller's TU.
+    MemorySummary memory;
+    PointsToSolution pointsTo;
+    MemoryModel memoryModel;
 
     // Cross-TU thread-attribution facts and the roles reduced from them.
     ThreadRoleSummary threadRoleFacts;
