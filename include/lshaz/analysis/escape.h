@@ -49,7 +49,15 @@ struct EscapeVerdict {
 };
 
 // Thread-escape analysis with both structural and interprocedural evidence.
-// Conservative: if uncertain, assumes escape.
+//
+// escapes is the disjunction of the seven positive signals below, so it reads
+// "one of these was found here" and not "this object is shared". Finding none
+// leaves it false, which makes the field an optimistic verdict and not a
+// conservative one. The per-TU scope is the reason: the record lives in a
+// header and its global lives in one .c, so the TU that reports is rarely the
+// TU that would have seen the evidence. Anything deciding against sharing
+// wants the merged TypeEscapeSignals, where sharingRouteRefuted() separates a
+// program fact from an unexamined one.
 //
 // Structural evidence (per-type):
 //   1. std::atomic member fields
