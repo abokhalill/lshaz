@@ -1068,6 +1068,56 @@ void testUnresolvedAccessesAreCounted() {
     check(model.resolutionRate() == 0.0, "and the rate says so");
 }
 
+// The reachability question the object-level sharing verdict asks. A line only
+// ever read costs no coherence traffic, and roles are counted over the
+// attributed touchers because an unattributed one can only add a role.
+void testObjectReachedByTwoRoles() {
+    std::cerr << "test: two roles reaching one object, and the cases that are not\n";
+    using namespace lshaz;
+
+    ThreadRoleVerdicts roles;
+    roles.functionRoles["ioThread"] = 1;
+    roles.functionRoles["workerThread"] = 2;
+    roles.functionRoles["alsoIo"] = 1;
+
+    auto touched = [&](std::initializer_list<std::pair<const char *, bool>> fns) {
+        MemorySummary m;
+        for (auto [fn, write] : fns) {
+            PendingAccess a;
+            a.base = obj::global("g_shared");
+            a.size = 8; a.function = fn; a.isWrite = write;
+            m.accesses.push_back(a);
+        }
+        return buildMemoryModel(m, solvePointsTo(m.constraints));
+    };
+
+    auto rolesOn = [&](const MemoryModel &model) {
+        const auto &acc = model.objects.at("g:g_shared");
+        std::set<std::string> all = acc.writers();
+        const auto r = acc.readers();
+        all.insert(r.begin(), r.end());
+        return ThreadRoleVerdicts::roleCount(roles.knownRolesOf(all));
+    };
+
+    auto twoRoles = touched({{"ioThread", true}, {"workerThread", true}});
+    check(rolesOn(twoRoles) >= 2, "two writing roles reach it");
+
+    auto writeAndRead = touched({{"ioThread", true}, {"workerThread", false}});
+    check(rolesOn(writeAndRead) >= 2,
+          "a reader on the other role pays the same miss a writer would");
+
+    auto sameRole = touched({{"ioThread", true}, {"alsoIo", true}});
+    check(rolesOn(sameRole) == 1, "two functions of one role are one role");
+
+    auto readOnly = touched({{"ioThread", false}, {"workerThread", false}});
+    check(readOnly.objects.at("g:g_shared").writers().empty(),
+          "a read-only object has no writer to invalidate the line");
+
+    auto unattributed = touched({{"ioThread", true}, {"mystery", true}});
+    check(rolesOn(unattributed) == 1,
+          "an unattributed toucher adds no role, so the count is a lower bound");
+}
+
 void testLadderRankIsOrdinal() {
     std::cerr << "test: ladder rank is ordinal and never claims certainty\n";
     using namespace lshaz;
@@ -1230,6 +1280,7 @@ int main() {
 
     // PMU instrument election
     testMechanismClaimCeiling();
+    testObjectReachedByTwoRoles();
     testTwoGlobalsOfOneTypeStayApart();
     testHeapObjectsAreDistinctPerSite();
     testUnresolvedAccessesAreCounted();

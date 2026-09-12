@@ -449,7 +449,8 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
     // them made "is a global" indistinguishable from "is shared".
     for (const auto *VD : globals) {
         if (isGlobalSharedMutable(VD))
-            markGlobalInstance(VD->getType(), VD->getNameAsString());
+            markGlobalInstance(VD->getType(),
+                               VD->getQualifiedNameAsString());
     }
 
     // Pass 2: thread-creation call sites across all function bodies.

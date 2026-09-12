@@ -2414,6 +2414,78 @@ static unsigned synthesizeUnappliedMitigation(
 // A rule cannot decide that: hasGlobalInstance is a per-TU fact, the record
 // lives in a header and its global lives in one .c, so at rule time the
 // answer is false almost everywhere it matters.
+// Objects that two thread roles both reach, with at least one writer.
+//
+// The type-keyed model could not ask this. Two globals of one type were one
+// node there, so two roles touching different instances read the same as two
+// roles touching one. Object identity makes it a fact about storage.
+static std::set<std::string> reachedByTwoRoles(const MemoryModel &model,
+                                               const ThreadRoleVerdicts &roles) {
+    std::set<std::string> out;
+    for (const auto &[id, acc] : model.objects) {
+        if (!obj::isStatic(id) && !obj::isHeap(id))
+            continue;
+        std::set<std::string> touchers = acc.writers();
+        if (touchers.empty())
+            continue;  // a line only read by anyone costs no coherence traffic
+        const auto rs = acc.readers();
+        touchers.insert(rs.begin(), rs.end());
+        if (ThreadRoleVerdicts::roleCount(roles.knownRolesOf(touchers)) >= 2)
+            out.insert(id);
+    }
+    return out;
+}
+
+// Settle the sharing claim on the object rather than on the type. Additive:
+// it establishes what no per-type disjunction could see, and never withdraws.
+static unsigned applyObjectSharingVerdict(std::vector<Diagnostic> &diagnostics,
+                                          const MemoryModel &model,
+                                          const ThreadRoleVerdicts &roles) {
+    const std::set<std::string> shared = reachedByTwoRoles(model, roles);
+    if (shared.empty())
+        return 0;
+
+    unsigned settled = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed) continue;
+        if (d.ruleID != "FL002" && d.ruleID != "FL041") continue;
+        auto it = d.structuralEvidence.find("global_instances");
+        if (it == d.structuralEvidence.end() || it->second.empty()) continue;
+
+        std::string named;
+        const std::string &gs = it->second;
+        for (size_t start = 0; start < gs.size();) {
+            size_t end = gs.find(';', start);
+            std::string g = gs.substr(start, end == std::string::npos
+                                                 ? std::string::npos
+                                                 : end - start);
+            if (!g.empty() && shared.count(obj::global(g))) {
+                if (!named.empty()) named += ", ";
+                named += g;
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        if (named.empty()) continue;
+
+        d.settleClaim("MESI invalidation ping-pong", ClaimState::Established,
+                      "two thread roles reach '" + named + "' itself, not "
+                      "merely two instances of its type");
+        // The type-level pass may have refuted the route gate from a
+        // disjunction over every instance of the type. Naming the object is
+        // the finer instrument and overrides it, the same precedence a
+        // profile takes over a declaration.
+        d.settleClaim("two threads reach the same instance",
+                      ClaimState::Established,
+                      "object '" + named + "' is reached by two roles");
+        d.escalations.push_back(
+            "object-level sharing: '" + named +
+            "' is reached by more than one thread role");
+        ++settled;
+    }
+    return settled;
+}
+
 struct SharingRouteVerdict {
     unsigned refuted = 0;  // no route, and absence of one is observable
     unsigned capped  = 0;  // no route found, but the tracker could not have seen one
@@ -3784,6 +3856,11 @@ ScanResult ScanPipeline::run(
            "% of accesses resolved" +
            (result.pointsTo.truncated
                 ? std::string(" (TRUNCATED: lower bound)") : std::string()));
+
+    if (unsigned objShared = applyObjectSharingVerdict(
+            result.diagnostics, result.memoryModel, result.threadRoles))
+        report("points_to", std::to_string(objShared) +
+               " sharing finding(s) established on the object itself");
 
     const ContentionGraph contention = buildContentionGraph(
         result.escapeSummary, result.threadRoleFacts,
