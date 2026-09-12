@@ -24,7 +24,8 @@ Per-diagnostic fields:
 |---|---|
 | `ruleID` | Producing rule (`FL002`) or synthesized ID (`FL091`, `B001`) |
 | `title` | Rule title |
-| `severity`, `confidence`, `evidenceTier` | As above |
+| `severity`, `evidenceTier` | As above |
+| `confidence` | Rank in (0,1) ordering findings **within one rule**. Not a probability, and not comparable across rules: use `evidenceTier` for that. Derived from the rule's evidence ladder, never hand-written. |
 | `location` | `file`, `line`, `column` (physical file; token-paste scratch buffers are resolved) |
 | `functionName` | Enclosing function; empty for struct/variable-level findings |
 | `hardwareReasoning` | The mechanism claim, with its assumptions stated inline |
@@ -55,7 +56,7 @@ cross-TU) follows them when applicable.
 ```json
 {
   "version": "0.4.0",
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "metadata": {
     "timestamp": 1751980800,
     "configPath": "lshaz.config.yaml",
@@ -72,7 +73,7 @@ cross-TU) follows them when applicable.
       "ruleID": "FL002",
       "title": "False Sharing Candidate",
       "severity": "Critical",
-      "confidence": 0.88,
+      "confidence": 0.66,
       "evidenceTier": "proven",
       "location": { "file": "src/engine.h", "line": 42, "column": 8 },
       "functionName": "",
@@ -106,8 +107,20 @@ cross-TU) follows them when applicable.
 ### Reading `mechanismClaims`
 
 Each claim states an `effect` the hardware produces, the `precondition` that
-effect requires, whether that precondition was `established`, and the severity
-it `supports`.
+effect requires, the `state` of that precondition, and the severity it
+`supports`.
+
+`state` is three-valued and the distinction is load-bearing:
+
+| `state` | Meaning |
+|---|---|
+| `unknown` | Nothing decided this. It cannot raise severity and does not retire the finding. |
+| `established` | An observation confirmed the precondition. |
+| `refuted` | An observation showed it does not hold. |
+
+A refuted `gating` claim retires the finding outright, because a necessary
+precondition is known false. Treating `unknown` as `refuted` is the one
+misreading to avoid: not checking something is not disproving it.
 
 Combination is not uniform. Ordinary claims (`gating: false`) are
 **alternatives**. Any one established mechanism can carry the finding, so

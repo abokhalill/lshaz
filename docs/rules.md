@@ -60,7 +60,7 @@ A claim is `unknown`, `established` or `refuted`. Unknown means nobody
 decided, so it cannot promote and does not withdraw. Refuted means an evidence
 source looked and found the precondition false: a refuted gate, or every
 alternative refuted, retires the finding and names what did it. A rule's own
-predicate coming out false is `unknown`, never `refuted` — not observing a
+predicate coming out false is `unknown`, never `refuted`: not observing a
 condition is not disproving it.
 
 **Hot-path gating caps severity.** A profile or a declaration (`hot` attribute,

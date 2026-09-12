@@ -88,6 +88,20 @@ chmod +x "$INSTALL_DIR/lshaz"
 
 info "installed to $INSTALL_DIR/lshaz"
 
+# Shell completions. 
+COMP_SRC="$WORK_DIR/lshaz/completions"
+install_completion() {
+    [ -f "$2" ] || return 0
+    mkdir -p "$1" 2>/dev/null || return 0
+    cp "$2" "$1/$3" 2>/dev/null && info "  completions: $1/$3"
+}
+install_completion "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions" \
+                   "$COMP_SRC/lshaz.bash" "lshaz"
+install_completion "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions" \
+                   "$COMP_SRC/lshaz.zsh" "_lshaz"
+install_completion "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions" \
+                   "$COMP_SRC/lshaz.fish" "lshaz.fish"
+
 # Check PATH.
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     info ""

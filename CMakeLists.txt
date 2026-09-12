@@ -264,3 +264,27 @@ add_executable(scan_test
     test/scan_test.cpp
 )
 target_link_libraries(scan_test PRIVATE ${LSHAZ_LLVM_LIBS})
+
+# Installation.
+include(GNUInstallDirs)
+
+# libLLVM.so lives outside the default loader path, so the installed binary
+# needs the runpath the build tree had.
+set_target_properties(lshaz PROPERTIES
+    INSTALL_RPATH "${LLVM_LIBRARY_DIRS}"
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+install(TARGETS lshaz RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(FILES completions/lshaz.bash
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+        RENAME lshaz)
+install(FILES completions/lshaz.zsh
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
+        RENAME _lshaz)
+install(FILES completions/lshaz.fish
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
+        RENAME lshaz.fish)
+
+install(FILES lshaz.config.yaml
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples)

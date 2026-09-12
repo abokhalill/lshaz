@@ -4,31 +4,39 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20x86--64-blue)]()
 
-Find cache-line and concurrency performance hazards in C and C++ **before**
-you run the code.
+Find cache-line and concurrency performance hazards in C and C++ **before** you
+run the code.
 
-`perf` tells you your program is slow on a machine that reproduces the load.
-lshaz reads your source and points at the struct whose two hot counters share
-a cache line, the `seq_cst` that could be `release`, the `malloc` inside your
-inner loop.
+`perf` tells you a program is slow, on a machine that reproduces the load.
+lshaz reads your source and points at the struct whose two hot counters share a
+cache line, the `seq_cst` that could be `release`, the `malloc` inside an inner
+loop.
 
 ```
 $ lshaz scan .
+lshaz: [points_to] 51144 constraint(s) -> 2496 object(s); 90% of accesses resolved
 lshaz: 172/172 TU(s) parsed, 41 diagnostic(s)
-lshaz: coverage 16947 function(s), 20526 record(s), 170 hot
+lshaz: coverage 16947 function(s), 20526 record(s), 43% hot
 
-[CRITICAL] FL002, False Sharing Candidate
-  src/connection.h:214  (struct ConnPool)
-  Two independently-written fields share cache line 0. Each write by one
-  core invalidates the line in every other core's L1/L2, forcing an RFO
-  round trip on the next access from those cores.
-  Evidence: sizeof=352B; atomic_pairs_same_line=3; thread_escape=true
-  Fix: separate the fields onto different cache lines with alignas(64).
+src/connection.h:214:8: [Critical] FL002, False Sharing Candidate
+  Hardware: Struct 'ConnPool' (352B, 6 line(s)): 3 mutable field pair(s) share
+  cache line(s) with thread-escape evidence. Concurrent writes to co-located
+  fields trigger MESI invalidation per write.
+  Evidence: atomic_pairs_same_line=3; global_instances=g_pool; sizeof=352B;
+  thread_escape=true; +5 more (--format json)
+  Mitigation: Pad independently-written fields to separate 64B cache lines with
+  alignas(64). Consider per-thread/per-core replicas.
+  Evidence tier: likely
+  Escalation: object-level sharing: 'g_pool' is reached by more than one thread role
+
+lshaz: 41 finding(s)  Critical 4  High 11  Medium 26
+lshaz: by rule   FL002 9  FL040 8  FL061 7  FL006 5  FL020 4  (+6 more)
+lshaz: by file   src/connection.h 12  src/server.c 9  src/rdb.c 6  (+14 more)
 ```
 
 Every finding names a specific hardware mechanism: cache geometry, MESI
 coherence, the store buffer, the TLB, NUMA, or the allocator. A rule that
-can't name one doesn't fire.
+cannot name one does not ship.
 
 ## Install
 
@@ -38,6 +46,8 @@ Linux x86-64, including WSL2.
 curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
 ```
 
+Installs to `~/.local/bin` and sets up shell completions for bash, zsh and fish.
+
 <details>
 <summary>Build from source</summary>
 
@@ -45,11 +55,12 @@ curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | ba
 apt install llvm-18-dev libclang-18-dev clang-18 cmake   # Ubuntu/Debian
 cmake --preset default
 cmake --build build -j$(nproc)
+sudo cmake --install build          # optional, system-wide
 ```
 
 Use the preset. Under WSL an inherited Windows `PATH` can make CMake pick a
 MinGW compiler, which then reports every LLVM header as missing; the preset
-pins the host toolchain and configure fails fast if it can't.
+pins the host toolchain and fails configuration immediately if it cannot.
 </details>
 
 ## Quickstart
@@ -59,29 +70,63 @@ lshaz init .        # one time: generates compile_commands.json
 lshaz scan .
 ```
 
-That's it. lshaz finds your compile database, analyzes every translation unit
-in parallel, and prints what it found.
+lshaz finds your compile database, analyzes every translation unit in parallel,
+and prints what it found. If there is no compile database it tells you so and
+names the command that creates one.
 
-A few things you'll probably want next:
+What you will most likely want next:
 
 ```bash
-lshaz scan . --min-severity Critical         # just the loud ones
-lshaz scan . --rule FL002                    # just false sharing
-lshaz scan . -f json -o out.json             # machine-readable
-lshaz explain FL002                          # what is this rule, really?
-lshaz diff before.json after.json            # did my change help?
+lshaz scan . --min-severity Critical    # only the loud ones
+lshaz scan . --rule FL002               # only false sharing
+lshaz scan . -f tidy                    # one line per finding, editor-friendly
+lshaz scan . -f json -o out.json        # complete record, every field
+lshaz explain FL002                     # what this rule is, and why
+lshaz diff before.json after.json       # did the change help?
 ```
 
-You can point it at a URL instead of a path, and it'll clone and scan:
+Point it at a URL instead of a path and it clones, then scans:
 
 ```bash
 lshaz scan https://github.com/abseil/abseil-cpp
 ```
 
-Exit codes: `0` clean, `1` findings, `2` some files failed to compile,
-`3` something was wrong with the invocation. **Exit `2` matters**, a file
-that didn't compile wasn't analyzed, so its hazards are missing from the
-report, not missing from your code.
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Clean, nothing reported |
+| `1` | Findings reported |
+| `2` | Some translation units failed to compile |
+| `3` | The invocation was wrong, or the scan could not run |
+
+**Exit `2` matters.** A file that did not compile was not analyzed, so its
+hazards are missing from the report, not missing from your code.
+
+## The mental model
+
+lshaz answers one question: **does this source contain the preconditions for a
+known hardware latency hazard?**
+
+It reasons about three things, and keeping them separate is the whole design.
+
+**Structure** is what the code says. Field offsets, cache-line residency, atomic
+ordering, allocation sites. This part is close to certain.
+
+**Reachability** is who touches what. lshaz solves whole-program points-to
+across every translation unit, so it distinguishes two globals of the same type
+from one global two threads share, and it names the object a finding is about instead of only its type. Scans report how much of this they resolved.
+
+**Cost** is what it would actually take from you, and is the weakest link.
+It depends on how close together in time the accesses land. Coherence cost
+collapses once writes are more than a few hundred nanoseconds apart within a
+socket, so software doing anything substantial per operation rarely reaches it.
+
+**Read Critical as *worth measuring*, not *known to be slow*.**
+
+To measure, `tools/wattr/` records which threads actually wrote which cache line
+at runtime and joins that against a scan. That confirms the sharing is real.
+Whether it costs anything is a separate story.
 
 ## What it looks for
 
@@ -113,61 +158,39 @@ report, not missing from your code.
 | FL092 | A struct missing the line-isolation idiom the tree uses elsewhere |
 | C002 | A loop-invariant load the compiler declined to hoist |
 
-Plus `B001`, which isn't a hazard: it means the scan itself was unsound,
-usually a project that needs building first, so a clean result next to it
-means nothing.
+`B001` is not a hazard. It means the scan itself was unsound, usually a project
+that needed building first, so a clean result beside it means nothing.
 
-`lshaz explain <ID>` gives you the mechanism and the fix for any of them.
-
-## How much should you trust a finding?
-
-A finding says **the preconditions for a hazard are present in your source**.
-It does not say the hazard costs you anything on your workload. That depends
-on how close together in time the accesses land: coherence cost collapses once
-writes are more than a few hundred nanoseconds apart within a socket, so
-software doing anything substantial per operation rarely reaches it.
-
-So lshaz grades rather than just reports. Each finding carries a severity, a
-confidence, and the specific hardware claims behind it, and **severity is
-capped by what those claims actually establish**. A rule can't call something
-Critical on a mechanism it never demonstrated. Hot-path rules are additionally
-capped by how well "this runs often" was established: a real perf profile
-lifts the cap, an inference from loop structure doesn't.
-
-Read Critical as *worth measuring*, not *known to be slow*.
-
-For measuring, `tools/wattr/` records which threads actually wrote which cache
-line at runtime and joins that against a scan. That confirms the sharing is
-real. Whether it costs anything is a separate question with a much higher bar,
-and a heavily written shared counter can produce no measurable coherence
-traffic at all if the writes never land close enough together.
+`lshaz explain <ID>` gives the mechanism and the fix for any of them, and
+`lshaz explain --list` prints them all.
 
 ## Good to know
 
-- **Output is byte-identical regardless of `--jobs`**, which is what makes
+- **Output is byte-identical regardless of `--jobs`.** That is what makes
   `lshaz diff` usable as a CI gate.
-- **Third-party trees are skipped** by default. `--include-vendored` if you
-  want them.
-- **Codebases that hide atomics behind a typedef** (`atomic_t`,
-  `ngx_atomic_t`) need those names in `atomic_type_names`, or lshaz can't see
-  the fields are atomic at all.
+- **Third-party trees are skipped** by default. Use `--include-vendored` to
+  include them.
+- **Atomics hidden behind a typedef** (`atomic_t`, `ngx_atomic_t`) must be named
+  in `atomic_type_names`, or lshaz cannot tell those fields are atomic. The same
+  applies to allocators reached through a wrapper, via
+  `allocator_function_patterns`. 
 - **x86-64 is the default model** (64-byte lines, TSO). `--target-arch arm64`
-  changes the severity model, since a `seq_cst` load is free under TSO and
-  costs `LDAR` on ARM64.
-- **Scanning a library on its own** gives thin hot-path coverage, there's no
-  application to infer hot paths from. lshaz tells you when this happens.
+  changes the grading, since a `seq_cst` load is free under TSO and costs `LDAR`
+  on ARM64.
+- **Scanning a library on its own** gives thin hot-path coverage: there is no
+  application to infer hot paths from. lshaz reports when this happens.
 
 ## CI
 
-Drop-in GitHub Actions in `.github/workflows/`: [`lshaz-pr.yml`](.github/workflows/lshaz-pr.yml)
-gates merges on new findings, [`lshaz-sarif.yml`](.github/workflows/lshaz-sarif.yml)
-feeds the Security tab.
+Drop-in GitHub Actions in `.github/workflows/`:
+[`lshaz-pr.yml`](.github/workflows/lshaz-pr.yml) gates merges on new findings,
+[`lshaz-sarif.yml`](.github/workflows/lshaz-sarif.yml) feeds the Security tab.
 
 ## Going deeper
 
 | | |
 |---|---|
-| [Architecture](docs/architecture.md) | How the pipeline works, the evidence model, why output is deterministic |
+| [Architecture](docs/architecture.md) | The pipeline, the evidence model, why output is deterministic |
 | [Rules](docs/rules.md) | Every rule: mechanism, detection logic, severity ladder, fix |
 | [Configuration](docs/configuration.md) | Every flag and config key, hot-path annotation, suppression |
 | [Output formats](docs/output-formats.md) | JSON schema, SARIF, how to consume findings |
