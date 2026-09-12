@@ -2413,9 +2413,30 @@ static unsigned synthesizeUnappliedMitigation(
 // A rule cannot decide that: hasGlobalInstance is a per-TU fact, the record
 // lives in a header and its global lives in one .c, so at rule time the
 // answer is false almost everywhere it matters.
-static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
-                                         const EscapeSummary &summary) {
-    unsigned capped = 0;
+struct SharingRouteVerdict {
+    unsigned refuted = 0;  // no route, and absence of one is observable
+    unsigned capped  = 0;  // no route found, but the tracker could not have seen one
+    bool vocabularyDark = false;  // no thread route anywhere: see below
+};
+
+static SharingRouteVerdict
+applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
+                         const EscapeSummary &summary) {
+    SharingRouteVerdict out;
+
+    // Positive control on the thread-detection vocabulary before trusting any
+    // negative from it. Every route runs through a recognized thread-creation
+    // call or a global whose writer is thread-borne, so a codebase that
+    // spawns through its own wrapper presents exactly as a codebase that
+    // never spawns: the disjunction is false everywhere and each finding
+    // looks disproven. When nothing anywhere reports a route, the instrument
+    // is dark rather than the program single-threaded, and this caps instead.
+    // Same rule bench/accept.sh applies to perf c2c.
+    bool anyThreadRoute = false;
+    for (const auto &[name, sig] : summary)
+        if (sig.hasThreadRoute()) { anyThreadRoute = true; break; }
+    out.vocabularyDark = !anyThreadRoute;
+
     for (auto &d : diagnostics) {
         if (d.suppressed) continue;
         // Rules whose whole claim is cross-core contention on one object.
@@ -2424,7 +2445,7 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
         if (it == d.structuralEvidence.end() || it->second.empty()) continue;
         // ';'-separated: a compound may name several types. Any one of them
         // being shared leaves the finding alone.
-        bool anyShared = false, anyKnown = false;
+        bool anyShared = false, anyKnown = false, allRefuted = true;
         const std::string &ts = it->second;
         for (size_t start = 0; start < ts.size();) {
             size_t end = ts.find(';', start);
@@ -2436,6 +2457,7 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
                 if (sit != summary.end()) {
                     anyKnown = true;
                     if (sit->second.hasSharingRoute()) anyShared = true;
+                    if (!sit->second.sharingRouteRefuted()) allRefuted = false;
                 }
             }
             if (end == std::string::npos) break;
@@ -2444,16 +2466,31 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
         // Absent from the summary means unanalyzed, not disproven.
         if (!anyKnown || anyShared) continue;
 
+        // Every TU that saw this type reported no route to a shared instance,
+        // for reasons that hold of the program. That is the mechanism ruled
+        // out rather than unwitnessed: a line no second core ever holds stays
+        // in M state, so there is no RFO from a peer and no HITM to pay for.
+        const bool observable = allRefuted && !out.vocabularyDark;
         d.mechanismClaims.push_back(
             {"two threads reach the same instance",
              "some TU shows a shared instance and a thread-borne writer",
-             ClaimState::Unknown, Severity::Medium, /*gating=*/true});
-        d.escalations.push_back(
-            "no TU showed a thread reaching a shared instance of this type: "
-            "co-location is real, cross-core contention is not established");
-        ++capped;
+             observable ? ClaimState::Refuted : ClaimState::Unknown,
+             Severity::Medium, /*gating=*/true,
+             observable ? "no TU reported a shared instance with a "
+                          "thread-borne writer, across writes this analysis "
+                          "can see"
+                        : std::string{}});
+        if (observable) {
+            ++out.refuted;
+        } else {
+            d.escalations.push_back(
+                "no TU showed a thread reaching a shared instance of this "
+                "type: co-location is real, cross-core contention is not "
+                "established");
+            ++out.capped;
+        }
     }
-    return capped;
+    return out;
 }
 
 // Drop thread_escape findings on types that no TU ever showed escaping.
@@ -3443,12 +3480,21 @@ ScanResult ScanPipeline::run(
             report("cross_tu", std::to_string(crossTUSuppressed) +
                    " finding(s) suppressed (no cross-TU escape evidence)");
 
-        unsigned unshared = applySharingRouteVerdict(result.diagnostics,
-                                                     result.escapeSummary);
-        if (unshared > 0)
-            report("cross_tu", std::to_string(unshared) +
-                   " sharing finding(s) capped (no shared instance any TU "
+        SharingRouteVerdict route = applySharingRouteVerdict(
+            result.diagnostics, result.escapeSummary);
+        if (route.refuted > 0)
+            report("cross_tu", std::to_string(route.refuted) +
+                   " sharing finding(s) refuted (no shared instance any TU "
                    "reached)");
+        if (route.capped > 0)
+            report("cross_tu", std::to_string(route.capped) +
+                   " sharing finding(s) capped (no shared instance any TU "
+                   "reached, writes not observable)");
+        if (route.vocabularyDark && (route.capped > 0 || route.refuted > 0))
+            report("cross_tu",
+                   "no thread route found on any type in this scan: thread "
+                   "creation is unrecognized here, so no sharing finding was "
+                   "refuted on its absence");
     }
 
     // Thread-role reduce: verdicts from the merged facts. Runs on the

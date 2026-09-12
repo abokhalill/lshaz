@@ -132,6 +132,43 @@ struct TypeEscapeSignals {
                (hasGlobalInstance && hasThreadBorneWriter);
     }
 
+    // Whether "no writer anywhere" is a statement about the program rather
+    // than about the write tracker. The tracker sees assignments; a mutex, an
+    // array or a nested aggregate is routinely mutated through its address
+    // with no assignment to find. For a record holding one of those, silence
+    // is blindness, and a negative verdict built on it would convert that
+    // blindness into recall loss. No extents at all means nothing was
+    // examined, which is the same answer.
+    bool writesObservable() const {
+        if (fieldExtents.empty())
+            return false;
+        for (const auto &[name, e] : fieldExtents)
+            if (!e.plainScalar && !e.isAtomic)
+                return false;
+        return true;
+    }
+
+    // No thread reaches a shared instance, for a reason that is a fact about
+    // the program rather than a limit of the write tracker.
+    //
+    // hasSharingRoute() fails two ways and they do not carry the same weight.
+    // If standing writes were seen, the tracker demonstrably worked on this
+    // type and what remains is structural: whether any declaration or
+    // thread-creation argument puts a thread on a shared instance. If they
+    // were not, the verdict rests entirely on that absence, which only means
+    // something where such a write could have been seen.
+    bool sharingRouteRefuted() const {
+        if (hasSharingRoute())
+            return false;
+        return hasStandingWrites || writesObservable();
+    }
+
+    // Some thread route was found. Aggregated over every type in a scan this
+    // is a positive control on the thread-detection vocabulary itself.
+    bool hasThreadRoute() const {
+        return hasPublication || hasThreadWriters || hasThreadBorneWriter;
+    }
+
     bool hasAnyEscape() const {
         // hasGlobalInstance belongs here. Splitting it out of hasPublication
         // and forgetting this suppressed every type whose only evidence is

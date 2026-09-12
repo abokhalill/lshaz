@@ -279,6 +279,82 @@ void testEscapeSummaryStructuralVsPublication() {
     check(!none.hasAnyEscape(), "empty has no escape");
 }
 
+// The sharing-route verdict is the only negative in the analyzer strong
+// enough to retire a finding, so each way it can be wrong gets a case here.
+// Positive and negative both, because a predicate that never fires and a
+// predicate that always fires are equally invisible in a scan summary.
+void testSharingRouteRefutationSeparates() {
+    std::cerr << "test: sharing-route refutation separates program from tracker\n";
+    using namespace lshaz;
+
+    // Observed standing writes, no route: the tracker worked and no thread
+    // reaches a shared instance.
+    TypeEscapeSignals seen;
+    seen.hasStandingWrites = true;
+    check(!seen.hasSharingRoute(), "standing writes alone are not a route");
+    check(seen.sharingRouteRefuted(),
+          "a working tracker finding no route refutes the mechanism");
+
+    // A route present is never a refutation, however the writes look.
+    TypeEscapeSignals shared = seen;
+    shared.hasPublication = true;
+    check(shared.hasSharingRoute(), "publication is a route");
+    check(!shared.sharingRouteRefuted(), "a live route is not refuted");
+
+    // No standing write, and a field whose writes the tracker cannot see.
+    // Absence here is the tracker's, not the program's.
+    TypeEscapeSignals blind;
+    blind.fieldExtents["buf"] = FieldExtent{0, 64, false, /*plainScalar=*/false};
+    check(!blind.writesObservable(), "an aggregate field hides writes");
+    check(!blind.sharingRouteRefuted(),
+          "silence about an unobservable field refutes nothing");
+
+    // Same shape, but every mutable field is a plain scalar: had there been a
+    // write, it would have been an assignment the tracker sees.
+    TypeEscapeSignals scalars;
+    scalars.fieldExtents["head"] = FieldExtent{0, 8, false, /*plainScalar=*/true};
+    scalars.fieldExtents["tail"] = FieldExtent{8, 8, false, /*plainScalar=*/true};
+    check(scalars.writesObservable(), "plain scalars are observable");
+    check(scalars.sharingRouteRefuted(),
+          "observable silence about every field is a program fact");
+
+    // An atomic is observable too: stores go through the atomic API.
+    TypeEscapeSignals atomics;
+    atomics.fieldExtents["seq"] = FieldExtent{0, 8, /*isAtomic=*/true, false};
+    check(atomics.writesObservable(), "atomic writes are observable");
+
+    // Nothing examined is not the same as nothing found.
+    TypeEscapeSignals empty;
+    check(!empty.writesObservable(), "no extents means nothing was examined");
+    check(!empty.sharingRouteRefuted(), "an unexamined type is not refuted");
+}
+
+// A scan whose thread-creation vocabulary matched nothing anywhere looks
+// exactly like a single-threaded program. Refuting on that absence would turn
+// a wrapped pthread_create into silent recall loss across the whole corpus.
+void testThreadRouteIsItsOwnPositiveControl() {
+    std::cerr << "test: thread route doubles as a vocabulary positive control\n";
+    using namespace lshaz;
+
+    EscapeSummary dark;
+    dark["Ring"].hasStandingWrites = true;
+    dark["Slab"].hasGlobalInstance = true;
+    bool anyRoute = false;
+    for (const auto &[n, s] : dark)
+        if (s.hasThreadRoute()) anyRoute = true;
+    check(!anyRoute, "no type reports a route when nothing spawns a thread");
+    check(dark["Ring"].sharingRouteRefuted(),
+          "the per-type verdict still reads refuted, which is why the "
+          "scan-level control exists to override it");
+
+    EscapeSummary live = dark;
+    live["Conn"].hasThreadWriters = true;
+    anyRoute = false;
+    for (const auto &[n, s] : live)
+        if (s.hasThreadRoute()) anyRoute = true;
+    check(anyRoute, "one thread-borne type proves the vocabulary matches");
+}
+
 void testEscapeSummaryIPCRoundTrip() {
     std::cerr << "test: EscapeSummary IPC round-trip via JSON\n";
     using namespace lshaz;
@@ -840,6 +916,8 @@ int main() {
     testEscapeSummaryMergeDisjoint();
     testEscapeSummaryMergeAccessorAccumulation();
     testEscapeSummaryStructuralVsPublication();
+    testSharingRouteRefutationSeparates();
+    testThreadRouteIsItsOwnPositiveControl();
     testEscapeSummaryIPCRoundTrip();
     testCrossTUSuppressionWithSummary();
     testCrossTUSuppressionPreservesProven();
