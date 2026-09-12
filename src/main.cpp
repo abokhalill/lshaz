@@ -14,8 +14,24 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstring>
+#include <csignal>
+#include <unistd.h>
+
+namespace {
+
+void onInterrupt(int) {
+    static const char msg[] = "\nlshaz: interrupted, no results written\n";
+    ssize_t ignored = ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    (void)ignored;
+    ::_exit(130);
+}
+
+} // namespace
 
 int main(int argc, const char **argv) {
+    std::signal(SIGINT, onInterrupt);
+    std::signal(SIGTERM, onInterrupt);
+
     if (argc >= 2 && std::strcmp(argv[1], "scan") == 0)
         return lshaz::runScanCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "explain") == 0)
@@ -42,10 +58,13 @@ int main(int argc, const char **argv) {
         return 0;
     }
 
-    if (argc < 2 || std::strcmp(argv[1], "help") == 0 ||
-        std::strcmp(argv[1], "--help") == 0 ||
-        std::strcmp(argv[1], "-h") == 0) {
-        llvm::outs()
+    const bool askedForHelp =
+        argc >= 2 && (std::strcmp(argv[1], "help") == 0 ||
+                      std::strcmp(argv[1], "--help") == 0 ||
+                      std::strcmp(argv[1], "-h") == 0);
+    if (argc < 2 || askedForHelp) {
+        llvm::raw_ostream &out = askedForHelp ? llvm::outs() : llvm::errs();
+        out
             << "lshaz " << lshaz::kToolVersion << "\n"
             << "Static analysis for microarchitectural latency hazards in C++\n"
             << "\n"
@@ -63,7 +82,7 @@ int main(int argc, const char **argv) {
             << "  lshaz help                    Show this help\n"
             << "\n"
             << "Run 'lshaz scan --help' for scan options.\n";
-        return 0;
+        return askedForHelp ? 0 : 3;
     }
 
     llvm::errs() << "lshaz: unknown command '" << argv[1] << "'\n\n"

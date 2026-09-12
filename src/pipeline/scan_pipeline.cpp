@@ -2626,6 +2626,11 @@ static void filterAndSort(const FilterOptions &filter,
                            if (static_cast<uint8_t>(d.evidenceTier) >
                                static_cast<uint8_t>(filter.minEvidenceTier))
                                return true;
+                           if (!filter.onlyRules.empty() &&
+                               std::find(filter.onlyRules.begin(),
+                                         filter.onlyRules.end(),
+                                         d.ruleID) == filter.onlyRules.end())
+                               return true;
                            return false;
                        }),
         diagnostics.end());
@@ -3914,12 +3919,7 @@ ScanResult ScanPipeline::run(
         report("tlb", std::to_string(pagingDemoted) +
                " FL070 finding(s) demoted (paging policy managed in-tree)");
 
-    // Cross-TU deduplication.
-    report("dedup", "");
     deduplicateDiagnostics(result.diagnostics);
-
-    // Interaction synthesis.
-    report("interactions", "");
     synthesizeInteractions(result.diagnostics);
 
     // FL092 precedent join.

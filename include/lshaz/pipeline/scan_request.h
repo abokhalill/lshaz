@@ -28,6 +28,9 @@ struct FeedbackOptions {
 struct FilterOptions {
     Severity minSeverity          = Severity::Informational;
     EvidenceTier minEvidenceTier  = EvidenceTier::Speculative;
+    // Rule allowlist from --rule. Empty means every rule.
+    std::vector<std::string> onlyRules;
+
     std::vector<std::string> includeFiles;
     std::vector<std::string> excludeFiles;
     unsigned maxFiles             = 0;  // 0 = unlimited

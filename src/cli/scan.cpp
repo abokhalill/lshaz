@@ -3,6 +3,7 @@
 
 #include "lshaz/core/config.h"
 #include "lshaz/core/registry.h"
+#include "lshaz/core/emitters.h"
 #include "lshaz/core/version.h"
 #include "lshaz/output/formatter.h"
 #include "lshaz/pipeline/repo.h"
@@ -28,9 +29,68 @@ namespace lshaz {
 
 namespace {
 
-void applyRuleFilter(Config &cfg,
+// Every ID the tool can emit: registered rules plus the reduce phase's own
+// emitters, which have no Rule object behind them.
+std::vector<std::string> allRuleIDs() {
+    std::vector<std::string> ids;
+    for (const auto &rule : RuleRegistry::instance().rules())
+        ids.emplace_back(rule->getID());
+    for (const auto &e : nonRuleEmitters())
+        ids.emplace_back(e.id);
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
+// Nearest known ID by a one-pass edit distance, for the "did you mean" line.
+std::string nearestRuleID(const std::string &want,
+                          const std::vector<std::string> &known) {
+    auto distance = [](const std::string &a, const std::string &b) {
+        std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
+        for (size_t j = 0; j <= b.size(); ++j) prev[j] = j;
+        for (size_t i = 1; i <= a.size(); ++i) {
+            cur[0] = i;
+            for (size_t j = 1; j <= b.size(); ++j)
+                cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1,
+                                   prev[j - 1] + (a[i - 1] != b[j - 1] ? 1 : 0)});
+            prev = cur;
+        }
+        return prev[b.size()];
+    };
+    std::string best;
+    size_t bestD = 3;  // beyond this it is a different name, not a typo
+    for (const auto &k : known) {
+        size_t d = distance(want, k);
+        if (d < bestD) { bestD = d; best = k; }
+    }
+    return best;
+}
+
+// Returns false when an ID names no rule. Silently ignoring one meant a typo
+// scanned everything and reported success, which is the filter answering a
+// question it was not asked.
+bool applyRuleFilter(Config &cfg, FilterOptions &filter,
                      const std::vector<std::string> &enabledRules) {
-    if (enabledRules.empty()) return;
+    if (enabledRules.empty()) return true;
+
+    const std::vector<std::string> known = allRuleIDs();
+    bool ok = true;
+    for (const auto &want : enabledRules) {
+        if (std::binary_search(known.begin(), known.end(), want)) continue;
+        llvm::errs() << "lshaz: unknown rule '" << want << "'\n";
+        const std::string near = nearestRuleID(want, known);
+        if (!near.empty())
+            llvm::errs() << "  did you mean '" << near << "'?\n";
+        ok = false;
+    }
+    if (!ok) {
+        llvm::errs() << "  run 'lshaz explain --list' for every rule ID\n";
+        return false;
+    }
+
+    // Both halves are needed. Disabling registered rules skips the work;
+    // the output filter is what reaches findings the reduce phase
+    // synthesizes, which no Rule object produces.
     std::unordered_set<std::string> enabled(enabledRules.begin(),
                                              enabledRules.end());
     for (const auto &rule : RuleRegistry::instance().rules()) {
@@ -38,6 +98,8 @@ void applyRuleFilter(Config &cfg,
         if (!enabled.count(id))
             cfg.disabledRules.push_back(id);
     }
+    filter.onlyRules = enabledRules;
+    return true;
 }
 
 struct ScanArgs {
@@ -97,7 +159,10 @@ void printScanUsage() {
         << "Options:\n"
         << "  -C, --compile-db <path>  Explicit path to compile_commands.json\n"
         << "  -c, --config <path>      Path to lshaz.config.yaml\n"
-        << "  -f, --format <fmt>       Output format: cli, json, sarif, tidy (default: cli)\n"
+        << "  -f, --format <fmt>       cli    full finding detail (default)\n"
+        << "                           tidy   one line per finding, clang-tidy style\n"
+        << "                           json   complete record, every evidence field\n"
+        << "                           sarif  SARIF 2.1.0 for code-scanning UIs\n"
         << "  -o, --output <path>      Write output to file instead of stdout\n"
         << "  -s, --min-severity <lv>  Minimum severity (Informational|Medium|High|Critical)\n"
         << "  -e, --min-evidence <t>   Minimum evidence tier (proven|likely|speculative)\n"
@@ -230,17 +295,37 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
     return true;
 }
 
-Severity parseSeverity(const std::string &s) {
-    if (s == "Critical") return Severity::Critical;
-    if (s == "High")     return Severity::High;
-    if (s == "Medium")   return Severity::Medium;
-    return Severity::Informational;
+std::string lowered(const std::string &s) {
+    std::string out = s;
+    for (char &c : out) c = static_cast<char>(std::tolower(
+        static_cast<unsigned char>(c)));
+    return out;
 }
 
-EvidenceTier parseEvidenceTier(const std::string &s) {
-    if (s == "proven") return EvidenceTier::Proven;
-    if (s == "likely") return EvidenceTier::Likely;
-    return EvidenceTier::Speculative;
+// Both of these used to fall back to the weakest value on an unrecognized
+// name, so a typo asked to narrow and got everything back. Case is accepted
+// in any form: --min-severity critical meaning Informational is the same
+// silent widening by another route.
+bool parseSeverity(const std::string &s, Severity &out) {
+    const std::string k = lowered(s);
+    if (k == "critical")      { out = Severity::Critical;      return true; }
+    if (k == "high")          { out = Severity::High;          return true; }
+    if (k == "medium")        { out = Severity::Medium;        return true; }
+    if (k == "informational") { out = Severity::Informational; return true; }
+    llvm::errs() << "lshaz: unknown severity '" << s
+                 << "'\n  expected one of: Critical, High, Medium, "
+                    "Informational\n";
+    return false;
+}
+
+bool parseEvidenceTier(const std::string &s, EvidenceTier &out) {
+    const std::string k = lowered(s);
+    if (k == "proven")      { out = EvidenceTier::Proven;      return true; }
+    if (k == "likely")      { out = EvidenceTier::Likely;      return true; }
+    if (k == "speculative") { out = EvidenceTier::Speculative; return true; }
+    llvm::errs() << "lshaz: unknown evidence tier '" << s
+                 << "'\n  expected one of: proven, likely, speculative\n";
+    return false;
 }
 
 // false on unknown arch (caller exits 3). shared by both scan modes so
@@ -347,8 +432,11 @@ int runScanCommand(int argc, const char **argv) {
 
         if (!applyTargetArch(request.config, args.targetArch))
             return 3;
-        request.config.minSeverity = parseSeverity(args.minSeverity);
-        applyRuleFilter(request.config, args.enabledRules);
+        if (!parseSeverity(args.minSeverity, request.config.minSeverity))
+            return 3;
+        if (!applyRuleFilter(request.config, request.filter,
+                             args.enabledRules))
+            return 3;
         request.ir.enabled = !args.noIR;
         request.ir.optLevel = args.irOpt;
         request.ir.cacheEnabled = !args.noIRCache;
@@ -360,7 +448,8 @@ int runScanCommand(int argc, const char **argv) {
         request.perfProfilePath = args.perfProfile;
         request.hotnessThreshold = args.hotnessThreshold;
         request.filter.minSeverity = request.config.minSeverity;
-        request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
+        if (!parseEvidenceTier(args.minEvidence, request.filter.minEvidenceTier))
+            return 3;
         const std::string singleFormat =
             args.formatGiven ? args.format
                              : (request.config.jsonOutput ? "json" : "cli");
@@ -443,8 +532,8 @@ int runScanCommand(int argc, const char **argv) {
     if (!args.workloadCyclesPerOp.empty())
         cfg.workloadCyclesPerOp =
             static_cast<unsigned>(std::stoul(args.workloadCyclesPerOp));
-    cfg.minSeverity = parseSeverity(args.minSeverity);
-    applyRuleFilter(cfg, args.enabledRules);
+    if (!parseSeverity(args.minSeverity, cfg.minSeverity))
+        return 3;
 
     ScanRequest request;
     request.config = cfg;
@@ -471,8 +560,11 @@ int runScanCommand(int argc, const char **argv) {
     request.feedback.pmuPriorsPath = args.pmuPriors;
 
     request.filter.minSeverity = cfg.minSeverity;
-    request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
+    if (!parseEvidenceTier(args.minEvidence, request.filter.minEvidenceTier))
+        return 3;
     request.filter.maxFiles = args.maxFiles;
+    if (!applyRuleFilter(request.config, request.filter, args.enabledRules))
+        return 3;
     request.filter.includeFiles = args.includeFiles;
     request.filter.excludeFiles = args.excludeFiles;
     request.filter.skipVendored = cfg.skipVendored && !args.includeVendored;
