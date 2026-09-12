@@ -209,16 +209,6 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
 
     v.contention = score > 1.0 ? 1.0 : score;
 
-    // Access pattern: atomics -> RMW, volatile alone -> read-heavy (MMIO/signal).
-    if (v.hasAtomics)
-        v.pattern = AccessPattern::ReadWrite;
-    else if (v.hasVolatile && !v.hasSyncPrims)
-        v.pattern = AccessPattern::ReadOnly;
-    else if (v.hasSyncPrims)
-        v.pattern = AccessPattern::ReadWrite;
-    else if (v.hasSharedOwner || v.hasPublication)
-        v.pattern = AccessPattern::ReadOnly;
-
     return v;
 }
 

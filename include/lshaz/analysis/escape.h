@@ -20,19 +20,10 @@
 
 namespace lshaz {
 
-enum class AccessPattern : uint8_t {
-    None       = 0,
-    ReadOnly   = 1,
-    WriteOnce  = 2,
-    ReadWrite  = 3,
-    WriteHeavy = 4, // worst coherence cost
-};
-
 // contention  in  [0.0, 1.0]. 0 = no cross-thread sharing expected.
 struct EscapeVerdict {
     bool escapes          = false;
     double contention     = 0.0;
-    AccessPattern pattern = AccessPattern::None;
 
     bool hasAtomics       = false;
     bool hasSyncPrims     = false;
