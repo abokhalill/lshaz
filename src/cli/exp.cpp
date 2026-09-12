@@ -13,8 +13,13 @@
 namespace lshaz {
 
 int runExpCommand(int argc, const char **argv) {
-    if (argc < 1 || (argc == 1 && std::strcmp(argv[0], "--help") == 0)) {
-        llvm::errs()
+    // Help is a success on stdout; no argument at all is a bad invocation.
+    const bool askedForHelp =
+        argc >= 1 && (std::strcmp(argv[0], "--help") == 0 ||
+                      std::strcmp(argv[0], "-h") == 0);
+    if (argc < 1 || askedForHelp) {
+        llvm::raw_ostream &o = askedForHelp ? llvm::outs() : llvm::errs();
+        o
             << "Usage: lshaz exp <scan-result.json> [options]\n\n"
             << "Synthesize experiment bundles from scan diagnostics.\n\n"
             << "Options:\n"
@@ -24,7 +29,7 @@ int runExpCommand(int argc, const char **argv) {
             << "  --sku <name>   CPU SKU family (default: generic)\n"
             << "  --dry-run      Show what would be generated without writing\n"
             << "  --help         Show this help\n";
-        return 0;
+        return askedForHelp ? 0 : 3;
     }
 
     const char *inputPath = argv[0];

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "diff.h"
 
+#include "lshaz/core/version.h"
+
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -138,7 +140,37 @@ struct ScanMeta {
 struct ParsedScan {
     std::vector<DiagEntry> diags;
     ScanMeta meta;
+    bool valid = false;
 };
+
+bool looksLikeScanResult(const std::string &json, const std::string &path) {
+    if (json.find("\"schemaVersion\"") == std::string::npos ||
+        json.find("\"diagnostics\"") == std::string::npos) {
+        llvm::errs() << "lshaz diff: '" << path
+                     << "' is not an lshaz scan result"
+                        " (no schemaVersion/diagnostics key)\n"
+                        "  produce one with: lshaz scan <path> -f json -o "
+                     << path << "\n";
+        return false;
+    }
+    // Major version only: added fields are compatible, changed meanings are
+    // not, and confidence changed meaning between 1.x and 2.x.
+    const std::string key = "\"schemaVersion\": \"";
+    auto at = json.find(key);
+    if (at != std::string::npos) {
+        at += key.size();
+        auto end = json.find('"', at);
+        const std::string got = json.substr(at, end - at);
+        const std::string want = kOutputSchemaVersion;
+        if (got.substr(0, got.find('.')) != want.substr(0, want.find('.'))) {
+            llvm::errs() << "lshaz diff: '" << path << "' is schema " << got
+                         << ", this build reads " << want
+                         << "\n  regenerate it with this version of lshaz\n";
+            return false;
+        }
+    }
+    return true;
+}
 
 ParsedScan parseDiagFile(const std::string &path) {
     auto bufOrErr = llvm::MemoryBuffer::getFile(path);
@@ -149,8 +181,11 @@ ParsedScan parseDiagFile(const std::string &path) {
     }
 
     std::string json = (*bufOrErr)->getBuffer().str();
+    if (!looksLikeScanResult(json, path))
+        return {};
 
     ParsedScan result;
+    result.valid = true;
 
     // Extract metadata from top-level JSON.
     auto metaPos = json.find("\"metadata\"");
@@ -247,8 +282,9 @@ void printDistribution(const char *label,
     if (headerPrinted) llvm::outs() << "\n";
 }
 
-void printDiffUsage() {
-    llvm::errs()
+void printDiffUsage(bool asError) {
+    llvm::raw_ostream &o = asError ? llvm::errs() : llvm::outs();
+    o
         << "Usage: lshaz diff <before.json> <after.json>\n"
         << "\n"
         << "Compare two lshaz JSON scan results and report:\n"
@@ -266,18 +302,18 @@ void printDiffUsage() {
 
 int runDiffCommand(int argc, const char **argv) {
     if (argc < 1) {
-        printDiffUsage();
+        printDiffUsage(/*asError=*/true);
         return 3;
     }
     if (std::strcmp(argv[0], "--help") == 0 ||
         std::strcmp(argv[0], "-h") == 0) {
-        printDiffUsage();
+        printDiffUsage(/*asError=*/false);
         return 0;
     }
 
     if (argc < 2) {
         llvm::errs() << "lshaz diff: expected two JSON files\n\n";
-        printDiffUsage();
+        printDiffUsage(/*asError=*/true);
         return 3;
     }
 
@@ -286,6 +322,8 @@ int runDiffCommand(int argc, const char **argv) {
 
     auto beforeScan = parseDiagFile(beforePath);
     auto afterScan = parseDiagFile(afterPath);
+    if (!beforeScan.valid || !afterScan.valid)
+        return 3;
     auto &before = beforeScan.diags;
     auto &after = afterScan.diags;
 

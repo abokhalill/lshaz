@@ -24,8 +24,9 @@
 namespace lshaz {
 namespace {
 
-void printFixUsage() {
-    llvm::errs()
+void printFixUsage(bool asError) {
+    llvm::raw_ostream &o = asError ? llvm::errs() : llvm::outs();
+    o
         << "Usage: lshaz fix <path> [options]\n"
         << "\n"
         << "Apply mechanical auto-remediation for fixable diagnostics.\n"
@@ -234,16 +235,16 @@ void applyEdits(const std::vector<SourceEdit> &edits, bool dryRun) {
 int runFixCommand(int argc, const char **argv) {
     FixArgs args;
     if (!parseFixArgs(argc, argv, args)) {
-        printFixUsage();
+        printFixUsage(/*asError=*/true);
         return 3;
     }
     if (args.help) {
-        printFixUsage();
+        printFixUsage(/*asError=*/false);
         return 0;
     }
     if (args.target.empty()) {
         llvm::errs() << "lshaz fix: missing target path\n\n";
-        printFixUsage();
+        printFixUsage(/*asError=*/true);
         return 3;
     }
 

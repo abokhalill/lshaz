@@ -499,8 +499,9 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
                         "build before scanning (generated headers)\n";
 }
 
-void printInitUsage() {
-    llvm::errs()
+void printInitUsage(bool asError) {
+    llvm::raw_ostream &o = asError ? llvm::errs() : llvm::outs();
+    o
         << "Usage: lshaz init [path] [options]\n"
         << "\n"
         << "Initialize a project for lshaz analysis.\n"
@@ -533,7 +534,7 @@ int runInitCommand(int argc, const char **argv) {
     for (int i = 0; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0 ||
             std::strcmp(argv[i], "-h") == 0) {
-            printInitUsage();
+            printInitUsage(/*asError=*/false);
             return 0;
         }
         if (std::strcmp(argv[i], "--no-config") == 0) { noConfig = true; continue; }
@@ -541,7 +542,7 @@ int runInitCommand(int argc, const char **argv) {
         if (std::strcmp(argv[i], "--build") == 0 || std::strcmp(argv[i], "-b") == 0) { fullBuild = true; continue; }
         if (argv[i][0] == '-') {
             llvm::errs() << "lshaz init: unknown option '" << argv[i] << "'\n";
-            printInitUsage();
+            printInitUsage(/*asError=*/true);
             return 3;
         }
         target = argv[i];

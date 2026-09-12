@@ -40,8 +40,13 @@ std::string hypothesisToJson(const LatencyHypothesis &h) {
 } // anonymous namespace
 
 int runHypCommand(int argc, const char **argv) {
-    if (argc < 1 || (argc == 1 && std::strcmp(argv[0], "--help") == 0)) {
-        llvm::errs()
+    // Help is a success on stdout; no argument at all is a bad invocation.
+    const bool askedForHelp =
+        argc >= 1 && (std::strcmp(argv[0], "--help") == 0 ||
+                      std::strcmp(argv[0], "-h") == 0);
+    if (argc < 1 || askedForHelp) {
+        llvm::raw_ostream &o = askedForHelp ? llvm::outs() : llvm::errs();
+        o
             << "Usage: lshaz hyp <scan-result.json> [options]\n\n"
             << "Construct latency hypotheses from scan diagnostics.\n\n"
             << "Options:\n"
@@ -49,7 +54,7 @@ int runHypCommand(int argc, const char **argv) {
             << "  --rule <id>          Only hypothesize for a specific rule ID\n"
             << "  --min-conf <f>       Minimum confidence threshold (default: 0.0)\n"
             << "  --help               Show this help\n";
-        return 0;
+        return askedForHelp ? 0 : 3;
     }
 
     const char *inputPath = argv[0];

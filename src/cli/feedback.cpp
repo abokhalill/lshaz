@@ -179,8 +179,13 @@ std::optional<HazardClass> parseHazardClass(llvm::StringRef name) {
 } // anonymous namespace
 
 int runFeedbackCommand(int argc, const char **argv) {
-    if (argc < 1 || (argc == 1 && std::strcmp(argv[0], "--help") == 0)) {
-        llvm::errs()
+    // Help is a success on stdout; no argument at all is a bad invocation.
+    const bool askedForHelp =
+        argc >= 1 && (std::strcmp(argv[0], "--help") == 0 ||
+                      std::strcmp(argv[0], "-h") == 0);
+    if (argc < 1 || askedForHelp) {
+        llvm::raw_ostream &o = askedForHelp ? llvm::outs() : llvm::errs();
+        o
             << "Usage: lshaz feedback <experiment-dir> [options]\n\n"
             << "Ingest experiment results into the calibration feedback store.\n\n"
             << "Reads hypothesis.json + results/{treatment,control}_samples.bin\n"
@@ -191,7 +196,7 @@ int runFeedbackCommand(int argc, const char **argv) {
             << "  --alpha <f>     Significance level (default: 0.01)\n"
             << "  --json          Output verdict as JSON\n"
             << "  --help          Show this help\n";
-        return 0;
+        return askedForHelp ? 0 : 3;
     }
 
     const char *expDir = argv[0];

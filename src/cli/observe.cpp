@@ -242,8 +242,11 @@ std::set<std::string> parseExecutedSymbols(const std::string &text) {
     return out;
 }
 
-void usage() {
-    llvm::outs()
+// Explicit --help is a success and belongs on stdout; every other route here
+// is a bad invocation and belongs on stderr.
+void usage(bool asError = true) {
+    llvm::raw_ostream &o = asError ? llvm::errs() : llvm::outs();
+    o
         << "Usage: lshaz observe --profile <c2c.txt> --findings <scan.json> "
            "[options]\n\n"
         << "Feeds a hardware profile back into the cost model. Findings are\n"
@@ -310,11 +313,12 @@ int runObserveCommand(int argc, const char **argv) {
             if (eq == std::string::npos) {
                 llvm::errs() << "lshaz: error: --evidence wants "
                                 "family=path, got " << spec << "\n";
-                return 2;
+                return 3;
             }
             evidenceArgs.emplace_back(spec.substr(0, eq), spec.substr(eq + 1));
         }
-        else if (a == "--machine") machineName = next("--machine");
+        else if (a == "--machine" || a == "--machine-name")
+            machineName = next(a.c_str());
         else if (a == "--workload") workloadName = next("--workload");
         else if (a == "--ops") ops = std::strtoull(next("--ops"), nullptr, 10);
         else if (a == "--hitm-events")
@@ -324,16 +328,16 @@ int runObserveCommand(int argc, const char **argv) {
         else if (a == "--top")
             top = static_cast<unsigned>(std::strtoul(next("--top"), nullptr, 10));
         else if (a == "--write") write = true;
-        else if (a == "--help" || a == "-h") { usage(); return 0; }
+        else if (a == "--help" || a == "-h") { usage(/*asError=*/false); return 0; }
         else {
             llvm::errs() << "lshaz: error: unknown option " << a << "\n";
-            return 2;
+            return 3;
         }
     }
 
     if (profilePath.empty() || findingsPath.empty()) {
         usage();
-        return 2;
+        return 3;
     }
 
     Config cfg = configPath.empty() ? Config::defaults()

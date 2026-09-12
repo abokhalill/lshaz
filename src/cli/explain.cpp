@@ -12,12 +12,18 @@ namespace lshaz {
 int runExplainCommand(int argc, const char **argv) {
     const auto &rules = RuleRegistry::instance().rules();
 
-    if (argc < 1 || (argc == 1 && std::strcmp(argv[0], "--help") == 0)) {
-        llvm::errs() << "Usage: lshaz explain <rule-id>\n"
-                     << "       lshaz explain --list\n"
-                     << "\n"
-                     << "Show detailed documentation for a diagnostic rule.\n";
-        return 0;
+    // Asking for help is a success on stdout. Being given nothing to explain
+    // is a bad invocation on stderr.
+    const bool askedForHelp =
+        argc >= 1 && (std::strcmp(argv[0], "--help") == 0 ||
+                      std::strcmp(argv[0], "-h") == 0);
+    if (argc < 1 || askedForHelp) {
+        llvm::raw_ostream &o = askedForHelp ? llvm::outs() : llvm::errs();
+        o << "Usage: lshaz explain <rule-id>\n"
+          << "       lshaz explain --list\n"
+          << "\n"
+          << "Show detailed documentation for a diagnostic rule.\n";
+        return askedForHelp ? 0 : 3;
     }
 
     if (std::strcmp(argv[0], "--list") == 0) {

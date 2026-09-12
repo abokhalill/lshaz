@@ -1416,6 +1416,44 @@ void testExitCodeClean(const std::string &bin, const std::string &fixture) {
     fs::remove_all(tmp);
 }
 
+// diff is the CI gate, so an input it cannot read has to fail closed. Reading
+// a corrupt "after" as a scan with no findings reported every finding as
+// resolved and exited 0, turning a truncated artifact into a green build.
+void testDiffRejectsNonScanInput(const std::string &bin,
+                                 const std::string &fixture) {
+    std::cerr << "test: diff refuses input that is not a scan result\n";
+    auto tmp = isolateFixture(fixture, "diffguard");
+    auto project = (tmp / "project").string();
+    const std::string good = (tmp / "good.json").string();
+    const std::string junk = (tmp / "junk.json").string();
+    const std::string trunc = (tmp / "trunc.json").string();
+
+    run(bin + " scan " + project + " --no-ir -f json -o " + good);
+    { std::ofstream o(junk); o << "{\"not\":\"a scan result\"}"; }
+    {
+        std::ifstream in(good);
+        std::string head(400, '\0');
+        in.read(&head[0], 400);
+        head.resize(in.gcount());
+        std::ofstream o(trunc); o << head;
+    }
+
+    check(run(bin + " diff " + good + " " + good).exitCode == 0,
+          "a real scan compared with itself is clean");
+    check(run(bin + " diff " + good + " " + junk).exitCode == 3,
+          "a wrong-shaped after is rejected, not read as all-resolved");
+    check(run(bin + " diff " + junk + " " + good).exitCode == 3,
+          "and rejected as a before too");
+    check(run(bin + " diff " + good + " " + trunc).exitCode == 3,
+          "a truncated after is rejected");
+
+    auto r = run(bin + " diff " + good + " " + junk);
+    check(r.err.find("not an lshaz scan result") != std::string::npos,
+          "the reason names what is wrong, on stderr");
+
+    fs::remove_all(tmp);
+}
+
 } // anonymous namespace
 
 int main() {
@@ -1492,6 +1530,7 @@ int main() {
 
     // Exit code semantics.
     testExitCodeClean(bin, fixture);
+    testDiffRejectsNonScanInput(bin, fixture);
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
