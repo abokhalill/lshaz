@@ -185,30 +185,6 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
             v.accessorCount = it->second;
     }
 
-    if (!v.escapes)
-        return v;
-
-    // Contention scoring: weights reflect coherence invalidation cost.
-    // atomics > volatile > sync > shared_ptr > publication
-    double score = 0.0;
-    if (v.hasAtomics)     score += 0.40;
-    if (v.hasVolatile)    score += 0.25;
-    if (v.hasSyncPrims)   score += 0.15;
-    if (v.hasSharedOwner) score += 0.10;
-    if (v.hasPublication) score += 0.10;
-    if (v.hasThreadWriters) score += 0.20;
-    if (v.hasAtomics && v.hasSyncPrims)
-        score += 0.15; // compound: lock + atomic = contended
-
-    // Accessor count modulation: single-accessor = init-only pattern.
-    // Many accessors = wider contention surface.
-    if (v.accessorCount <= 1)
-        score *= 0.5;
-    else if (v.accessorCount >= 6)
-        score = std::min(score * 1.2, 1.0);
-
-    v.contention = score > 1.0 ? 1.0 : score;
-
     return v;
 }
 
@@ -336,6 +312,23 @@ std::string EscapeAnalysis::globalInstanceNames(
         out += n;
     }
     return out;
+}
+
+std::string EscapeVerdict::escapeSignals() const {
+    std::string out;
+    auto add = [&](bool on, const char *name) {
+        if (!on) return;
+        if (!out.empty()) out += ',';
+        out += name;
+    };
+    add(hasAtomics, "atomic");
+    add(hasVolatile, "volatile");
+    add(hasSyncPrims, "sync");
+    add(hasSharedOwner, "shared_ptr");
+    add(hasPublication, "publication");
+    add(hasThreadWriters, "thread_writers");
+    add(hasGlobalInstance, "global_instance");
+    return out.empty() ? "none" : out;
 }
 
 bool EscapeAnalysis::hasStandingWrites(const clang::RecordDecl *RD) const {

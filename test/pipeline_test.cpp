@@ -7,6 +7,7 @@
 #include "lshaz/hypothesis/pmu_calibration.h"
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/core/diagnostic.h"
+#include "lshaz/core/ladder.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/repo.h"
 #include "lshaz/pipeline/filter.h"
@@ -279,38 +280,30 @@ void testEscapeSummaryStructuralVsPublication() {
     check(!none.hasAnyEscape(), "empty has no escape");
 }
 
-// The sharing-route verdict is the only negative in the analyzer strong
-// enough to retire a finding, so each way it can be wrong gets a case here.
-// Positive and negative both, because a predicate that never fires and a
-// predicate that always fires are equally invisible in a scan summary.
+// The only negative strong enough to retire a finding. A predicate that never
+// fires and one that always fires are equally invisible in a scan summary, so
+// both directions are pinned here.
 void testSharingRouteRefutationSeparates() {
     std::cerr << "test: sharing-route refutation separates program from tracker\n";
     using namespace lshaz;
 
-    // Observed standing writes, no route: the tracker worked and no thread
-    // reaches a shared instance.
     TypeEscapeSignals seen;
     seen.hasStandingWrites = true;
     check(!seen.hasSharingRoute(), "standing writes alone are not a route");
     check(seen.sharingRouteRefuted(),
           "a working tracker finding no route refutes the mechanism");
 
-    // A route present is never a refutation, however the writes look.
     TypeEscapeSignals shared = seen;
     shared.hasPublication = true;
     check(shared.hasSharingRoute(), "publication is a route");
     check(!shared.sharingRouteRefuted(), "a live route is not refuted");
 
-    // No standing write, and a field whose writes the tracker cannot see.
-    // Absence here is the tracker's, not the program's.
     TypeEscapeSignals blind;
     blind.fieldExtents["buf"] = FieldExtent{0, 64, false, /*plainScalar=*/false};
     check(!blind.writesObservable(), "an aggregate field hides writes");
     check(!blind.sharingRouteRefuted(),
           "silence about an unobservable field refutes nothing");
 
-    // Same shape, but every mutable field is a plain scalar: had there been a
-    // write, it would have been an assignment the tracker sees.
     TypeEscapeSignals scalars;
     scalars.fieldExtents["head"] = FieldExtent{0, 8, false, /*plainScalar=*/true};
     scalars.fieldExtents["tail"] = FieldExtent{8, 8, false, /*plainScalar=*/true};
@@ -318,20 +311,17 @@ void testSharingRouteRefutationSeparates() {
     check(scalars.sharingRouteRefuted(),
           "observable silence about every field is a program fact");
 
-    // An atomic is observable too: stores go through the atomic API.
     TypeEscapeSignals atomics;
     atomics.fieldExtents["seq"] = FieldExtent{0, 8, /*isAtomic=*/true, false};
     check(atomics.writesObservable(), "atomic writes are observable");
 
-    // Nothing examined is not the same as nothing found.
     TypeEscapeSignals empty;
     check(!empty.writesObservable(), "no extents means nothing was examined");
     check(!empty.sharingRouteRefuted(), "an unexamined type is not refuted");
 }
 
-// A scan whose thread-creation vocabulary matched nothing anywhere looks
-// exactly like a single-threaded program. Refuting on that absence would turn
-// a wrapped pthread_create into silent recall loss across the whole corpus.
+// An unmatched thread-creation vocabulary looks exactly like a single-threaded
+// program, so a wrapped pthread_create would become corpus-wide recall loss.
 void testThreadRouteIsItsOwnPositiveControl() {
     std::cerr << "test: thread route doubles as a vocabulary positive control\n";
     using namespace lshaz;
@@ -344,8 +334,8 @@ void testThreadRouteIsItsOwnPositiveControl() {
         if (s.hasThreadRoute()) anyRoute = true;
     check(!anyRoute, "no type reports a route when nothing spawns a thread");
     check(dark["Ring"].sharingRouteRefuted(),
-          "the per-type verdict still reads refuted, which is why the "
-          "scan-level control exists to override it");
+          "the per-type verdict reads refuted, so the override must be "
+          "scan-level");
 
     EscapeSummary live = dark;
     live["Conn"].hasThreadWriters = true;
@@ -793,6 +783,27 @@ void testMechanismClaimCeiling() {
 
 // Refutation is a verdict, not a low score. An evidence source that looked
 // for a precondition and found it absent retires the finding by name.
+void testLadderRankIsOrdinal() {
+    std::cerr << "test: ladder rank is ordinal and never claims certainty\n";
+    using namespace lshaz;
+
+    enum class Four : unsigned { A, B, C, D, Count };
+    check(rungRank(Four::A) < rungRank(Four::B), "rank rises with position");
+    check(rungRank(Four::B) < rungRank(Four::C), "rank rises with position");
+    check(rungRank(Four::C) < rungRank(Four::D), "rank rises with position");
+    check(rungRank(Four::A) > 0.0, "a finding that exists clears the bottom");
+    check(rungRank(Four::D) < 1.0, "the best rung of one rule is not certainty");
+    check(ladderSize<Four>() == 4, "Count is the length, not a rung");
+
+    enum class Two : unsigned { A, B, Count };
+    check(rungRank(Two::A) > rungRank(Four::A),
+          "a shorter ladder spreads its rungs wider");
+    check(rungRank(Two::B) < 1.0, "still no certainty on a two-rung ladder");
+
+    enum class One : unsigned { Only, Count };
+    check(rungRank(One::Only) == 0.5, "nothing to rank sits in the middle");
+}
+
 void testRefutationWithdrawsTheFinding() {
     std::cerr << "test: a refuted precondition withdraws the finding\n";
     lshaz::Diagnostic d;
@@ -934,6 +945,7 @@ int main() {
 
     // PMU instrument election
     testMechanismClaimCeiling();
+    testLadderRankIsOrdinal();
     testRefutationWithdrawsTheFinding();
     testPMUCliffAtLineSize();
     testPMUCliffRejectsWrongMechanism();

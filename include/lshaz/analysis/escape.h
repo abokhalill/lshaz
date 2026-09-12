@@ -20,10 +20,8 @@
 
 namespace lshaz {
 
-// contention  in  [0.0, 1.0]. 0 = no cross-thread sharing expected.
 struct EscapeVerdict {
     bool escapes          = false;
-    double contention     = 0.0;
 
     bool hasAtomics       = false;
     bool hasSyncPrims     = false;
@@ -45,19 +43,24 @@ struct EscapeVerdict {
 
     unsigned accessorCount = 0; // distinct functions touching this type in TU
 
+    // An address became reachable but nothing names a writer. Coherence cost
+    // needs one, so this is a mechanism distinction and not a shade of doubt.
+    bool escapesByRouteOnly() const {
+        return escapes && !hasAtomics && !hasVolatile && !hasSyncPrims &&
+               !hasThreadWriters;
+    }
+
+    // The signals that fired, for the evidence block.
+    std::string escapeSignals() const;
+
     operator bool() const { return escapes; }
 };
 
 // Thread-escape analysis with both structural and interprocedural evidence.
 //
-// escapes is the disjunction of the seven positive signals below, so it reads
-// "one of these was found here" and not "this object is shared". Finding none
-// leaves it false, which makes the field an optimistic verdict and not a
-// conservative one. The per-TU scope is the reason: the record lives in a
-// header and its global lives in one .c, so the TU that reports is rarely the
-// TU that would have seen the evidence. Anything deciding against sharing
-// wants the merged TypeEscapeSignals, where sharingRouteRefuted() separates a
-// program fact from an unexamined one.
+// escapes is the disjunction of the seven signals below, so finding none
+// leaves it false: it reads "one was found in this TU", not "this is shared".
+// Deciding against sharing wants the merged TypeEscapeSignals instead.
 //
 // Structural evidence (per-type):
 //   1. std::atomic member fields

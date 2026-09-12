@@ -2424,14 +2424,10 @@ applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
                          const EscapeSummary &summary) {
     SharingRouteVerdict out;
 
-    // Positive control on the thread-detection vocabulary before trusting any
-    // negative from it. Every route runs through a recognized thread-creation
-    // call or a global whose writer is thread-borne, so a codebase that
-    // spawns through its own wrapper presents exactly as a codebase that
-    // never spawns: the disjunction is false everywhere and each finding
-    // looks disproven. When nothing anywhere reports a route, the instrument
-    // is dark rather than the program single-threaded, and this caps instead.
-    // Same rule bench/accept.sh applies to perf c2c.
+    // A codebase spawning through its own wrapper presents exactly as one
+    // that never spawns, so refuting on the absence would be mass recall
+    // loss. Require the instrument to fire somewhere first, as
+    // bench/accept.sh requires of perf c2c.
     bool anyThreadRoute = false;
     for (const auto &[name, sig] : summary)
         if (sig.hasThreadRoute()) { anyThreadRoute = true; break; }
@@ -2466,10 +2462,8 @@ applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
         // Absent from the summary means unanalyzed, not disproven.
         if (!anyKnown || anyShared) continue;
 
-        // Every TU that saw this type reported no route to a shared instance,
-        // for reasons that hold of the program. That is the mechanism ruled
-        // out rather than unwitnessed: a line no second core ever holds stays
-        // in M state, so there is no RFO from a peer and no HITM to pay for.
+        // A line no second core ever holds stays in M state: no RFO from a
+        // peer, no HITM. The mechanism is ruled out, not unwitnessed.
         const bool observable = allRefuted && !out.vocabularyDark;
         d.mechanismClaims.push_back(
             {"two threads reach the same instance",

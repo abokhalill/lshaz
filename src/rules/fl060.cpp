@@ -5,6 +5,7 @@
 #include "lshaz/core/hot_path.h"
 #include "lshaz/analysis/escape.h"
 #include "lshaz/analysis/numa.h"
+#include "lshaz/core/ladder.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -15,6 +16,19 @@
 #include <sstream>
 
 namespace lshaz {
+namespace {
+
+// Weakest first. Remote-access cost is paid per access, so a rung rises only
+// when something names an accessor.
+enum class Rung : unsigned {
+    RouteOnly,
+    RouteOnlyAtomic,
+    WriterNamed,
+    WriterNamedAtomic,
+    Count,
+};
+
+} // namespace
 
 class FL060_NUMAUnfriendly : public Rule {
 public:
@@ -87,7 +101,6 @@ public:
 
         // Infer NUMA placement via first-touch policy analysis.
         NUMAPlacement placement = NUMATopology::classifyStruct(RD, Ctx);
-        double hazardFactor = numaHazardFactor(placement);
 
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
@@ -142,16 +155,18 @@ public:
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 
-        // Scale confidence by contention. Low-contention types (shared_ptr only)
-        // are unlikely NUMA hotspots.
-        double baseConfidence = hasAtomics ? 0.55 : 0.35;
-        baseConfidence *= (0.5 + 0.5 * ev.contention); // floor at 50% of base
+        // Placement caps severity above and used to scale confidence too:
+        // one fact scored twice.
+        const Rung rung =
+            ev.escapesByRouteOnly()
+                ? (hasAtomics ? Rung::RouteOnlyAtomic : Rung::RouteOnly)
+                : (hasAtomics ? Rung::WriterNamedAtomic : Rung::WriterNamed);
 
         Diagnostic diag;
         diag.ruleID    = "FL060";
         diag.title     = "NUMA-Unfriendly Shared Structure";
         diag.severity  = sev;
-        diag.confidence = baseConfidence * hazardFactor;
+        diag.confidence = rungRank(rung);
         diag.evidenceTier = EvidenceTier::Speculative;
 
         diag.location = resolveSourceLocation(loc, SM);

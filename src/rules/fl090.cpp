@@ -4,6 +4,7 @@
 #include "lshaz/core/hot_path.h"
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/escape.h"
+#include "lshaz/core/ladder.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -13,6 +14,17 @@
 #include <sstream>
 
 namespace lshaz {
+namespace {
+
+// Weakest first. The compounded hazards are established elsewhere, so all
+// that separates these is whether an accessor was named.
+enum class Rung : unsigned {
+    RouteOnly,
+    WriterNamed,
+    Count,
+};
+
+} // namespace
 
 class FL090_HazardAmplification : public Rule {
 public:
@@ -139,7 +151,8 @@ public:
         diag.ruleID    = "FL090";
         diag.title     = "Hazard Amplification";
         diag.severity  = sev;
-        diag.confidence = 0.70 + 0.18 * ev.contention; // [0.70, 0.88]
+        diag.confidence = rungRank(ev.escapesByRouteOnly() ? Rung::RouteOnly
+                                                          : Rung::WriterNamed);
         diag.evidenceTier = EvidenceTier::Likely;
 
         diag.location = resolveSourceLocation(loc, SM);

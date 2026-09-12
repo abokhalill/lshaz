@@ -3,6 +3,7 @@
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
 #include "lshaz/core/config.h"
+#include "lshaz/core/ladder.h"
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/escape.h"
 
@@ -14,6 +15,22 @@
 #include <sstream>
 
 namespace lshaz {
+namespace {
+
+// Weakest first. An atomic field names a writer outright, so it outranks
+// every escape verdict.
+enum class Rung : unsigned {
+    NoEscape,
+    NoEscapeStraddling,
+    RouteOnly,
+    RouteOnlyStraddling,
+    Escaping,
+    EscapingStraddling,
+    AtomicFields,
+    Count,
+};
+
+} // namespace
 
 class FL001_CacheLineSpanning : public Rule {
 public:
@@ -171,16 +188,11 @@ public:
         if (!ev.escapes && map.totalAtomicFields() == 0) {
             sev = Severity::Medium;
         }
-        // Escapes but low contention (shared_ptr/publication only,
-        // no atomics/volatile/sync) -> demote. Coherence pressure is
-        // theoretically possible but unlikely to be a hot path.
-        else if (ev.escapes && ev.contention < 0.30 &&
-                 map.totalAtomicFields() == 0) {
+        else if (ev.escapesByRouteOnly() && map.totalAtomicFields() == 0) {
             sev = Severity::Medium;
             escalations.push_back(
-                "low contention (" +
-                std::to_string(static_cast<int>(ev.contention * 100)) +
-                "%): escape via shared_ptr/publication only");
+                "escape is by ownership or publication only (" +
+                ev.escapeSignals() + "): no signal names a second writer");
         }
 
         if (map.totalAtomicFields() > 0 &&
@@ -201,16 +213,24 @@ public:
         diag.ruleID    = "FL001";
         diag.title     = "Cache Line Spanning Struct";
         diag.severity  = sev;
-        if (!ev.escapes && map.totalAtomicFields() == 0) {
-            diag.confidence = !straddlers.empty() ? 0.52 : 0.42;
+        // Escape class now dominates straddling, reversing the old scores
+        // where 0.52 beat 0.45. The spanning cost is only paid once another
+        // core reaches the struct.
+        const bool straddling = !straddlers.empty();
+        if (map.totalAtomicFields() > 0) {
+            diag.confidence = rungRank(Rung::AtomicFields);
+            diag.evidenceTier = EvidenceTier::Proven;
+        } else if (!ev.escapes) {
+            diag.confidence = rungRank(straddling ? Rung::NoEscapeStraddling
+                                                  : Rung::NoEscape);
             diag.evidenceTier = EvidenceTier::Likely;
-        } else if (ev.contention < 0.30 && map.totalAtomicFields() == 0) {
-            // Low-contention escape: slightly above non-escape.
-            diag.confidence = !straddlers.empty() ? 0.55 : 0.45;
+        } else if (ev.escapesByRouteOnly()) {
+            diag.confidence = rungRank(straddling ? Rung::RouteOnlyStraddling
+                                                  : Rung::RouteOnly);
             diag.evidenceTier = EvidenceTier::Likely;
         } else {
-            diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
-                              (!straddlers.empty() ? 0.82 : 0.72);
+            diag.confidence = rungRank(straddling ? Rung::EscapingStraddling
+                                                  : Rung::Escaping);
             diag.evidenceTier = EvidenceTier::Proven;
         }
 
@@ -235,7 +255,7 @@ public:
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"mutable_fields", std::to_string(map.totalMutableFields())},
             {"thread_escape", ev.escapes ? "true" : "false"},
-            {"contention", std::to_string(static_cast<int>(ev.contention * 100)) + "%"},
+            {"escape_signals", ev.escapeSignals()},
             {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
         };
 
