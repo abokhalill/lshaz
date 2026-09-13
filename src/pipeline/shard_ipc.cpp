@@ -324,6 +324,105 @@ std::string serializeShardResult(int exitCode,
             first = false;
         }
     }
+    // Positional and open-ended, same wire shape as fieldAccess: [first] when
+    // the two coincide, [first,last] otherwise. Most call sites are a single
+    // statement outside any loop, so the short form is the common one.
+    const auto emitPos = [&](const CallPosition &p) {
+        buf += '[' + std::to_string(p.first);
+        if (p.last != p.first) buf += ',' + std::to_string(p.last);
+        buf += ']';
+    };
+    const auto emitPosMap = [&](const std::map<std::string, CallPosition> &m) {
+        bool first = true;
+        for (const auto &[fn, p] : m) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":";
+            emitPos(p);
+            first = false;
+        }
+    };
+    buf += "],\"edgeOrder\":{";
+    {
+        bool firstCaller = true;
+        for (const auto &[caller, edges] : threadRoles.edgeOrder) {
+            if (edges.empty()) continue;
+            if (!firstCaller) buf += ',';
+            buf += '"'; buf += esc(caller); buf += "\":{";
+            emitPosMap(edges);
+            buf += '}';
+            firstCaller = false;
+        }
+    }
+    buf += "},\"spawnPos\":{";
+    emitPosMap(threadRoles.spawnPoints);
+    buf += "},\"indirectPos\":{";
+    {
+        bool firstCaller = true;
+        for (const auto &[caller, sigs] : threadRoles.indirectCalls) {
+            if (sigs.empty()) continue;
+            if (!firstCaller) buf += ',';
+            buf += '"'; buf += esc(caller); buf += "\":{";
+            emitPosMap(sigs);
+            buf += '}';
+            firstCaller = false;
+        }
+    }
+    buf += "},\"addrTaken\":{";
+    emitNameSets(threadRoles.addressTakenBySignature);
+    buf += "},\"slotTargets\":{";
+    emitNameSets(threadRoles.fnSlotTargets);
+    buf += "},\"slotFwd\":{";
+    emitNameSets(threadRoles.fnSlotForwards);
+    buf += "},\"slotOpaque\":[";
+    emitNames(threadRoles.fnSlotOpaque);
+    buf += "],\"noReturn\":[";
+    emitNames(threadRoles.noReturnFunctions);
+    buf += "],\"returning\":[";
+    emitNames(threadRoles.returningFunctions);
+    buf += "],\"callSites\":{";
+    {
+        bool first = true;
+        for (const auto &[fn, n] : threadRoles.callSiteCount) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":" + std::to_string(n);
+            first = false;
+        }
+    }
+    buf += "},\"unreachAfter\":{";
+    {
+        bool first = true;
+        for (const auto &[fn, n] : threadRoles.unreachableAfterCount) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":" + std::to_string(n);
+            first = false;
+        }
+    }
+    buf += "},\"tailCallee\":{";
+    {
+        bool first = true;
+        for (const auto &[fn, tail] : threadRoles.tailCallee) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":\"";
+            buf += esc(tail); buf += '"';
+            first = false;
+        }
+    }
+    buf += "},\"slotCalls\":{";
+    {
+        bool firstCaller = true;
+        for (const auto &[caller, slots] : threadRoles.indirectSlotCalls) {
+            if (slots.empty()) continue;
+            if (!firstCaller) buf += ',';
+            buf += '"'; buf += esc(caller); buf += "\":{";
+            emitPosMap(slots);
+            buf += '}';
+            firstCaller = false;
+        }
+    }
+    buf += "},\"preMain\":[";
+    emitNames(threadRoles.preMainFunctions);
+    buf += "],\"orderUnknown\":[";
+    emitNames(threadRoles.orderUnknown);
     buf += "]}";
 
     buf += ",\"striped\":{";
@@ -776,6 +875,33 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         ipc::expect(json, i, ',');
                     }
                 };
+            auto parsePosMap = [&](std::map<std::string, CallPosition> &dst) {
+                ipc::expect(json, i, '{');
+                while (true) {
+                    ipc::skipWS(json, i);
+                    if (i >= json.size() || json[i] == '}') {
+                        if (i < json.size()) ++i;
+                        break;
+                    }
+                    std::string k = ipc::parseStr(json, i);
+                    ipc::expect(json, i, ':');
+                    ipc::expect(json, i, '[');
+                    CallPosition p;
+                    p.first = static_cast<unsigned>(ipc::parseNum(json, i));
+                    ipc::skipWS(json, i);
+                    if (i < json.size() && json[i] == ',') {
+                        ++i;
+                        p.last = static_cast<unsigned>(ipc::parseNum(json, i));
+                    } else {
+                        p.last = p.first;
+                    }
+                    ipc::skipWS(json, i);
+                    if (i < json.size() && json[i] == ']') ++i;
+                    auto [it, fresh] = dst.emplace(k, p);
+                    if (!fresh) it->second.merge(p);
+                    ipc::expect(json, i, ',');
+                }
+            };
             ipc::expect(json, i, '{');
             while (true) {
                 ipc::skipWS(json, i);
@@ -954,7 +1080,96 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                             static_cast<unsigned>(ipc::parseNum(json, i));
                         ipc::expect(json, i, ',');
                     }
-                } else
+                } else if (tk == "edgeOrder") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string caller = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        parsePosMap(out.threadRoles.edgeOrder[caller]);
+                        ipc::expect(json, i, ',');
+                    }
+                } else if (tk == "spawnPos")
+                    parsePosMap(out.threadRoles.spawnPoints);
+                else if (tk == "indirectPos") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string caller = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        parsePosMap(out.threadRoles.indirectCalls[caller]);
+                        ipc::expect(json, i, ',');
+                    }
+                } else if (tk == "addrTaken")
+                    parseNameSets(out.threadRoles.addressTakenBySignature);
+                else if (tk == "slotTargets")
+                    parseNameSets(out.threadRoles.fnSlotTargets);
+                else if (tk == "slotFwd")
+                    parseNameSets(out.threadRoles.fnSlotForwards);
+                else if (tk == "slotOpaque")
+                    parseStrArray(out.threadRoles.fnSlotOpaque);
+                else if (tk == "noReturn")
+                    parseStrArray(out.threadRoles.noReturnFunctions);
+                else if (tk == "returning")
+                    parseStrArray(out.threadRoles.returningFunctions);
+                else if (tk == "callSites" || tk == "unreachAfter") {
+                    auto &dst = tk == "callSites"
+                                    ? out.threadRoles.callSiteCount
+                                    : out.threadRoles.unreachableAfterCount;
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string fn = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        dst[fn] += static_cast<unsigned>(ipc::parseNum(json, i));
+                        ipc::expect(json, i, ',');
+                    }
+                }
+                else if (tk == "tailCallee") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string fn = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        out.threadRoles.tailCallee[fn] = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ',');
+                    }
+                }
+                else if (tk == "slotCalls") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string caller = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        parsePosMap(out.threadRoles.indirectSlotCalls[caller]);
+                        ipc::expect(json, i, ',');
+                    }
+                }
+                else if (tk == "preMain")
+                    parseStrArray(out.threadRoles.preMainFunctions);
+                else if (tk == "orderUnknown")
+                    parseStrArray(out.threadRoles.orderUnknown);
+                else
                     ipc::skipValue(json, i);
                 ipc::expect(json, i, ',');
             }

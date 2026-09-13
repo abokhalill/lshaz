@@ -591,6 +591,64 @@ void testShardIPCFieldAccessRoundTrip() {
     check(cold->second.readSites == 2, "read-only counts preserved");
 }
 
+// The partition is solved in the parent from facts the children collect, so
+// every one of them has to cross the boundary. Forgetting one is the failure
+// mode this protocol exists to prevent: right at --jobs 1, quietly different
+// in parallel.
+void testShardIPCPhaseFactsRoundTrip() {
+    std::cerr << "test: phase facts survive the shard boundary\n";
+    using namespace lshaz;
+    ThreadRoleSummary tr;
+    tr.callEdges["main"] = {"init", "spawn_all"};
+    tr.edgeOrder["main"]["init"] = {1, 1};
+    tr.edgeOrder["main"]["spawn_all"] = {2, 5};
+    tr.spawnPoints["spawn_all"] = {3, 3};
+    tr.indirectCalls["dispatch"]["void *(void *)"] = {4, 4};
+    tr.indirectSlotCalls["apply"]["P:apply|0"] = {1, 2};
+    tr.addressTakenBySignature["void *(void *)"] = {"worker"};
+    tr.fnSlotTargets["P:apply|0"] = {"defrag_alloc"};
+    tr.fnSlotForwards["P:inner|1"] = {"P:apply|0"};
+    tr.fnSlotOpaque = {"F:T::cb"};
+    tr.preMainFunctions = {"ctor"};
+    tr.orderUnknown = {"spaghetti"};
+    tr.noReturnFunctions = {"die"};
+    tr.tailCallee["fatal_with_info"] = "fatal";
+    tr.returningFunctions = {"ordinary"};
+    tr.callSiteCount["fatal"] = 9;
+    tr.unreachableAfterCount["fatal"] = 8;
+
+    const std::string wire = serializeShardResult(
+        0, {}, {}, EscapeSummary{}, tr, StripedArraySummary{}, ScanCoverage{},
+        MemorySummary{});
+    ShardIPC parsed;
+    check(deserializeShardResult(wire, parsed), "record with phase facts parses");
+
+    const auto &g = parsed.threadRoles;
+    check(g.edgeOrder.at("main").at("init").first == 1 &&
+              g.edgeOrder.at("main").at("init").last == 1,
+          "a single-statement call position round-trips in short form");
+    check(g.edgeOrder.at("main").at("spawn_all").first == 2 &&
+              g.edgeOrder.at("main").at("spawn_all").last == 5,
+          "a spread call position keeps both ends");
+    check(g.spawnPoints.at("spawn_all").first == 3, "spawn position");
+    check(g.indirectCalls.at("dispatch").count("void *(void *)"),
+          "signature-keyed indirect site");
+    check(g.indirectSlotCalls.at("apply").count("P:apply|0"),
+          "slot-keyed indirect site");
+    check(g.addressTakenBySignature.at("void *(void *)").count("worker"),
+          "address-taken by signature");
+    check(g.fnSlotTargets.at("P:apply|0").count("defrag_alloc"), "slot target");
+    check(g.fnSlotForwards.at("P:inner|1").count("P:apply|0"), "slot forward");
+    check(g.fnSlotOpaque.count("F:T::cb"), "opaque slot");
+    check(g.preMainFunctions.count("ctor"), "pre-main function");
+    check(g.orderUnknown.count("spaghetti"), "unordered body");
+    check(g.noReturnFunctions.count("die"), "declared noreturn");
+    check(g.tailCallee.at("fatal_with_info") == "fatal", "tail callee");
+    check(g.returningFunctions.count("ordinary"), "returning function");
+    check(g.callSiteCount.at("fatal") == 9, "call site count");
+    check(g.unreachableAfterCount.at("fatal") == 8, "unreachable-after count");
+}
+
 // Counts are per-TU partials. Two shards each seeing part of the writes must
 // sum, or a threshold on recurrence answers differently depending on which
 // shard compiled the writer.
@@ -1271,6 +1329,7 @@ int main() {
 
     // ThreadRoleSummary
     testShardIPCFieldAccessRoundTrip();
+    testShardIPCPhaseFactsRoundTrip();
     testFieldAccessMergesAsPartials();
     testThreadRoleSummaryMerge();
     testThreadRolePropagation();

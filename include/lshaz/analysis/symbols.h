@@ -51,4 +51,24 @@ inline std::string threadRoleNodeName(const clang::FunctionDecl *FD,
     return FD->getQualifiedNameAsString();
 }
 
+// Canonical spelling of what a call goes through, used to match an indirect
+// call site against the functions whose address the program takes. A fixed
+// default policy rather than the TU's, so the same signature spells
+// identically whether the shard that saw it compiled C or C++. Empty when the
+// type is not a function or a pointer to one.
+inline std::string calleeSignature(clang::QualType T) {
+    if (T.isNull())
+        return {};
+    T = T.getCanonicalType();
+    if (const auto *PT = T->getAs<clang::PointerType>())
+        T = PT->getPointeeType().getCanonicalType();
+    else if (const auto *MP = T->getAs<clang::MemberPointerType>())
+        T = MP->getPointeeType().getCanonicalType();
+    else if (const auto *BP = T->getAs<clang::BlockPointerType>())
+        T = BP->getPointeeType().getCanonicalType();
+    if (!T->isFunctionType())
+        return {};
+    return T.getAsString(clang::PrintingPolicy(clang::LangOptions()));
+}
+
 } // namespace lshaz

@@ -3,6 +3,7 @@
 
 #include "lshaz/core/cost.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -10,6 +11,23 @@
 #include <vector>
 
 namespace lshaz {
+
+// Where inside a caller something is invoked, numbered by statement in
+// source order. Two values because the question is asymmetric: the earliest
+// spawn is what reaches forward, and a callee is concurrent as soon as any
+// one of its call sites is reached.
+//
+// `first` is the enclosing loop's head index when the site sits in a loop,
+// which is how a spawn inside a loop reaches statements textually above it.
+struct CallPosition {
+    unsigned first = 0;
+    unsigned last = 0;
+
+    void merge(const CallPosition &o) {
+        first = std::min(first, o.first);
+        last = std::max(last, o.last);
+    }
+};
 
 // Per-TU thread-attribution facts, keyed by function/field name so they
 // join across TUs (a pthread_create call and its entry's definition are
@@ -185,6 +203,77 @@ struct ThreadRoleSummary {
     // override usually lives in another TU than the call.
     std::set<std::string> overriddenVirtuals;
 
+    // Statement position of each call site, for the phase partition. Which
+    // side of the first thread creation an access falls on is a question
+    // about order inside the caller, and the caller is routinely compiled in
+    // a different shard from the spawn it reaches.
+    std::map<std::string, std::map<std::string, CallPosition>> edgeOrder;
+
+    // Where each function calls a thread-creation primitive. Recorded by the
+    // same walk that resolves the entry, rather than re-matched against a
+    // name list in reduce: std::async's entry slot and a spawner wrapper's
+    // forwarded parameter are both already settled by then.
+    std::map<std::string, CallPosition> spawnPoints;
+
+    // Where function pointers live, and what reaches each place. A slot key
+    // is one of:
+    //
+    //   P:<function>|<n>   parameter n of that function
+    //   F:<type>::<field>  a struct field
+    //   G:<symbol>         a file-scope variable
+    //
+    // targets are the functions named directly into the slot, forwards name
+    // another slot whose contents flow in, and opaque marks a slot something
+    // unnameable was written to.
+    //
+    // This exists because signature alone cannot decide whether an indirect
+    // call spawns. void *(void *) is both the pthread entry type and the
+    // generic C callback type, so on redis it connects a defrag callback to a
+    // worker thread, and from there every assert in the tree creates threads.
+    std::map<std::string, std::set<std::string>> fnSlotTargets;
+    std::map<std::string, std::set<std::string>> fnSlotForwards;
+    std::set<std::string> fnSlotOpaque;
+
+    // Indirect call sites: caller -> slot key, when the callee expression
+    // names a slot, and caller -> callee signature when it does not.
+    std::map<std::string, std::map<std::string, CallPosition>> indirectSlotCalls;
+    std::map<std::string, std::map<std::string, CallPosition>> indirectCalls;
+    std::map<std::string, std::set<std::string>> addressTakenBySignature;
+
+    // Functions a call to which never returns, so the statement after the
+    // call site does not run and cannot be concurrent with anything the
+    // callee spawned.
+    //
+    // The declared set is seeded from the attribute, which is not where most
+    // of them are: redis spells its assert as a plain void function whose
+    // body ends in abort(), and taking it as returning puts the whole crash
+    // reporter downstream of every assert in the tree. tailCallee names the
+    // direct callee of a body's last statement and returningFunctions the
+    // bodies that can return at all; closing the two over the declared set
+    // recovers the rest.
+    std::set<std::string> noReturnFunctions;
+    std::map<std::string, std::string> tailCallee;
+    std::set<std::string> returningFunctions;
+
+    // Call sites per callee, and how many of them the source marks
+    // unreachable afterwards. A function every one of whose call sites is
+    // followed by __builtin_unreachable does not return, and that is how an
+    // assertion macro says so when the function itself carries no attribute.
+    // Both counts scale together when a header body is compiled twice, so
+    // the ratio survives the merge.
+    std::map<std::string, unsigned> callSiteCount;
+    std::map<std::string, unsigned> unreachableAfterCount;
+
+    // Functions whose body runs before main: a constructor attribute, or a
+    // namespace-scope initializer. If one of them spawns, main is concurrent
+    // from its first instruction and the partition has no pre-thread side.
+    std::set<std::string> preMainFunctions;
+
+    // Bodies whose statement numbering does not order execution: a backward
+    // goto, a computed goto, or setjmp. Every site in one reaches every
+    // other, which costs precision only in the functions that earn it.
+    std::set<std::string> orderUnknown;
+
     void merge(const ThreadRoleSummary &other) {
         threadEntries.insert(other.threadEntries.begin(),
                              other.threadEntries.end());
@@ -258,6 +347,55 @@ struct ThreadRoleSummary {
                               other.builtinCallees.end());
         overriddenVirtuals.insert(other.overriddenVirtuals.begin(),
                                   other.overriddenVirtuals.end());
+        // Min of first and max of last, so the widest reach any TU saw wins.
+        // Both are associative and commutative, which is what keeps the
+        // partition identical under any shard arrival order.
+        for (const auto &[caller, edges] : other.edgeOrder) {
+            auto &dst = edgeOrder[caller];
+            for (const auto &[callee, p] : edges) {
+                auto [it, inserted] = dst.emplace(callee, p);
+                if (!inserted) it->second.merge(p);
+            }
+        }
+        for (const auto &[fn, p] : other.spawnPoints) {
+            auto [it, inserted] = spawnPoints.emplace(fn, p);
+            if (!inserted) it->second.merge(p);
+        }
+        for (const auto &[caller, sigs] : other.indirectCalls) {
+            auto &dst = indirectCalls[caller];
+            for (const auto &[sig, p] : sigs) {
+                auto [it, inserted] = dst.emplace(sig, p);
+                if (!inserted) it->second.merge(p);
+            }
+        }
+        for (const auto &[sig, fns] : other.addressTakenBySignature)
+            addressTakenBySignature[sig].insert(fns.begin(), fns.end());
+        for (const auto &[slot, fns] : other.fnSlotTargets)
+            fnSlotTargets[slot].insert(fns.begin(), fns.end());
+        for (const auto &[slot, srcs] : other.fnSlotForwards)
+            fnSlotForwards[slot].insert(srcs.begin(), srcs.end());
+        fnSlotOpaque.insert(other.fnSlotOpaque.begin(),
+                            other.fnSlotOpaque.end());
+        for (const auto &[caller, slots] : other.indirectSlotCalls) {
+            auto &dst = indirectSlotCalls[caller];
+            for (const auto &[slot, p] : slots) {
+                auto [it, inserted] = dst.emplace(slot, p);
+                if (!inserted) it->second.merge(p);
+            }
+        }
+        noReturnFunctions.insert(other.noReturnFunctions.begin(),
+                                 other.noReturnFunctions.end());
+        tailCallee.insert(other.tailCallee.begin(), other.tailCallee.end());
+        returningFunctions.insert(other.returningFunctions.begin(),
+                                  other.returningFunctions.end());
+        for (const auto &[fn, n] : other.callSiteCount)
+            callSiteCount[fn] += n;
+        for (const auto &[fn, n] : other.unreachableAfterCount)
+            unreachableAfterCount[fn] += n;
+        preMainFunctions.insert(other.preMainFunctions.begin(),
+                                other.preMainFunctions.end());
+        orderUnknown.insert(other.orderUnknown.begin(),
+                            other.orderUnknown.end());
     }
 
     bool empty() const {

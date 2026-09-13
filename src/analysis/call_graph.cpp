@@ -109,6 +109,241 @@ public:
     Milli ownFrequency = kMilli;
     unsigned ownLoopDepth = 0;
 
+    // Statement counter for the phase partition. All call sites in one
+    // full-expression share an index, which makes nested and sibling calls
+    // mutually reaching: their evaluation order is unspecified anyway, and
+    // an index that claimed otherwise would be the unsound direction.
+    unsigned stmtIndex = 0;
+    std::vector<unsigned> loopHeads;
+    std::unordered_map<const clang::FunctionDecl *, CallPosition> calleePos;
+    std::map<std::string, CallPosition> indirectPos;
+    CallPosition spawnPos;
+    bool anySpawn = false;
+    bool orderUnknown = false;
+    // signature -> functions whose address is taken under it. A function
+    // cast to another type at the point its address is taken is recorded
+    // under both, since that cast is how a thread entry usually reaches
+    // pthread_create in C.
+    std::map<std::string, std::set<const clang::FunctionDecl *>> addressTaken;
+    llvm::SmallPtrSet<const clang::Stmt *, 16> calleeExprs;
+
+    // Enclosing function, needed to name a forwarded parameter slot.
+    const clang::FunctionDecl *self = nullptr;
+    std::map<std::string, std::set<std::string>> fnSlotTargets;
+    std::map<std::string, std::set<std::string>> fnSlotForwards;
+    std::set<std::string> fnSlotOpaque;
+    std::map<std::string, CallPosition> indirectSlotPos;
+    std::set<const clang::FunctionDecl *> noReturn;
+    bool hasReturn = false;
+    std::map<const clang::FunctionDecl *, unsigned> callSites;
+    std::map<const clang::FunctionDecl *, unsigned> unreachableAfter;
+
+    bool VisitReturnStmt(clang::ReturnStmt *) {
+        hasReturn = true;
+        return true;
+    }
+
+    // Something after which the program does not reach the next statement:
+    // __builtin_unreachable, or any function declared noreturn. Both spell
+    // the same guarantee, and which one a codebase gets is not its choice.
+    // redis picks between them on __GNUC__ >= 5, which Clang answers 4 to, so
+    // matching only the builtin sees the assertion macro nowhere.
+    static bool isUnreachableMarker(const clang::Stmt *S) {
+        const auto *E = llvm::dyn_cast_or_null<clang::Expr>(S);
+        if (!E) return false;
+        const auto *CE =
+            llvm::dyn_cast<clang::CallExpr>(E->IgnoreParenImpCasts());
+        if (!CE) return false;
+        const auto *C = CE->getDirectCallee();
+        if (!C) return false;
+        return C->isNoReturn() ||
+               (C->getBuiltinID() != 0 &&
+                C->getName() == "__builtin_unreachable");
+    }
+
+    void noteUnreachableAfter(const clang::Stmt *S) {
+        const auto *E = llvm::dyn_cast_or_null<clang::Expr>(S);
+        if (!E) return;
+        const auto *CE =
+            llvm::dyn_cast<clang::CallExpr>(E->IgnoreParenImpCasts());
+        if (!CE) return;
+        if (const auto *C = CE->getDirectCallee())
+            ++unreachableAfter[C->getCanonicalDecl()];
+    }
+
+    // "f(...), __builtin_unreachable()" is how an assertion macro states that
+    // f does not return when the function itself carries no attribute.
+    bool VisitBinaryOperator(clang::BinaryOperator *BO) {
+        if (BO->getOpcode() == clang::BO_Comma &&
+            isUnreachableMarker(BO->getRHS()))
+            noteUnreachableAfter(BO->getLHS());
+        if (!BO->isAssignmentOp())
+            return true;
+        if (calleeSignature(BO->getLHS()->getType()).empty())
+            return true;
+        noteSlotWrite(slotKeyOf(BO->getLHS()), BO->getRHS());
+        return true;
+    }
+
+    // Parameter index when an expression is a bare reference to one of the
+    // enclosing function's own parameters.
+    int paramIndexOf(const clang::Expr *E) const {
+        if (!E) return -1;
+        E = E->IgnoreParenImpCasts();
+        if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
+            if (UO->getOpcode() == clang::UO_AddrOf)
+                E = UO->getSubExpr()->IgnoreParenImpCasts();
+        const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E);
+        if (!DRE) return -1;
+        const auto *PV = llvm::dyn_cast<clang::ParmVarDecl>(DRE->getDecl());
+        if (!PV || !self) return -1;
+        // Against the canonical decl, since the parameter belongs to the
+        // definition and self is the first declaration whenever a prototype
+        // exists, which for a function called across TUs is always.
+        const auto *owner =
+            llvm::dyn_cast<clang::FunctionDecl>(PV->getDeclContext());
+        if (!owner || owner->getCanonicalDecl() != self->getCanonicalDecl())
+            return -1;
+        return static_cast<int>(PV->getFunctionScopeIndex());
+    }
+
+    // Which named place a function-pointer expression reads from or writes
+    // to. Empty when it is a local, a return value, or an array element,
+    // which then falls back to the callee signature.
+    std::string slotKeyOf(const clang::Expr *E) const {
+        if (!E || !ctx) return {};
+        const int p = paramIndexOf(E);
+        if (p >= 0)
+            return "P:" + threadRoleNodeName(self, *ctx) + "|" +
+                   std::to_string(p);
+        E = E->IgnoreParenImpCasts();
+        if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+            const auto *FD = llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl());
+            if (!FD) return {};
+            const auto *RD = FD->getParent();
+            if (!RD) return {};
+            return "F:" + RD->getCanonicalDecl()->getQualifiedNameAsString() +
+                   "::" + FD->getNameAsString();
+        }
+        if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
+            const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl());
+            if (!VD) return {};
+            if (VD->hasGlobalStorage())
+                return "G:" + VD->getQualifiedNameAsString();
+            // A local copied out of a struct before the loop that dispatches
+            // through it. Without this the call reads as unattributable and
+            // falls back to the signature, which on redis pairs a defrag
+            // callback with a thread entry because both are void *(void *).
+            if (self)
+                return "L:" + threadRoleNodeName(self, *ctx) +
+                       "::" + VD->getNameAsString();
+        }
+        return {};
+    }
+
+    // What a function pointer written into `slot` may hold.
+    void noteSlotWrite(const std::string &slot, const clang::Expr *value) {
+        if (slot.empty() || !value || !ctx) return;
+        // "a ? a : fallback" is how a table fills an optional callback, and
+        // reading the whole expression as unnameable makes the slot opaque
+        // for the one pattern that names both of its values.
+        if (const auto *CO = llvm::dyn_cast<clang::AbstractConditionalOperator>(
+                value->IgnoreParenImpCasts())) {
+            noteSlotWrite(slot, CO->getTrueExpr());
+            noteSlotWrite(slot, CO->getFalseExpr());
+            return;
+        }
+        if (const auto *FD = entryArgToFunction(value)) {
+            fnSlotTargets[slot].insert(threadRoleNodeName(FD, *ctx));
+            return;
+        }
+        // A null callee is never called, so storing one says nothing about
+        // what the slot can dispatch to. The implicit form is the common one:
+        // the semantic InitListExpr fills every field a designated
+        // initializer left out, and reading those as unnameable makes every
+        // partially-initialised callback table opaque.
+        if (llvm::isa<clang::ImplicitValueInitExpr>(
+                value->IgnoreParenImpCasts()) ||
+            value->isNullPointerConstant(const_cast<clang::ASTContext &>(*ctx),
+                                         clang::Expr::NPC_ValueDependentIsNull))
+            return;
+        const std::string from = slotKeyOf(value);
+        if (!from.empty()) {
+            fnSlotForwards[slot].insert(from);
+            return;
+        }
+        fnSlotOpaque.insert(slot);
+    }
+
+    void noteFnArgs(const clang::FunctionDecl *callee,
+                    const clang::CallExpr *CE) {
+        if (!ctx || !callee) return;
+        std::string calleeName;
+        for (unsigned j = 0; j < CE->getNumArgs(); ++j) {
+            const clang::Expr *A = CE->getArg(j);
+            if (!A || calleeSignature(A->getType()).empty())
+                continue;
+            if (calleeName.empty())
+                calleeName = threadRoleNodeName(callee, *ctx);
+            noteSlotWrite("P:" + calleeName + "|" + std::to_string(j), A);
+        }
+    }
+
+    bool VisitInitListExpr(clang::InitListExpr *ILE) {
+        // Semantic form only. The syntactic form lists designated
+        // initializers in written order, so pairing it with fields() maps
+        // ".rewrite = f" onto whatever field happens to be third, and every
+        // callback table in the tree reads as holding something unnameable.
+        if (!ILE->isSemanticForm()) return true;
+        const auto *RT = ILE->getType()->getAsRecordDecl();
+        if (!RT) return true;
+        unsigned i = 0;
+        for (const auto *field : RT->fields()) {
+            if (i >= ILE->getNumInits()) break;
+            const clang::Expr *init = ILE->getInit(i++);
+            if (!init || calleeSignature(field->getType()).empty())
+                continue;
+            noteSlotWrite("F:" +
+                              RT->getCanonicalDecl()->getQualifiedNameAsString() +
+                              "::" + field->getNameAsString(),
+                          init);
+        }
+        return true;
+    }
+
+    bool VisitVarDecl(clang::VarDecl *VD) {
+        if (!VD->hasInit() || calleeSignature(VD->getType()).empty())
+            return true;
+        if (VD->hasGlobalStorage()) {
+            noteSlotWrite("G:" + VD->getQualifiedNameAsString(), VD->getInit());
+        } else if (self && ctx) {
+            noteSlotWrite("L:" + threadRoleNodeName(self, *ctx) +
+                              "::" + VD->getNameAsString(),
+                          VD->getInit());
+        }
+        return true;
+    }
+
+    // Outermost enclosing loop head, since a spawn in a nested loop reaches
+    // back to the start of every loop containing it.
+    unsigned reachFrom() const {
+        return loopHeads.empty() ? stmtIndex : loopHeads.front();
+    }
+
+    void notePosition(CallPosition &p, bool &seen) {
+        const CallPosition here{reachFrom(), stmtIndex};
+        if (!seen) { p = here; seen = true; return; }
+        p.merge(here);
+    }
+
+    void noteIndirect(const std::string &sig) {
+        if (sig.empty())
+            return;
+        const CallPosition here{reachFrom(), stmtIndex};
+        auto [it, fresh] = indirectPos.emplace(sig, here);
+        if (!fresh) it->second.merge(here);
+    }
+
     template <typename Node, typename Base>
     bool traverseLoop(Node *N, Base base) {
         // A do/while(0) macro wrapper is not repetition, and counting it
@@ -116,6 +351,7 @@ public:
         const unsigned step = (ctx && isDegenerateLoop(N, *ctx)) ? 0u : 1u;
         loopDepth += step;
         if (loopDepth > ownLoopDepth) ownLoopDepth = loopDepth;
+        if (step) loopHeads.push_back(stmtIndex);
 
         // The source's own trip count where it states one, and the default
         // where it does not. Being wrong about the default scales a whole
@@ -132,8 +368,65 @@ public:
         }
         bool r = (this->*base)(N);
         frequency = saved;
+        if (step) loopHeads.pop_back();
         loopDepth -= step;
         return r;
+    }
+
+    bool TraverseCompoundStmt(clang::CompoundStmt *CS) {
+        const clang::Stmt *prev = nullptr;
+        for (auto *child : CS->body()) {
+            if (prev && isUnreachableMarker(child))
+                noteUnreachableAfter(prev);
+            prev = child;
+            ++stmtIndex;
+            if (!TraverseStmt(child))
+                return false;
+        }
+        return true;
+    }
+
+    // A backward jump reorders execution against the statement numbering, and
+    // setjmp does the same from a caller's frame. Everything in such a body
+    // reaches everything else, which is the sound reading of "we cannot say".
+    bool VisitGotoStmt(clang::GotoStmt *GS) {
+        const auto *L = GS->getLabel();
+        if (!ctx || !L || !L->getStmt()) {
+            orderUnknown = true;
+            return true;
+        }
+        const auto &SM = ctx->getSourceManager();
+        if (SM.isBeforeInTranslationUnit(L->getStmt()->getBeginLoc(),
+                                         GS->getBeginLoc()))
+            orderUnknown = true;
+        return true;
+    }
+
+    bool VisitIndirectGotoStmt(clang::IndirectGotoStmt *) {
+        orderUnknown = true;
+        return true;
+    }
+
+    bool VisitDeclRefExpr(clang::DeclRefExpr *DRE) {
+        if (calleeExprs.count(DRE))
+            return true;
+        if (const auto *FD =
+                llvm::dyn_cast<clang::FunctionDecl>(DRE->getDecl())) {
+            const std::string sig = calleeSignature(FD->getType());
+            if (!sig.empty())
+                addressTaken[sig].insert(FD->getCanonicalDecl());
+        }
+        return true;
+    }
+
+    bool VisitExplicitCastExpr(clang::ExplicitCastExpr *CE) {
+        const auto *FD = entryArgToFunction(CE->getSubExpr());
+        if (!FD)
+            return true;
+        const std::string sig = calleeSignature(CE->getTypeAsWritten());
+        if (!sig.empty())
+            addressTaken[sig].insert(FD->getCanonicalDecl());
+        return true;
     }
     bool TraverseForStmt(clang::ForStmt *S) {
         return traverseLoop(S, &CallEdgeVisitor::baseTraverseFor);
@@ -167,6 +460,10 @@ public:
         d = std::max(d, loopDepth);
         auto &f = calleeFrequency[callee];
         f = std::max(f, frequency);
+        const CallPosition here{reachFrom(), stmtIndex};
+        auto [it, inserted] = calleePos.emplace(callee, here);
+        if (!inserted) it->second.merge(here);
+        ++callSites[callee];
     }
 
     bool TraverseLambdaExpr(clang::LambdaExpr *LE) {
@@ -180,10 +477,39 @@ public:
     }
 
     bool VisitCallExpr(clang::CallExpr *CE) {
+        if (const auto *C = CE->getCallee())
+            calleeExprs.insert(C->IgnoreParenImpCasts());
         const auto *Callee = CE->getDirectCallee();
-        if (!Callee)
+        if (!Callee) {
+            const clang::Expr *C = CE->getCallee();
+            const std::string slot = slotKeyOf(C);
+            if (!slot.empty()) {
+                const CallPosition here{reachFrom(), stmtIndex};
+                auto [it, fresh] = indirectSlotPos.emplace(slot, here);
+                if (!fresh) it->second.merge(here);
+            } else {
+                noteIndirect(C ? calleeSignature(C->getType())
+                               : std::string());
+            }
             return true;
+        }
+        if (Callee->isNoReturn())
+            noReturn.insert(Callee->getCanonicalDecl());
+        noteFnArgs(Callee, CE);
+        // A virtual call resolves at run time, so its target set is the
+        // override set and not this declaration. It counts as indirect for
+        // the spawn question and as a direct edge for every other.
+        if (const auto *MD = llvm::dyn_cast<clang::CXXMethodDecl>(Callee))
+            if (MD->isVirtual())
+                noteIndirect(calleeSignature(MD->getType()));
         noteEdge(Callee->getCanonicalDecl());
+
+        {
+            const llvm::StringRef n = Callee->getName();
+            if (n == "setjmp" || n == "_setjmp" || n == "sigsetjmp" ||
+                n == "__sigsetjmp")
+                orderUnknown = true;
+        }
 
         for (unsigned i = 0; i < CE->getNumArgs(); ++i)
             if (const auto *FD = entryArgToFunction(CE->getArg(i)))
@@ -203,6 +529,12 @@ public:
             if (!addEntryAnyOrSpawner(CE->getArg(0)) && CE->getNumArgs() >= 2)
                 addEntryAnyOrSpawner(CE->getArg(1));
         }
+        // Where the thread is created, not which function it runs. A
+        // pthread_create whose entry argument does not resolve still creates
+        // the thread, and the phase partition turns on the creation alone.
+        if (name == "pthread_create" || name == "thrd_create" ||
+            name == "async")
+            notePosition(spawnPos, anySpawn);
         return true;
     }
 
@@ -216,8 +548,10 @@ public:
         const auto *RD = CD->getParent();
         if (RD && CE->getNumArgs() >= 1) {
             llvm::StringRef cls = RD->getName();
-            if (cls == "thread" || cls == "jthread")
+            if (cls == "thread" || cls == "jthread") {
                 addEntryAny(CE->getArg(0));
+                notePosition(spawnPos, anySpawn);
+            }
         }
         return true;
     }
@@ -322,6 +656,7 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
 
     CallEdgeVisitor visitor;
     visitor.ctx = &ctx_;
+    visitor.self = canon;
     visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 
     ownLoopDepth_[canon] = visitor.ownLoopDepth;
@@ -337,6 +672,43 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         auto fit = visitor.calleeFrequency.find(callee);
         if (fit != visitor.calleeFrequency.end())
             edgeFrequency_[{canon, callee}] = fit->second;
+        auto pit = visitor.calleePos.find(callee);
+        if (pit != visitor.calleePos.end())
+            edgePos_[{canon, callee}] = pit->second;
+    }
+    if (visitor.anySpawn)
+        spawnPos_[canon] = visitor.spawnPos;
+    if (!visitor.indirectPos.empty())
+        indirectPos_[canon] = visitor.indirectPos;
+    if (visitor.orderUnknown)
+        orderUnknown_.insert(canon);
+    for (const auto &[sig, fns] : visitor.addressTaken)
+        addressTaken_[sig].insert(fns.begin(), fns.end());
+    for (const auto &[slot, fns] : visitor.fnSlotTargets)
+        fnSlotTargets_[slot].insert(fns.begin(), fns.end());
+    for (const auto &[slot, srcs] : visitor.fnSlotForwards)
+        fnSlotForwards_[slot].insert(srcs.begin(), srcs.end());
+    fnSlotOpaque_.insert(visitor.fnSlotOpaque.begin(),
+                         visitor.fnSlotOpaque.end());
+    if (!visitor.indirectSlotPos.empty())
+        indirectSlotPos_[canon] = visitor.indirectSlotPos;
+    noReturn_.insert(visitor.noReturn.begin(), visitor.noReturn.end());
+    for (const auto &[fn, n] : visitor.callSites) callSites_[fn] += n;
+    for (const auto &[fn, n] : visitor.unreachableAfter)
+        unreachableAfter_[fn] += n;
+    if (visitor.hasReturn || !FD->getReturnType()->isVoidType())
+        returning_.insert(canon);
+    // The last statement of the top-level body, when it is a call in
+    // statement position. A call nested inside an if leaves a path that falls
+    // past it, so it is not a tail call and is deliberately not recorded.
+    if (const auto *body =
+            llvm::dyn_cast<clang::CompoundStmt>(FD->getBody())) {
+        if (!body->body_empty())
+            if (const auto *E = llvm::dyn_cast<clang::Expr>(body->body_back()))
+                if (const auto *CE =
+                        llvm::dyn_cast<clang::CallExpr>(E->IgnoreImplicit()))
+                    if (const auto *C = CE->getDirectCallee())
+                        tailCallee_[canon] = C->getCanonicalDecl();
     }
     for (const auto *entry : visitor.threadEntries)
         threadEntries_.insert(threadRoleNodeName(entry, ctx_));
@@ -411,12 +783,60 @@ void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
                 auto &f = out.edgeFrequency[callerName][calleeName];
                 if (fit->second > f) f = fit->second;
             }
+            auto pit = edgePos_.find({caller, callee});
+            if (pit != edgePos_.end()) {
+                auto &dst = out.edgeOrder[callerName];
+                auto [ins, fresh] = dst.emplace(calleeName, pit->second);
+                if (!fresh) ins->second.merge(pit->second);
+            }
             const unsigned d = callSiteLoopDepth(caller, callee);
             if (!d) continue;
             auto &cur = out.edgeLoopDepth[callerName][calleeName];
             if (d > cur) cur = d;
         }
     }
+    for (const auto &[fn, p] : spawnPos_) {
+        auto [it, fresh] =
+            out.spawnPoints.emplace(threadRoleNodeName(fn, ctx_), p);
+        if (!fresh) it->second.merge(p);
+    }
+    for (const auto &[fn, sigs] : indirectPos_) {
+        auto &dst = out.indirectCalls[threadRoleNodeName(fn, ctx_)];
+        for (const auto &[sig, p] : sigs) {
+            auto [it, fresh] = dst.emplace(sig, p);
+            if (!fresh) it->second.merge(p);
+        }
+    }
+    for (const auto &[sig, fns] : addressTaken_) {
+        auto &dst = out.addressTakenBySignature[sig];
+        for (const auto *fn : fns)
+            dst.insert(threadRoleNodeName(fn, ctx_));
+    }
+    for (const auto &[slot, fns] : fnSlotTargets_)
+        out.fnSlotTargets[slot].insert(fns.begin(), fns.end());
+    for (const auto &[slot, srcs] : fnSlotForwards_)
+        out.fnSlotForwards[slot].insert(srcs.begin(), srcs.end());
+    out.fnSlotOpaque.insert(fnSlotOpaque_.begin(), fnSlotOpaque_.end());
+    for (const auto &[fn, slots] : indirectSlotPos_) {
+        auto &dst = out.indirectSlotCalls[threadRoleNodeName(fn, ctx_)];
+        for (const auto &[slot, p] : slots) {
+            auto [it, fresh] = dst.emplace(slot, p);
+            if (!fresh) it->second.merge(p);
+        }
+    }
+    for (const auto *fn : noReturn_)
+        out.noReturnFunctions.insert(threadRoleNodeName(fn, ctx_));
+    for (const auto &[fn, tail] : tailCallee_)
+        out.tailCallee[threadRoleNodeName(fn, ctx_)] =
+            threadRoleNodeName(tail, ctx_);
+    for (const auto *fn : returning_)
+        out.returningFunctions.insert(threadRoleNodeName(fn, ctx_));
+    for (const auto &[fn, n] : callSites_)
+        out.callSiteCount[threadRoleNodeName(fn, ctx_)] += n;
+    for (const auto &[fn, n] : unreachableAfter_)
+        out.unreachableAfterCount[threadRoleNodeName(fn, ctx_)] += n;
+    for (const auto *fn : orderUnknown_)
+        out.orderUnknown.insert(threadRoleNodeName(fn, ctx_));
     // Own loop depth travels for every node, not only callers: a leaf that
     // spins is still the body the grade sharpens on.
     for (const auto *fn : functions()) {

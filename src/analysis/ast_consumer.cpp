@@ -11,10 +11,13 @@
 #include "lshaz/analysis/struct_layout.h"
 #include "lshaz/core/registry.h"
 
+#include <clang/AST/Attr.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclGroup.h>
 #include <clang/AST/DeclTemplate.h>
+#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Basic/SourceManager.h>
+#include <llvm/ADT/SmallPtrSet.h>
 
 #include <algorithm>
 #include <unordered_set>
@@ -33,6 +36,66 @@ void collectOverriddenVirtuals(const std::vector<clang::Decl *> &decls,
             for (const auto *Base : MD->overridden_methods())
                 out.overriddenVirtuals.insert(
                     Base->getCanonicalDecl()->getQualifiedNameAsString());
+    }
+}
+
+// Functions a namespace-scope initializer runs, and functions it merely
+// names. The first set runs before main, so if one of them spawns there is
+// no pre-thread side to the program at all; the second only says a function
+// pointer exists, which is what decides whether an indirect call can spawn.
+class GlobalInitVisitor
+    : public clang::RecursiveASTVisitor<GlobalInitVisitor> {
+public:
+    GlobalInitVisitor(const clang::ASTContext &Ctx, ThreadRoleSummary &out)
+        : ctx_(Ctx), out_(out) {}
+
+    bool VisitCallExpr(clang::CallExpr *CE) {
+        if (const auto *C = CE->getCallee())
+            callees_.insert(C->IgnoreParenImpCasts());
+        if (const auto *FD = CE->getDirectCallee())
+            out_.preMainFunctions.insert(threadRoleNodeName(FD, ctx_));
+        return true;
+    }
+
+    bool VisitCXXConstructExpr(clang::CXXConstructExpr *CE) {
+        if (const auto *CD = CE->getConstructor())
+            out_.preMainFunctions.insert(threadRoleNodeName(CD, ctx_));
+        return true;
+    }
+
+    bool VisitDeclRefExpr(clang::DeclRefExpr *DRE) {
+        if (callees_.count(DRE))
+            return true;
+        const auto *FD = llvm::dyn_cast<clang::FunctionDecl>(DRE->getDecl());
+        if (!FD)
+            return true;
+        const std::string sig = calleeSignature(FD->getType());
+        if (!sig.empty())
+            out_.addressTakenBySignature[sig].insert(
+                threadRoleNodeName(FD, ctx_));
+        return true;
+    }
+
+private:
+    const clang::ASTContext &ctx_;
+    ThreadRoleSummary &out_;
+    llvm::SmallPtrSet<const clang::Stmt *, 8> callees_;
+};
+
+void collectPreMainFunctions(const std::vector<clang::Decl *> &decls,
+                             const clang::ASTContext &Ctx,
+                             ThreadRoleSummary &out) {
+    GlobalInitVisitor v(Ctx, out);
+    for (auto *D : decls) {
+        if (const auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+            if (FD->hasAttr<clang::ConstructorAttr>())
+                out.preMainFunctions.insert(threadRoleNodeName(FD, Ctx));
+            continue;
+        }
+        auto *VD = llvm::dyn_cast<clang::VarDecl>(D);
+        if (!VD || !VD->hasInit() || VD->isConstexpr())
+            continue;
+        v.TraverseStmt(const_cast<clang::Expr *>(VD->getInit()));
     }
 }
 
@@ -345,6 +408,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     cg.snapshotForThreadRoles(threadRoles_);
     escape.appendFieldAccessNames(threadRoles_);
     collectOverriddenVirtuals(decls, threadRoles_);
+    collectPreMainFunctions(decls, Ctx, threadRoles_);
     // Ownership facts come from the vocabulary prepass, which already walked
     // this TU for them. Collecting again here would be the second walk the
     // two-pass split exists to avoid.

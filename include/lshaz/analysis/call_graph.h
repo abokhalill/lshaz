@@ -81,6 +81,27 @@ private:
                        const clang::FunctionDecl *>, Milli> edgeFrequency_;
     std::unordered_map<const clang::FunctionDecl *, unsigned> ownLoopDepth_;
     std::unordered_map<const clang::FunctionDecl *, Milli> ownFrequency_;
+    // Statement position of every call site, for the phase partition. Dense
+    // rather than sparse: unlike loop depth, zero is a real position and an
+    // absent entry has to mean "unordered", not "at the top".
+    std::map<std::pair<const clang::FunctionDecl *,
+                       const clang::FunctionDecl *>, CallPosition> edgePos_;
+    std::unordered_map<const clang::FunctionDecl *, CallPosition> spawnPos_;
+    std::unordered_map<const clang::FunctionDecl *,
+                       std::map<std::string, CallPosition>> indirectPos_;
+    std::map<std::string, std::set<const clang::FunctionDecl *>> addressTaken_;
+    std::unordered_set<const clang::FunctionDecl *> orderUnknown_;
+    std::map<std::string, std::set<std::string>> fnSlotTargets_;
+    std::map<std::string, std::set<std::string>> fnSlotForwards_;
+    std::set<std::string> fnSlotOpaque_;
+    std::unordered_map<const clang::FunctionDecl *,
+                       std::map<std::string, CallPosition>> indirectSlotPos_;
+    std::set<const clang::FunctionDecl *> noReturn_;
+    std::map<const clang::FunctionDecl *, const clang::FunctionDecl *>
+        tailCallee_;
+    std::set<const clang::FunctionDecl *> returning_;
+    std::map<const clang::FunctionDecl *, unsigned> callSites_;
+    std::map<const clang::FunctionDecl *, unsigned> unreachableAfter_;
     std::unordered_set<const clang::FunctionDecl *> poolEntryDecls_;
     std::unordered_set<const clang::FunctionDecl *> poolReachable_;
 
