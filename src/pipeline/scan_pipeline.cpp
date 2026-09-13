@@ -4,6 +4,7 @@
 
 #include "lshaz/analysis/contention.h"
 #include "lshaz/analysis/memory.h"
+#include "lshaz/analysis/phase.h"
 #include "lshaz/pipeline/abs_path_db.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/filter.h"
@@ -1336,9 +1337,10 @@ static unsigned settleStoreRepetition(std::vector<Diagnostic> &diagnostics,
 // merely unproven.
 static constexpr const char *kCoherenceMechanism = "coherence_line_sharing";
 
-static CostEstimate estimateLineCost(const std::set<std::string> &writers,
-                                     const std::set<std::string> &readers,
+static CostEstimate estimateLineCost(const std::set<std::string> &allWriters,
+                                     const std::set<std::string> &allReaders,
                                      bool disjointRoles,
+                                     const PhaseVerdicts &phases,
                                      const RateModel &rates,
                                      const MachineModel &machine,
                                      const CostCalibration &calib,
@@ -1350,6 +1352,15 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     CostEstimate est;
     est.mechanism = mechanism;
     est.site = site;
+
+    // Traffic a store cannot generate does not belong in the rate. A field
+    // written twenty times while the program is still single-threaded and
+    // once per command afterwards costs the once, not the twenty-one.
+    const std::set<std::string> writers = phases.concurrentSubset(allWriters);
+    const std::set<std::string> readers = phases.concurrentSubset(allReaders);
+    const bool phaseRefuted = !allWriters.empty() && writers.empty();
+    const size_t droppedW = allWriters.size() - writers.size();
+    const size_t droppedR = allReaders.size() - readers.size();
 
     const bool wKnown = rates.anyKnown(writers);
     const Milli wRate = wKnown ? rates.maxRateOf(writers) : kMilli;
@@ -1397,11 +1408,23 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
     est.add("reads_per_store", ratio, wKnown && rKnown, "call graph");
 
     // Rates carry no phase: two roles at one mean collide constantly if
-    // interleaved and never if phase-disjoint. Left unestablished so observe
-    // can settle it, and deriving a value here from the call graph would be
-    // a guess dressed as a term.
-    est.add("temporal_coincidence", kMilli, false,
-            "not established, taken as fully coincident");
+    // interleaved and never if phase-disjoint. The partition settles one end
+    // of that, where every store precedes the first thread creation and the
+    // line is therefore never held by a second core.
+    if (phaseRefuted)
+        est.add("temporal_coincidence", 0, true,
+                "every store to this line is sequenced before the program's "
+                "first thread creation");
+    else if (droppedW || droppedR)
+        est.add("temporal_coincidence", kMilli, false,
+                "taken as fully coincident, with " +
+                    std::to_string(droppedW) + " writer(s) and " +
+                    std::to_string(droppedR) +
+                    " reader(s) dropped from the rates: they run only before "
+                    "the first thread exists");
+    else
+        est.add("temporal_coincidence", kMilli, false,
+                "not established, taken as fully coincident");
 
     est.add("hitm_cycles",
             toMilli(machine.cyclesHitmLocal ? machine.cyclesHitmLocal : 100),
@@ -1453,6 +1476,7 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
 static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                                  const ThreadRoleSummary &facts,
                                  const ThreadRoleVerdicts &roles,
+                                 const PhaseVerdicts &phases,
                                  const RateModel &rates,
                                  const MachineModel &machine,
                                  const WorkloadModel &workload,
@@ -1513,7 +1537,7 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
                         const bool disjoint = wr != ROLE_NONE &&
                                               rr != ROLE_NONE && (wr & rr) == 0;
                         CostEstimate est = estimateLineCost(
-                            W, R, disjoint, rates, machine, calib,
+                            W, R, disjoint, phases, rates, machine, calib,
                             workloadName, workload, flip ? b : a);
                         if (best.empty() ||
                             est.cyclesPerOp > best.cyclesPerOp) {
@@ -1583,6 +1607,33 @@ static unsigned applyCostVerdict(std::vector<Diagnostic> &diagnostics,
         ++graded;
     }
     return graded;
+}
+
+// Retire findings whose every store is on the near side of the program's
+// first thread creation.
+//
+// Keyed on the cost term rather than on a rule list, so every rule that
+// prices coherence through estimateLineCost is covered by construction and a
+// new one cannot forget to ask. The term is only ever established at zero by
+// the phase partition, and only when that partition is not dark.
+static unsigned applyPhaseVerdict(std::vector<Diagnostic> &diagnostics) {
+    unsigned refuted = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || d.cost.empty())
+            continue;
+        for (const auto &t : d.cost.terms) {
+            if (t.name != "temporal_coincidence" || !t.established ||
+                t.value != 0)
+                continue;
+            d.addSettledGate(
+                "the two accesses are in flight at the same time",
+                "some store to this line runs while another thread exists",
+                ClaimState::Refuted, Severity::Medium, t.source);
+            ++refuted;
+            break;
+        }
+    }
+    return refuted;
 }
 
 // Give type-level findings the symbols that touch them. A layout finding
@@ -1674,6 +1725,7 @@ static unsigned emitTrueSharingFindings(
         const ThreadRoleSummary &facts,
         const ThreadRoleVerdicts &roles,
         const std::map<std::string, HotnessSource> &globalHot,
+        const PhaseVerdicts &phases,
         const RateModel &rates,
         const MachineModel &machine,
         const CostCalibration &calib,
@@ -1870,8 +1922,8 @@ static unsigned emitTrueSharingFindings(
             };
 
             d.cost = estimateLineCost(
-                r.writers, pureReaders, disjoint, rates, machine, calib,
-                workloadName, workload, node.owner + "::" + r.field,
+                r.writers, pureReaders, disjoint, phases, rates, machine,
+                calib, workloadName, workload, node.owner + "::" + r.field,
                 kTrueSharingMechanism);
             recordCostSites(d, r.writers, pureReaders);
 
@@ -1894,6 +1946,7 @@ static unsigned emitCrossTUSharedLineFindings(
         const ThreadRoleSummary &facts,
         const ThreadRoleVerdicts &roles,
         const std::map<std::string, HotnessSource> &globalHot,
+        const PhaseVerdicts &phases,
         const RateModel &rates,
         const MachineModel &machine,
         const CostCalibration &calib,
@@ -2103,8 +2156,8 @@ static unsigned emitCrossTUSharedLineFindings(
             CostEstimate est;
             if (hits[0].writerSet && hits[0].otherSet)
                 est = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
-                                       disjointRoles, rates, machine, calib,
-                                       workloadName, workload);
+                                       disjointRoles, phases, rates, machine,
+                                       calib, workloadName, workload);
             for (auto *d : existing->second) {
                 d->escalations.push_back(
                     "cross-TU line-sharing evidence: " + detail);
@@ -2165,8 +2218,8 @@ static unsigned emitCrossTUSharedLineFindings(
         };
         if (hits[0].writerSet && hits[0].otherSet) {
             d.cost = estimateLineCost(*hits[0].writerSet, *hits[0].otherSet,
-                                      disjointRoles, rates, machine, calib,
-                                      workloadName, workload);
+                                      disjointRoles, phases, rates, machine,
+                                      calib, workloadName, workload);
             recordCostSites(d, *hits[0].writerSet, *hits[0].otherSet);
         }
         d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
@@ -3599,6 +3652,20 @@ ScanResult ScanPipeline::run(
     result.threadRoles = computeThreadRoles(result.threadRoleFacts,
                                             request.config.threadEntryPatterns,
                                             request.config.mainFunctionPatterns);
+
+    // Which side of the program's first thread creation each function runs
+    // on. Solved here for the same reason points-to is: the call site that
+    // decides it sits in a caller this shard may never have compiled.
+    const PhaseVerdicts phases = computePhases(result.threadRoleFacts);
+    if (phases.dark)
+        report("phase", "not partitioned: " + phases.darkReason);
+    else
+        report("phase",
+               std::to_string(phases.preThread.size()) + " of " +
+               std::to_string(phases.functionsSeen) +
+               " function(s) run only before the first thread exists, " +
+               std::to_string(phases.spawning.size()) + " can spawn; window "
+               "ends at " + phases.windowEnd);
     if (!result.threadRoles.functionRoles.empty()) {
         report("thread_roles",
                std::to_string(result.threadRoleFacts.threadEntries.size()) +
@@ -3892,7 +3959,7 @@ ScanResult ScanPipeline::run(
     TrueSharingGates tsGates;
     emitTrueSharingFindings(
         result.diagnostics, contention, result.escapeSummary,
-        result.threadRoleFacts, result.threadRoles, globalHot, rates,
+        result.threadRoleFacts, result.threadRoles, globalHot, phases, rates,
         *machine, costCalib, workloadName, workload, tsGates);
     // Reported whether or not anything fired, which is the point.
     report("true_sharing", tsGates.summary());
@@ -3904,7 +3971,7 @@ ScanResult ScanPipeline::run(
 
     unsigned crossLine = emitCrossTUSharedLineFindings(
         result.diagnostics, result.escapeSummary, result.threadRoleFacts,
-        result.threadRoles, globalHot, rates, *machine, costCalib,
+        result.threadRoles, globalHot, phases, rates, *machine, costCalib,
         workloadName, workload, request.config.cacheLineBytes);
     if (crossLine > 0)
         report("shared_lines", std::to_string(crossLine) +
@@ -3912,9 +3979,14 @@ ScanResult ScanPipeline::run(
 
     if (unsigned costGraded = applyCostVerdict(
             result.diagnostics, result.threadRoleFacts, result.threadRoles,
-            rates, *machine, workload, costCalib, workloadName))
+            phases, rates, *machine, workload, costCalib, workloadName))
         report("cost_model", std::to_string(costGraded) +
                " finding(s) carry an estimated cycles-per-operation");
+
+    if (unsigned phaseRefuted = applyPhaseVerdict(result.diagnostics))
+        report("phase", std::to_string(phaseRefuted) +
+               " finding(s) withdrawn: every store to the line is sequenced "
+               "before the program's first thread creation");
 
     // Affinity respect runs before dedup so all duplicates demote alike.
     std::string affinityAPI =

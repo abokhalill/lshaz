@@ -113,6 +113,7 @@ set(LSHAZ_SOURCES
     src/analysis/rate_model.cpp
     src/analysis/call_graph.cpp
     src/analysis/thread_role.cpp
+    src/analysis/phase.cpp
     src/analysis/striped_array_summary.cpp
     src/analysis/striped_array.cpp
     src/analysis/data_flow.cpp
@@ -215,6 +216,7 @@ add_executable(pipeline_test
     src/analysis/points_to.cpp
     src/analysis/event_profile.cpp
     src/analysis/thread_role.cpp
+    src/analysis/phase.cpp
     src/analysis/striped_array_summary.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
 )
@@ -236,6 +238,7 @@ add_executable(analysis_test
     src/analysis/call_graph.cpp
     src/analysis/escape.cpp
     src/analysis/thread_role.cpp
+    src/analysis/phase.cpp
     src/analysis/striped_array_summary.cpp
     src/analysis/striped_array.cpp
     src/core/hot_path.cpp

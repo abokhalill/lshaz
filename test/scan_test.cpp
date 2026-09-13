@@ -1056,6 +1056,39 @@ void testThreadRoleEscalation(const std::string &bin) {
     fs::remove_all(tmp);
 }
 
+// Fixture: test/fixtures/phase. AppConfig is stored only by load_config,
+// which main calls before it spawns anything, so no second core can ever hold
+// that line. LiveCounters is the control: written on both sides while the
+// worker runs, and identical in every other respect.
+//
+// Both halves matter. A partition that withdraws neither has stopped working
+// and looks exactly like a clean scan; one that withdraws both is refuting on
+// the absence of evidence rather than on the happens-before edge.
+void testPhasePartition(const std::string &bin) {
+    std::cerr << "test: pre-thread stores withdraw a sharing finding\n";
+    if (!fs::exists("test/fixtures/phase")) {
+        std::cerr << "  SKIP: fixture missing\n";
+        return;
+    }
+    auto tmp = isolateFixture("test/fixtures/phase", "phase");
+    auto project = (tmp / "project").string();
+
+    auto r = run(bin + " scan " + project + " --no-ir --format json");
+    check(contains(r.err, "run only before the first thread exists"),
+          "partition reported, not dark");
+    check(contains(r.err, "every store to the line is sequenced before the "
+                          "program's first thread creation"),
+          "phase withdrawal reported");
+    check(contains(r.err, "FL002=1"),
+          "exactly one sharing finding withdrawn on a refuted precondition");
+    check(countOccurrences(r.out, "\"FL002\"") == 1,
+          "one sharing finding survives");
+    check(contains(r.out, "LiveCounters"),
+          "and it is the concurrently written control");
+
+    fs::remove_all(tmp);
+}
+
 // ===== Output format tests =====
 
 void testJSONOutput(const std::string &bin, const std::string &fixture) {
@@ -1502,6 +1535,7 @@ int main() {
     testHazardDetectionWithConfig(bin, fixture);
     testMultipleTUs(bin, fixture);
     testThreadRoleEscalation(bin);
+    testPhasePartition(bin);
 
     // Output formats.
     testJSONOutput(bin, fixture);

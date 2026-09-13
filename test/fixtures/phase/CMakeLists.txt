@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(phase C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(phase src/main.c src/worker.c)
+find_package(Threads REQUIRED)
+target_link_libraries(phase PRIVATE Threads::Threads)

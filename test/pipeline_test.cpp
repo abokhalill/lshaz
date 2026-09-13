@@ -6,6 +6,7 @@
 #include "lshaz/analysis/escape_summary.h"
 #include "lshaz/hypothesis/pmu_calibration.h"
 #include "lshaz/analysis/thread_role.h"
+#include "lshaz/analysis/phase.h"
 #include "lshaz/core/diagnostic.h"
 #include "lshaz/core/ladder.h"
 #include "lshaz/analysis/memory.h"
@@ -770,6 +771,162 @@ void testThreadRoleCycle() {
     check(v.roleOf("w") == ROLE_WORKER, "self-recursion converges");
 }
 
+// ===== Concurrency phase partition =====
+
+// main calls init() then spawns, so init and everything under it is on the
+// near side of the happens-before edge and serve() is not.
+void testPhaseWindow() {
+    std::cerr << "test: phase partition splits main at the spawn\n";
+    using namespace lshaz;
+    ThreadRoleSummary f;
+    f.threadEntries = {"worker"};
+    f.spawnPoints["spawn_all"] = {2, 2};
+    f.callEdges["main"] = {"init", "spawn_all", "serve"};
+    f.edgeOrder["main"]["init"] = {1, 1};
+    f.edgeOrder["main"]["spawn_all"] = {2, 2};
+    f.edgeOrder["main"]["serve"] = {3, 3};
+    f.callEdges["init"] = {"load"};
+    f.edgeOrder["init"]["load"] = {1, 1};
+    f.callEdges["serve"] = {"load"};
+    f.edgeOrder["serve"]["load"] = {1, 1};
+    f.callEdges["worker"] = {"tick"};
+    f.edgeOrder["worker"]["tick"] = {1, 1};
+
+    auto v = computePhases(f);
+    check(!v.dark, "spawn site and main both present");
+    check(v.isPreThread("main"), "main starts before any thread");
+    check(v.isPreThread("init"), "called before the spawn");
+    check(!v.isPreThread("serve"), "called after the spawn");
+    check(!v.isPreThread("load"),
+          "reached from both sides, so concurrent wins");
+    check(!v.isPreThread("tick"), "under a thread entry");
+    check(!v.isPreThread("never_seen"), "unknown reads as concurrent");
+    check(v.allPreThread({"main", "init"}), "all-pre-thread set");
+    check(!v.allPreThread({"init", "serve"}), "one live member is enough");
+    check(!v.allPreThread({}), "a claim about nobody is not a claim");
+}
+
+// The positive controls. Refuting on an absence is how a partition turns a
+// precision gain into silent recall loss, so each one is checked separately.
+void testPhaseDarkness() {
+    std::cerr << "test: phase partition declines to answer when blind\n";
+    using namespace lshaz;
+    {
+        ThreadRoleSummary f;
+        f.callEdges["main"] = {"init"};
+        f.edgeOrder["main"]["init"] = {1, 1};
+        auto v = computePhases(f);
+        check(v.dark, "no thread-creation site anywhere");
+        check(!v.isPreThread("init"), "dark refutes nothing");
+        check(v.concurrentSubset({"init"}).size() == 1,
+              "dark keeps every writer in the rate");
+    }
+    {
+        ThreadRoleSummary f;
+        f.spawnPoints["start"] = {1, 1};
+        f.callEdges["start"] = {"worker"};
+        auto v = computePhases(f);
+        check(v.dark, "no main to partition from");
+    }
+    {
+        ThreadRoleSummary f;
+        f.spawnPoints["ctor_spawn"] = {1, 1};
+        f.preMainFunctions = {"ctor_spawn"};
+        f.callEdges["main"] = {"init"};
+        f.edgeOrder["main"]["init"] = {1, 1};
+        f.callEdges["ctor_spawn"] = {"worker"};
+        auto v = computePhases(f);
+        check(v.dark, "a global constructor spawns before main runs");
+    }
+}
+
+// A spawn inside a loop reaches statements above it, since the loop runs
+// again. Encoded as the enclosing loop's head index rather than the call
+// site's own.
+void testPhaseLoopReachesBackward() {
+    std::cerr << "test: a spawn in a loop reaches the whole loop\n";
+    using namespace lshaz;
+    ThreadRoleSummary f;
+    f.threadEntries = {"worker"};
+    f.spawnPoints["spawn_one"] = {2, 4};
+    f.callEdges["main"] = {"before", "prep", "spawn_one"};
+    f.edgeOrder["main"]["before"] = {1, 1};
+    f.edgeOrder["main"]["prep"] = {2, 3};    // inside the loop, head at 2
+    f.edgeOrder["main"]["spawn_one"] = {2, 4};
+
+    auto v = computePhases(f);
+    check(v.isPreThread("before"), "outside the loop, above it");
+    check(!v.isPreThread("prep"),
+          "inside the loop with the spawn, so a later iteration overlaps");
+}
+
+// An indirect call is only a spawn point if something that can reach it
+// spawns. Signature alone answers yes far too often.
+void testPhaseIndirectResolution() {
+    std::cerr << "test: indirect calls resolve through slots, not signatures\n";
+    using namespace lshaz;
+    ThreadRoleSummary f;
+    f.threadEntries = {"worker"};
+    f.spawnPoints["worker"] = {1, 1};
+    f.addressTakenBySignature["void *(void *)"] = {"worker", "defrag_alloc"};
+    f.callEdges["main"] = {"apply", "spawn_all"};
+    f.edgeOrder["main"]["apply"] = {1, 1};
+    f.edgeOrder["main"]["spawn_all"] = {2, 2};
+    f.spawnPoints["spawn_all"] = {1, 1};
+    // apply(defrag_alloc) then calls it through its own parameter.
+    f.callEdges["apply"] = {};
+    f.fnSlotTargets["P:apply|0"] = {"defrag_alloc"};
+    f.indirectSlotCalls["apply"]["P:apply|0"] = {1, 1};
+
+    auto v = computePhases(f);
+    check(!v.spawning.count("apply"),
+          "the slot names defrag_alloc, which does not spawn");
+    check(v.isPreThread("apply"), "so the call above the spawn stays early");
+
+    // The same shape with the slot opaque cannot be answered, and the
+    // conservative answer is the one that refutes nothing.
+    f.fnSlotOpaque.insert("P:apply|0");
+    auto blind = computePhases(f);
+    check(blind.spawning.count("apply"), "an opaque slot may hold anything");
+    check(!blind.isPreThread("apply"), "and that closes the window early");
+}
+
+// A call that never returns cannot make the statement after it concurrent.
+// Most codebases spell the fatal path without the attribute, so the site
+// evidence has to carry it.
+void testPhaseNoReturn() {
+    std::cerr << "test: an unreachable-terminated callee blocks propagation\n";
+    using namespace lshaz;
+    ThreadRoleSummary f;
+    f.threadEntries = {"worker"};
+    f.spawnPoints["crash_report"] = {1, 1};
+    f.callEdges["main"] = {"check", "spawn_all"};
+    f.edgeOrder["main"]["check"] = {1, 1};
+    f.edgeOrder["main"]["spawn_all"] = {2, 2};
+    f.spawnPoints["spawn_all"] = {1, 1};
+    f.callEdges["check"] = {"fatal"};
+    f.edgeOrder["check"]["fatal"] = {1, 1};
+    f.callEdges["fatal"] = {"crash_report"};
+    f.edgeOrder["fatal"]["crash_report"] = {1, 1};
+
+    // Without the evidence, the crash path makes every caller of an assert
+    // a thread creation.
+    f.callSiteCount["fatal"] = 3;
+    auto live = computePhases(f);
+    check(live.spawning.count("check"), "fatal is taken as returning");
+    check(!live.isPreThread("check"), "so the window closes at the assert");
+
+    // Two sites say unreachable outright; the third is the tail call of a
+    // wrapper whose own sites all do.
+    f.unreachableAfterCount["fatal"] = 2;
+    f.tailCallee["fatal_with_info"] = "fatal";
+    f.callSiteCount["fatal_with_info"] = 5;
+    f.unreachableAfterCount["fatal_with_info"] = 5;
+    auto dead = computePhases(f);
+    check(!dead.spawning.count("check"), "fatal no longer returns");
+    check(dead.isPreThread("check"), "and the window reopens past it");
+}
+
 void testFilterSourcesSkipsVendored() {
     std::vector<std::string> src = {
         "/p/src/server.c", "/p/deps/jemalloc/jemalloc.c",
@@ -1336,6 +1493,11 @@ int main() {
     testThreadRolePatternRoots();
     testThreadRoleNoWorkers();
     testThreadRoleCycle();
+    testPhaseWindow();
+    testPhaseDarkness();
+    testPhaseLoopReachesBackward();
+    testPhaseIndirectResolution();
+    testPhaseNoReturn();
 
     // PMU instrument election
     testMechanismClaimCeiling();
