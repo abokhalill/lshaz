@@ -916,7 +916,19 @@ int runObserveCommand(int argc, const char **argv) {
     // Zero is a measurement. Without these the store only ever learns about
     // lines that cost something, so a line the machine has repeatedly shown
     // silent is reported at the same grade every scan.
+    //
+    // Only when the profile saw coherence traffic somewhere. A record with no
+    // HITM anywhere is indistinguishable from one taken with the wrong event,
+    // without the right permissions, or against traffic the kernel absorbed,
+    // and storing zeros from it teaches the model every mechanism is free.
     unsigned zeroed = 0;
+    if (!total) {
+        llvm::outs() << "  " << executedSilent.size()
+                     << " line(s) ran silent, not stored: this profile"
+                        " recorded no coherence traffic at all, so silence"
+                        " here is the instrument's and not the machine's\n";
+        executedSilent.clear();
+    }
     for (const auto *f : executedSilent) {
         CostObservation o;
         o.mechanism = f->mechanism;

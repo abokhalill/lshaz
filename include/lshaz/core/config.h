@@ -109,6 +109,7 @@ struct Config {
     unsigned cyclesDram = 0;
     unsigned cyclesMispredict = 0;
     unsigned mlpOverlapPct = 0;
+    unsigned coherenceWindowCycles = 0;
 
     // A property of the workload, not the hardware. Without it a cost cannot
     // be read as a share of an operation and nothing is graded on it.

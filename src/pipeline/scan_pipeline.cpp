@@ -1396,6 +1396,13 @@ static CostEstimate estimateLineCost(const std::set<std::string> &writers,
             (static_cast<__int128>(rRate) * kMilli) / wRate);
     est.add("reads_per_store", ratio, wKnown && rKnown, "call graph");
 
+    // Rates carry no phase: two roles at one mean collide constantly if
+    // interleaved and never if phase-disjoint. Left unestablished so observe
+    // can settle it, and deriving a value here from the call graph would be
+    // a guess dressed as a term.
+    est.add("temporal_coincidence", kMilli, false,
+            "not established, taken as fully coincident");
+
     est.add("hitm_cycles",
             toMilli(machine.cyclesHitmLocal ? machine.cyclesHitmLocal : 100),
             machine.hasCoherenceCost(),
@@ -3788,6 +3795,7 @@ ScanResult ScanPipeline::run(
     machineStorage.cyclesDram = request.config.cyclesDram;
     machineStorage.cyclesMispredict = request.config.cyclesMispredict;
     machineStorage.mlpOverlapPct = request.config.mlpOverlapPct;
+    machineStorage.coherenceWindowCycles = request.config.coherenceWindowCycles;
     const MachineModel *machine = &machineStorage;
     WorkloadModel workload;
     workload.cyclesPerOp = request.config.workloadCyclesPerOp;

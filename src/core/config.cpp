@@ -61,6 +61,7 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("cycles_dram",            cfg.cyclesDram);
         io.mapOptional("cycles_mispredict",      cfg.cyclesMispredict);
         io.mapOptional("mlp_overlap_pct",        cfg.mlpOverlapPct);
+        io.mapOptional("coherence_window_cycles", cfg.coherenceWindowCycles);
         io.mapOptional("workload_cycles_per_op", cfg.workloadCyclesPerOp);
         io.mapOptional("workload_name",          cfg.workloadName);
         io.mapOptional("workload_sharers",       cfg.workloadSharers);
