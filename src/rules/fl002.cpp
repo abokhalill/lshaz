@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <map>
 #include "lshaz/core/rule.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
@@ -89,9 +90,16 @@ public:
         unsigned denseSites = 0;
         std::vector<std::string> writeEvidence;
         const auto &evPairs = hasAtomicPairs ? atomicPairs : mutablePairs;
-        for (const auto &p : evPairs) {
+        // How much write evidence each pair carries, kept from the loop below
+        // so the evidence list can lead with the pairs the reduce phase can
+        // actually settle. A pair of fields nothing writes joins to nothing.
+        std::vector<unsigned> pairWeight(evPairs.size(), 0);
+        for (size_t pi = 0; pi < evPairs.size(); ++pi) {
+            const auto &p = evPairs[pi];
             auto ea = escape.fieldWriteEvidence(p.a->decl);
             auto eb = escape.fieldWriteEvidence(p.b->decl);
+            pairWeight[pi] = ea.writeSites + eb.writeSites +
+                             4 * (ea.loopWriteSites + eb.loopWriteSites);
             if (ea.loopWriteSites || eb.loopWriteSites) {
                 densePair = true;
                 denseSites += ea.loopWriteSites + eb.loopWriteSites;
@@ -353,11 +361,35 @@ public:
         // join could escalate on a pair this rule never flagged. Bounded
         // separately from the display cap: the join is for machines, and
         // large structs put the interesting pair deep in the list.
+        // A line is the unit of the mechanism, so every line that has a pair
+        // gets one before any line gets a second.
         constexpr size_t kMaxPairEvidence = 64;
         std::string pairFields;
-        for (size_t i = 0; i < evPairs.size() && i < kMaxPairEvidence; ++i) {
-            if (i) pairFields += ';';
-            pairFields += evPairs[i].a->name + "|" + evPairs[i].b->name;
+        {
+            std::map<uint64_t, std::vector<size_t>> byLine;
+            for (size_t pi = 0; pi < evPairs.size(); ++pi)
+                byLine[evPairs[pi].lineIndex].push_back(pi);
+            // Within a line, most write evidence first. Ties keep field order,
+            // so the list stays stable for the same input.
+            for (auto &[line, idx] : byLine)
+                std::stable_sort(idx.begin(), idx.end(),
+                                 [&](size_t x, size_t y) {
+                                     return pairWeight[x] > pairWeight[y];
+                                 });
+            size_t emitted = 0;
+            for (size_t round = 0; emitted < kMaxPairEvidence; ++round) {
+                bool any = false;
+                for (const auto &[line, ps] : byLine) {
+                    if (round >= ps.size())
+                        continue;
+                    any = true;
+                    if (emitted++) pairFields += ';';
+                    const auto &q = evPairs[ps[round]];
+                    pairFields += q.a->name + "|" + q.b->name;
+                    if (emitted >= kMaxPairEvidence) break;
+                }
+                if (!any) break;
+            }
         }
 
         diag.structuralEvidence = {
