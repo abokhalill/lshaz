@@ -2610,20 +2610,15 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
     // would retire findings for want of an allocator map.
     constexpr double kRefuteFloor = 0.80;
 
-    // Two separate permissions, and they fail for different reasons.
-    //
-    // A profile may only SETTLE anything if its instrument was shown to
-    // measure coherence. Sample counts are real whatever encoding produced
-    // them, so an unverified profile still ranks; it just cannot say what the
-    // hardware was doing, because nothing established that.
+    // Settling and refuting are separate permissions. Counts are real whatever
+    // encoding produced them, so an unverified profile still ranks; it just
+    // cannot say what the hardware was doing.
     const bool maySettle = prof.coherenceVerified();
 
-    // Absence only means something when the profile could name most of what
-    // it saw, AND when its instrument can see the class of sharing being
-    // refuted. On a heap-heavy target it names very little, and refuting there
-    // would retire findings for want of an allocator map. On a store-blind
-    // instrument it would retire findings for want of an event, which is
-    // worse: the hazard is there and the hardware never reports it.
+    // Refuting on absence needs the profile to name most of what it saw and to
+    // be able to see the class being refuted. Without the first it retires
+    // findings for want of an allocator map; without the second, for want of
+    // an event the hazard never triggers.
     const bool mayRefute = maySettle && prof.seesStoreOnlySharing() &&
                            prof.resolutionRate() >= kRefuteFloor;
     out.verified = maySettle;
@@ -2670,11 +2665,23 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
         d.structuralEvidence["measured_samples"] =
             std::to_string(hit->samples);
 
-        // The gate is about two threads reaching the object, and every
-        // hit-modified sample is on its own a line found dirty in another
-        // core. A count that rules out a stray settles it; a count of distinct
-        // sampling cores does not, and would miss a pinned producer/consumer
-        // pair, which is one consumer and real sharing.
+        // Several objects answer to this name, so the samples are their sum.
+        // Rank on it, settle nothing.
+        if (hit->ambiguous) {
+            d.structuralEvidence["measured_ambiguous_symbol"] = "true";
+            d.escalations.push_back(
+                "measured: " + std::to_string(hit->samples) +
+                " cross-core sample(s) reached storage named '" + hitName +
+                "', but more than one object in the binary carries that name, "
+                "so the traffic cannot be attributed to this one");
+            ++out.ranked;
+            continue;
+        }
+
+        // Every hit-modified sample is on its own a line found dirty in
+        // another core, so a count that rules out a stray settles the gate.
+        // Counting distinct sampling cores would miss a pinned
+        // producer/consumer pair.
         if (maySettle && hit->samples >= kMinSamplesToEstablish) {
             const std::string obs =
                 "'" + hitName + "' took " + std::to_string(hit->samples) +
@@ -2692,11 +2699,10 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
             ++out.established;
         }
 
-        // The mechanism claim is about a field pair, and object traffic does
-        // not settle it. False sharing and two threads contending one field
-        // produce the same object-level number and take different fixes, so
-        // settling the mechanism from that number establishes whichever one
-        // the rule happened to guess.
+        // The mechanism claim is about a field pair. False sharing and two
+        // threads contending one field give the same object-level number and
+        // take different fixes, so settling from that number just confirms
+        // whichever the rule guessed.
         auto pe = d.structuralEvidence.find("pair_extents");
         const std::vector<ClaimedField> claimed =
             pe == d.structuralEvidence.end() ? std::vector<ClaimedField>{}
@@ -2719,10 +2725,9 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
                             "', split across " + joinNames(se.fieldsHit, 3));
                     break;
                 case SharingVerdict::SingleField:
-                    // Re-attributing to true sharing asserts the OTHER field
-                    // on the line was quiet. A store-blind instrument cannot
-                    // establish that: a neighbour written with plain stores
-                    // contends exactly as hard and reports nothing.
+                    // Re-attributing asserts the other field was quiet, which
+                    // a store-blind instrument cannot establish: a neighbour
+                    // written with plain stores contends and reports nothing.
                     if (!prof.seesStoreOnlySharing()) {
                         d.escalations.push_back(
                             "measured: all " +
@@ -2751,11 +2756,9 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
                     ++out.reattributed;
                     break;
                 case SharingVerdict::CrossObjectLine: {
-                    // Not a variant of the rule's claim: a distinct mechanism
-                    // the source cannot state, because which globals share a
-                    // line is the linker's decision and appears nowhere in an
-                    // AST. Padding the struct does not fix it; separating the
-                    // objects does.
+                    // A distinct mechanism, not a variant of the rule's claim:
+                    // which globals share a line is the linker's decision.
+                    // Padding the struct does not fix it.
                     std::string others;
                     for (size_t k = 0; k < se.lineNeighbours.size() && k < 3; ++k) {
                         if (k) others += ", ";
@@ -2791,9 +2794,8 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
                     break;
             }
         } else if (maySettle && !fs.empty()) {
-            // No field extents from the rule, so the join is offset-level:
-            // two distinct offsets on one line is the false-sharing signature
-            // without naming which fields they are.
+            // No field extents from the rule, so the join stays offset-level:
+            // the false-sharing signature without naming the fields.
             d.settleClaim("MESI invalidation ping-pong",
                           ClaimState::Established,
                           std::to_string(fs.size()) +

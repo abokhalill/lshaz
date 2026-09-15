@@ -1160,6 +1160,41 @@ void testInstrumentProvenance() {
                   "offsets":[{"offset":0,"samples":6370,"cpus":[1,2]}]}]})",
               n, nerr),
           "a profile carrying line neighbours parses");
+    // The join key is the source-level name, because that is what the analyzer
+    // writes. A namespaced C++ global resolves to _ZN6engine4book8countersE in
+    // the symbol table and to engine::book::counters in a finding, and before
+    // the sampler demangled, the two never met on any C++ target.
+    MemoryProfile cxx;
+    std::string cerr2;
+    check(parseMemoryProfile(
+              R"({"kind":"lshaz.memory-profile","objects":[
+                  {"id":"g:engine::book::counters","samples":16016,
+                   "symbol":"_ZN6engine4book8countersE",
+                   "offsets":[{"offset":0,"samples":16016,"cpus":[0,1]}]}]})",
+              cxx, cerr2),
+          "a demangled object id parses");
+    const auto *cc = cxx.find("g:engine::book::counters");
+    check(cc != nullptr, "and is found under the name a finding would use");
+    check(cc && cc->symbol == "_ZN6engine4book8countersE",
+          "with the linker name kept for a human to grep for");
+    check(!cc->ambiguous, "and is unambiguous by default");
+
+    // Two file statics called `initialized` in two TUs are two objects. The
+    // samples are their sum, so they belong to the one a finding meant no more
+    // than to the one it did not.
+    MemoryProfile amb;
+    std::string aerr;
+    check(parseMemoryProfile(
+              R"({"kind":"lshaz.memory-profile","objects":[
+                  {"id":"g:initialized","samples":16016,"ambiguous":true,
+                   "offsets":[{"offset":0,"samples":8008,"cpus":[0]},
+                              {"offset":8,"samples":8008,"cpus":[1]}]}]})",
+              amb, aerr),
+          "a profile flagging a duplicated name parses");
+    const auto *ai = amb.find("g:initialized");
+    check(ai && ai->ambiguous,
+          "and the flag survives, so nothing settles on the wrong object");
+
     const auto *so = n.find("g:stopf");
     check(so && so->neighbours.size() == 1, "the neighbour arrived");
     check(so->neighbours[0].at == -8,

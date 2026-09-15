@@ -41,19 +41,20 @@ struct LineNeighbour {
     std::string objectId;
     int64_t at = 0;
 
-    // Offset within THIS object of a sample that landed on the shared line.
-    //
-    // Not derivable from `at`: an object is not line-aligned, so the line grid
-    // taken relative to its start is off by its own misalignment. The flag
-    // that measured this sat 8 bytes into its line, which put its neighbour at
-    // -8 and outside every object-relative line. The sampler knows the real
-    // line, so it names a sample on it instead of leaving a grid to be guessed.
+    // Offset within THIS object of a sample on the shared line. An object is
+    // not line-aligned, so a line grid taken from its start can put a
+    // neighbour outside every line. Match on this, never on `at`.
     uint64_t witness = 0;
 };
 
 struct ObjectCoherence {
     std::string objectId;
+    std::string symbol;   // ELF name when it differs from the source-level one
     uint64_t samples = 0;
+
+    // More than one symbol in the binary carries this name, so the samples are
+    // a sum over several objects and belong to none of them in particular.
+    bool ambiguous = false;
     std::map<uint64_t, OffsetCoherence> byOffset;
     std::set<unsigned> cpus;
 
@@ -94,10 +95,9 @@ struct ClaimedField {
     }
 };
 
-// False sharing and true sharing produce the same object-level measurement and
-// take different fixes: padding separates two fields, and does nothing at all
-// for one field two threads both want. Discriminating them needs the measured
-// offsets checked against the fields the rule actually named.
+// False and true sharing give the same object-level count and take different
+// fixes. Separating them needs the measured offsets checked against the fields
+// the rule named.
 enum class SharingVerdict {
     NoTraffic,        // nothing measured on this object
     OffClaimedLines,  // the object moved, but not on the lines the rule named
@@ -120,15 +120,13 @@ struct SharingEvidence {
     std::vector<std::string> lineNeighbours; // other objects on the same line
 };
 
-// Each XSNP_HITM sample is on its own proof that the line was dirty in another
-// core, so cross-core transfer needs a count that rules out a stray, not a
-// count of distinct sampling cores. Requiring two sampled cores would miss a
-// pinned producer/consumer pair, which is real sharing with one consumer.
+// Each sample independently proves the line was dirty in another core, so this
+// rules out a stray. Counting distinct sampling cores instead would miss a
+// pinned producer/consumer pair.
 inline constexpr uint64_t kMinSamplesToEstablish = 8;
 
-// Refuting false sharing is the stronger claim: it asserts a second field on
-// the line carried no traffic. A field taking 20% of a line's transfers goes
-// unsampled with probability 0.8^n, which at n=64 is 6e-7.
+// Refuting asserts a second field on the line was quiet. A field taking a
+// fifth of its transfers goes unsampled with probability 0.8^n.
 inline constexpr uint64_t kMinSamplesToDiscriminate = 64;
 
 SharingEvidence discriminateSharing(const ObjectCoherence &oc,
@@ -140,28 +138,19 @@ struct MemoryProfile {
     std::string machine;
     std::string workload;
 
-    // What was counted, and whether it was shown to count what we say it does.
-    //
-    // PERF_TYPE_RAW accepts any config. An encoding that names cross-core
-    // hit-modified traffic on one part names something else on the next, and
-    // the samples arrive looking identical either way: real numbers, wrong
-    // meaning. A profile that did not prove its own instrument can rank
-    // findings and must not establish a mechanism.
+    // PERF_TYPE_RAW accepts any config, so a wrong encoding yields real samples
+    // with a different meaning. Without a passing self-test a profile may rank
+    // findings but must not settle a claim.
     std::string event;              // raw PMU config, as written
     std::string cpuModel;           // vendor-family-model of the machine
     std::string selfTest;           // pass | fail | skipped, empty if older
     uint64_t selfTestSamples = 0;   // hits on a known-positive victim line
 
-    // Whether this instrument can see two cores sharing a line by storing to
-    // it. Measured on an i9-9900K: MEM_LOAD_L3_HIT_RETIRED.XSNP_HITM reports
-    // 20016 samples on a line two cores read-modify-write and 0 on the same
-    // line written with plain stores, which is what an unshared line reports.
-    // A load event cannot see a store-driven transfer, and no PEBS event on
-    // that part carries a data address for one.
-    //
-    // It is a real hazard, and the single-writer-per-slot striping FL002 exists
-    // to catch produces exactly it. So silence from a store-blind instrument
-    // is not evidence of absence, and nothing may be refuted on it.
+    // Whether the instrument can see a line shared by stores alone. A load
+    // event reports nothing for that pattern, which is what an unshared line
+    // reports, and single-writer-per-slot striping produces exactly it. Do not
+    // refute on silence unless this is "visible".
+    // See reports/instrument-characterization.md.
     std::string storeOnlySharing;   // visible | blind | unknown
 
     bool coherenceVerified() const { return selfTest == "pass"; }

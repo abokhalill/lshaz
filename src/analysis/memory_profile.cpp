@@ -70,9 +70,8 @@ SharingEvidence discriminateSharing(const ObjectCoherence &oc,
     if (!lineBytes || claimed.empty() || oc.byOffset.empty())
         return e;
 
-    // A field wider than the gap to the next boundary belongs to every line its
-    // bytes touch, so a straddling field is not lost from the line where the
-    // traffic happened to land.
+    // A field belongs to every line its bytes touch, so a straddler is not lost
+    // from the line the traffic landed on.
     std::map<uint64_t, std::vector<const ClaimedField *>> byLine;
     for (const auto &f : claimed) {
         const uint64_t last = f.offset + (f.size ? f.size - 1 : 0);
@@ -112,8 +111,8 @@ SharingEvidence discriminateSharing(const ObjectCoherence &oc,
         return e;
     }
 
-    // Lowest offset breaks a tie, so the reported line does not depend on map
-    // iteration order changing under a different sample distribution.
+    // Lowest offset breaks ties: the reported line must not depend on the
+    // sample distribution.
     const uint64_t best = std::max_element(
         tally.begin(), tally.end(),
         [](const auto &a, const auto &b) {
@@ -145,11 +144,8 @@ SharingEvidence discriminateSharing(const ObjectCoherence &oc,
     else if (e.fieldsHit.size() >= 2)
         e.verdict = SharingVerdict::MultiField;
     else if (!e.lineNeighbours.empty())
-        // A different object shares this line, so traffic landing in one field
-        // does not mean one field is contended. Measured on an i9-9900K: a
-        // read-only flag took 9727 samples because a counter eight bytes below
-        // it was written from another core. Calling that field contention
-        // names the wrong cause and recommends the wrong fix.
+        // Another object holds part of this line, so traffic in one field is
+        // not evidence that the field is what is contended.
         e.verdict = SharingVerdict::CrossObjectLine;
     else if (t.samples < kMinSamplesToDiscriminate)
         e.verdict = SharingVerdict::TooFewSamples;
@@ -350,6 +346,12 @@ bool parseMemoryProfile(const std::string &json, MemoryProfile &out,
                     if (ok == "id")           oc.objectId = p.str();
                     else if (ok == "samples") oc.samples = p.num();
                     else if (ok == "offsets") parseOffsets(p, oc);
+                    else if (ok == "symbol")  oc.symbol = p.str();
+                    else if (ok == "ambiguous") {
+                        p.ws();
+                        oc.ambiguous = p.i < p.s.size() && p.s[p.i] == 't';
+                        p.skip();
+                    }
                     else if (ok == "neighbours") parseNeighbours(p, oc);
                     else p.skip();
                     p.take(',');

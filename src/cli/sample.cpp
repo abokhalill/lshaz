@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <asm/unistd.h>
+#include <cxxabi.h>
 #include <elf.h>
 #include <sched.h>
 #include <fcntl.h>
@@ -93,11 +94,14 @@ std::vector<MapRegion> readMaps(pid_t pid) {
 
 struct Sym {
     uint64_t value = 0, size = 0;
-    std::string name;
-    char kind = '?';   // O object, F func
-    // st_size was 0: a linker marker like __TMC_END__ or _DYNAMIC, not
-    // storage. Containment gives it one byte so an exact hit still resolves,
-    // but it must never be reported as something sharing a line.
+    std::string name;       // as the ELF carries it
+    // Demangled form, which is the join key: the analyzer names globals with
+    // getQualifiedNameAsString. C matches either way, namespaced C++ does not.
+    std::string sourceName;
+    bool ambiguous = false; // another symbol carries this name
+    char kind = '?';        // O object, F func
+    // st_size was 0: a linker marker, not storage. Given one byte so an exact
+    // hit still resolves, but never reported as sharing a line.
     bool sized = true;
 };
 
@@ -154,6 +158,36 @@ bool loadElf(const std::string &path, ObjectFile &out) {
     munmap(base, len);
     std::sort(out.syms.begin(), out.syms.end(),
               [](const Sym &a, const Sym &b) { return a.value < b.value; });
+
+    // Once per symbol: __cxa_demangle allocates and the resolver runs inside
+    // the drain loop.
+    for (auto &s : out.syms) {
+        if (s.name.compare(0, 2, "_Z") != 0) continue;
+        int status = 0;
+        char *d = abi::__cxa_demangle(s.name.c_str(), nullptr, nullptr, &status);
+        if (status == 0 && d) s.sourceName = d;
+        std::free(d);
+    }
+
+    // Two file statics of the same name are two objects. Traffic under that
+    // name is their sum and must not be attributed to either.
+    std::map<std::string, uint64_t> firstAt;
+    for (auto &s : out.syms) {
+        const std::string &key = s.sourceName.empty() ? s.name : s.sourceName;
+        auto [it, fresh] = firstAt.emplace(key, s.value);
+        if (!fresh && it->second != s.value) s.ambiguous = true;
+    }
+    // The first holder of a duplicated name is as ambiguous as the later ones.
+    for (auto &s : out.syms) {
+        const std::string &key = s.sourceName.empty() ? s.name : s.sourceName;
+        if (s.ambiguous) continue;
+        for (const auto &o : out.syms)
+            if (o.ambiguous && o.value != s.value &&
+                (o.sourceName.empty() ? o.name : o.sourceName) == key) {
+                s.ambiguous = true;
+                break;
+            }
+    }
     return true;
 }
 
@@ -161,7 +195,9 @@ bool loadElf(const std::string &path, ObjectFile &out) {
 
 struct Resolution {
     const char *region = "?";   // bss/data/heap/stack/anon/file/vdso
-    std::string object;         // symbol name when storage is named
+    std::string object;         // source-level name, the form the join uses
+    std::string symbol;         // as the ELF carries it, when the two differ
+    bool ambiguous = false;     // another symbol elsewhere has the same name
     uint64_t offset = 0;        // byte offset into that object
     std::string file;
 };
@@ -221,25 +257,21 @@ public:
         if (it == S.begin()) return r;
         --it;
         if (v >= it->value && v < it->value + it->size) {
-            r.object = it->name;
+            r.object = it->sourceName.empty() ? it->name : it->sourceName;
+            if (!it->sourceName.empty()) r.symbol = it->name;
+            r.ambiguous = it->ambiguous;
             r.offset = v - it->value;
         }
         return r;
     }
 
-    // Every other named object whose storage touches the cache line this
-    // address sits on, with its start relative to the sampled object's start.
+    // Other named objects on the same cache line, each with its start relative
+    // to the sampled object's. Which objects share a line is the linker's
+    // decision and appears in no AST.
     //
-    // Which objects share a line is decided by the linker, not by the source,
-    // so no amount of AST reading produces this. Measured on an i9-9900K: a
-    // read-only flag took 9727 hit-modified samples because a counter eight
-    // bytes below it was being written from another core. Attributing that
-    // line to the flag alone is true as an observation and wrong as an
-    // explanation.
-    // `addr` must be an address the sample actually landed on, not the line
-    // base: the anchor is the object that CONTAINS it. Passing the line base
-    // resolved the anchor to whichever symbol happened to start the line,
-    // which on a two-object line reported the pair backwards.
+    // `addr` must be an address a sample landed on, not a line base: the anchor
+    // is the object containing it, and a line base anchors to whichever symbol
+    // starts the line, reporting the pair backwards.
     std::vector<std::pair<std::string, int64_t>>
     neighboursOn(uint64_t addr, uint64_t lineBytes) const {
         std::vector<std::pair<std::string, int64_t>> out;
@@ -266,7 +298,7 @@ public:
             if (s.value + s.size <= lineLo) continue;
             if (self && s.value == self->value && s.name == self->name)
                 continue;
-            out.emplace_back(s.name,
+            out.emplace_back(s.sourceName.empty() ? s.name : s.sourceName,
                              self ? (int64_t)s.value - (int64_t)self->value
                                   : (int64_t)s.value - (int64_t)lineLo);
         }
@@ -337,11 +369,10 @@ public:
             uint64_t tail = r.meta->data_tail;
             while (tail < head) {
                 // The kernel rounds every record to a multiple of 8, so an
-                // 8-byte header at an 8-aligned offset cannot cross the end of
-                // the buffer and can be read in place. That invariant is what
-                // makes the read below safe, so it is checked rather than
-                // assumed: one bad size desynchronises tail permanently, and
-                // every later header read would then straddle for real.
+                // 8-byte header at an 8-aligned tail never crosses the end and
+                // can be read in place. Validate size anyway: one bad value
+                // desyncs tail permanently and every later header read would
+                // then straddle for real.
                 auto *h = (perf_event_header *)(r.data + (tail % r.sz));
                 const uint64_t sz = h->size;
                 if (sz < sizeof(perf_event_header) || (sz % 8) != 0 ||
@@ -440,14 +471,11 @@ std::string cpuIdentity() {
 
 // ---------- known-positive control ----------
 //
-// An instrument that reports nothing looks exactly like a clean machine, which
-// is why bench/accept.sh will not believe perf c2c until it has seen a known
-// positive. The same rule has to apply to the encoding itself: PERF_TYPE_RAW
-// accepts any config, a wrong one still produces real samples, and nothing in
-// the sample stream says which event they came from.
-//
-// So: build sharing on purpose, on a line whose address is known, and check
-// that the event fires on it.
+// An instrument that reports nothing looks exactly like a clean machine, so
+// sharing is built on purpose and the event must fire on it. Firing alone is
+// not enough: ALL_LOADS and ALL_STORES fire just as hard on a line that is
+// merely busy. The unshared phase separates coherence from access, and
+// dropping it turns this back into a rubber stamp.
 
 struct SelfTest {
     bool ran = false;
@@ -456,9 +484,8 @@ struct SelfTest {
     uint64_t privateHits = 0; // samples on two lines worked equally hard, unshared
     uint64_t storeHits = 0;   // same shared line, written with plain stores
     uint64_t total = 0;       // samples the event produced anywhere
-    // Measured, not assumed: a load event sees nothing when two cores share a
-    // line by storing to it, and that pattern is a real hazard. What the
-    // instrument cannot see bounds what its silence is allowed to refute.
+    // A load event sees nothing when two cores share a line by storing to it.
+    // What the instrument cannot see bounds what its silence may refute.
     bool storeBlind = true;
     std::string problem;
 };
@@ -529,9 +556,8 @@ SelfTest runSelfTest(uint64_t event) {
     }
     st.ran = true;
 
-    // One phase of the control. `shared` decides whether the two threads work
-    // the same line or a line each; everything else is identical, so the only
-    // difference between the two runs is coherence.
+    // The phases must stay identical apart from `shared` and `rmw`, or the
+    // difference between them stops being the thing being measured.
     auto phase = [&](bool shared, bool rmw, uint64_t &hits) {
         std::atomic<uint64_t> *slotA = &g_victim[0];
         std::atomic<uint64_t> *slotB = shared ? &g_victim[1] : &g_privateB[0];
@@ -584,22 +610,8 @@ SelfTest runSelfTest(uint64_t event) {
     rings.disable();
     rings.closeAll();
 
-    // Measured on an i9-9900K: XSNP_HITM reports 20016 samples on a line two
-    // cores read-modify-write and 0 on the same line written with plain
-    // stores, which is the same 0 an unshared line gives. Store-only sharing
-    // is a real hazard and the single-writer-per-slot idiom FL002 exists for
-    // produces exactly it, so a profile has to carry whether its instrument
-    // can see that class rather than letting silence read as absence.
     st.storeBlind = st.storeHits * 8 < st.hits;
 
-    // Firing on the shared line is not enough. MEM_INST_RETIRED.ALL_LOADS
-    // fires on it too, at the same rate, because the line is being hammered
-    // and not because it is being shared; so does ALL_STORES. Both were
-    // measured passing a liveness-only check on an i9-9900K.
-    //
-    // The discriminating question is whether the event goes quiet when the
-    // same work stops sharing. A coherence event collapses; an access event
-    // does not move.
     constexpr uint64_t kMinHits = 16;
     constexpr uint64_t kMinRatio = 8;
     if (st.hits < kMinHits) {
@@ -703,8 +715,8 @@ int runSample(int argc, const char **argv) {
         }
     }
     // After the whole line is parsed, not where the flag appeared: acting on
-    // half-parsed state made --self-test-only --event X test the default
-    // encoding and report a pass for whatever the caller asked about.
+    // half-parsed state tests the default encoding and reports a pass for
+    // whatever the caller asked about.
     if (selfTestOnly) {
         const SelfTest s = runSelfTest(event);
         if (s.passed) {
@@ -754,10 +766,8 @@ int runSample(int argc, const char **argv) {
     attr.use_clockid = 1;
     attr.clockid = CLOCK_MONOTONIC;
 
-    // Before the target: prove the encoding measures what the profile will
-    // claim it measured. A profile that skipped this cannot establish a
-    // mechanism downstream, and says so in its own text rather than being
-    // quietly weaker.
+    // Before the target: a profile that skipped this cannot settle a claim
+    // downstream, and records that rather than being quietly weaker.
     SelfTest st;
     if (selfTest) {
         st = runSelfTest(event);
@@ -808,24 +818,28 @@ int runSample(int argc, const char **argv) {
     std::map<std::string, std::map<uint64_t, OffsetAgg>> acc;
     uint64_t kept = 0, unresolved = 0;
 
-    // Absolute line addresses a sample landed on, per object. Resolved to
-    // co-occupants after the run, because the symbol lookup is too slow to do
-    // per sample and the answer does not change while the process lives.
+    // Line -> a sample address on it, per object. Resolved to co-occupants
+    // after the run: the symbol lookup is too slow per sample and the answer
+    // does not change while the process lives.
     std::map<std::string, std::map<uint64_t, std::pair<uint64_t, uint64_t>>>
         linesSeen;
+    std::set<std::string> ambiguous;
+    std::map<std::string, std::string> rawSymbol;
 
     auto consume = [&](const Sample &s) {
         if ((pid_t)s.pid != target) return;
         Resolution rr = res.resolve(s.addr);
         if (rr.object.empty()) { ++unresolved; return; }
         const std::string id = "g:" + rr.object;
+        if (rr.ambiguous) ambiguous.insert(id);
+        if (!rr.symbol.empty()) rawSymbol.emplace(id, rr.symbol);
         auto &o = acc[id][rr.offset];
         o.offset = rr.offset;
         ++o.samples;
         o.cpus.insert(s.cpu);
         if (s.weight) { o.weightSum += s.weight; ++o.weightCount; }
-        // One representative address per line: the neighbour lookup anchors
-        // on the object containing it, so a line base will not do.
+        // A real address, not the line base: neighboursOn anchors on the
+        // object containing it.
         linesSeen[id].emplace(s.addr & ~63ull,
                               std::make_pair(s.addr, rr.offset));
         ++kept;
@@ -865,18 +879,16 @@ int runSample(int argc, const char **argv) {
              std::snprintf(b, sizeof b, "%llx", (unsigned long long)event);
              return std::string(b); }() + "\",\n";
     buf += "  \"cpu\": \"" + jsonEscape(cpuIdentity()) + "\",\n";
-    // Whether this instrument was shown to measure what the profile claims.
-    // A consumer that cannot see this has to take the encoding on trust, and
-    // an encoding is exactly the thing that is silently wrong on a new part.
+    // Without this a consumer takes the encoding on trust, which is the thing
+    // that goes silently wrong on an unfamiliar part.
     buf += "  \"selfTest\": \"" +
            std::string(!selfTest ? "skipped" : (st.passed ? "pass" : "fail")) +
            "\",\n";
     buf += "  \"selfTestSamples\": " + std::to_string(st.hits) + ",\n";
     buf += "  \"selfTestUnshared\": " + std::to_string(st.privateHits) + ",\n";
     buf += "  \"selfTestStoreOnly\": " + std::to_string(st.storeHits) + ",\n";
-    // What this instrument cannot see. A consumer that refutes on absence has
-    // to read this first, or it retires findings the event was never able to
-    // observe in the first place.
+    // A consumer that refutes on absence must read this first, or it retires
+    // findings the event could never have observed.
     buf += "  \"storeOnlySharing\": \"" +
            std::string(!selfTest ? "unknown" : (st.storeBlind ? "blind"
                                                               : "visible")) +
@@ -901,6 +913,10 @@ int runSample(int argc, const char **argv) {
 
         buf += "    {\"id\": \"" + jsonEscape(id) + "\", \"samples\": " +
                std::to_string(tot);
+        if (auto rs = rawSymbol.find(id); rs != rawSymbol.end())
+            buf += ", \"symbol\": \"" + jsonEscape(rs->second) + "\"";
+        if (ambiguous.count(id))
+            buf += ", \"ambiguous\": true";
         if (!nb.empty()) {
             buf += ", \"neighbours\": [";
             bool firstN = true;

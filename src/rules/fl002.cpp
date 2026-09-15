@@ -19,9 +19,9 @@ namespace {
 
 // "name@offset+size|name@offset+size", the wire the memory-profile join parses.
 //
-// An array self-pair (a == b) is two ELEMENTS on one line, so naming the field
-// once would collapse to a single extent and read as contention on one field.
-// The elements resident on the shared line are named individually instead.
+// An array self-pair (a == b) is two ELEMENTS on one line. Naming the field
+// once would collapse to a single extent and read as contention on one field,
+// so the elements resident on the line are named individually.
 std::string extentsOf(const CacheLineMap::SharedLinePair &q, uint64_t lineBytes) {
     auto one = [](const std::string &n, uint64_t off, uint64_t sz) {
         return n + "@" + std::to_string(off) + "+" + std::to_string(sz);
@@ -400,6 +400,9 @@ public:
         // gets one before any line gets a second.
         constexpr size_t kMaxPairEvidence = 64;
         std::string pairFields;
+        // The same pairs in the coordinates a PEBS data address arrives in, so
+        // a measurement can be checked against the fields named here rather
+        // than against the object holding them.
         std::string pairExtents;
         {
             std::map<uint64_t, std::vector<size_t>> byLine;
