@@ -7,6 +7,7 @@
 #include "cli/hyp.h"
 #include "cli/init.h"
 #include "cli/observe.h"
+#include "cli/sample.h"
 #include "cli/scan.h"
 
 #include "lshaz/core/version.h"
@@ -48,6 +49,8 @@ int main(int argc, const char **argv) {
         return lshaz::runExpCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "feedback") == 0)
         return lshaz::runFeedbackCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "sample") == 0)
+        return lshaz::runSample(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "observe") == 0)
         return lshaz::runObserveCommand(argc - 2, argv + 2);
 

@@ -117,6 +117,7 @@ struct ScanArgs {
     // C++. --ir-opt O0 remains available for debug-build parity.
     std::string irOpt = "O2";
     std::string perfProfile;
+    std::string memoryProfile;
     std::string allocator;
     std::string calibrationStore;
     std::string pmuTrace;
@@ -184,6 +185,8 @@ void printScanUsage() {
         << "      --no-cache           Ignore --cache-dir for this run\n"
         << "      --cache-max-mb <N>   Cache size cap, pruned oldest first (default 4096)\n"
         << "      --perf-profile <path> Path to perf profile for hotness guidance\n"
+        << "      --memory-profile <path> Measured cross-core traffic from `lshaz sample`;\n"
+        << "                          settles the sharing claim on evidence\n"
         << "      --machine-name <name> Machine profile to cost against\n"
         << "      --workload-cycles-per-op <N>\n"
         << "                           Cycles per operation of the target's own\n"
@@ -263,6 +266,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         { std::string v; if (consumeArg(i, argc, argv, "--include", v, "-I")) { args.includeFiles.push_back(v); continue; } }
         { std::string v; if (consumeArg(i, argc, argv, "--exclude", v, "-X")) { args.excludeFiles.push_back(v); continue; } }
         if (consumeArg(i, argc, argv, "--perf-profile", args.perfProfile)) continue;
+        if (consumeArg(i, argc, argv, "--memory-profile", args.memoryProfile)) continue;
         if (consumeArg(i, argc, argv, "--allocator", args.allocator)) continue;
         if (consumeArg(i, argc, argv, "--calibration-store", args.calibrationStore)) continue;
         if (consumeArg(i, argc, argv, "--pmu-trace", args.pmuTrace)) continue;
@@ -451,6 +455,7 @@ int runScanCommand(int argc, const char **argv) {
         request.feedback.pmuTracePath = args.pmuTrace;
         request.feedback.pmuPriorsPath = args.pmuPriors;
         request.perfProfilePath = args.perfProfile;
+        request.memoryProfilePath = args.memoryProfile;
         request.hotnessThreshold = args.hotnessThreshold;
         request.filter.minSeverity = request.config.minSeverity;
         if (!parseEvidenceTier(args.minEvidence, request.filter.minEvidenceTier))
@@ -597,6 +602,7 @@ int runScanCommand(int argc, const char **argv) {
     request.memoryLimitMB = args.memoryLimitMB;
 
     request.perfProfilePath = args.perfProfile;
+    request.memoryProfilePath = args.memoryProfile;
     request.hotnessThreshold = args.hotnessThreshold;
 
     // json_output was parsed and documented but read by nothing, so a config

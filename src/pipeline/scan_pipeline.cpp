@@ -5,6 +5,7 @@
 #include "lshaz/analysis/contention.h"
 #include "lshaz/analysis/memory.h"
 #include "lshaz/analysis/phase.h"
+#include "lshaz/analysis/memory_profile.h"
 #include "lshaz/pipeline/abs_path_db.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/filter.h"
@@ -2546,6 +2547,119 @@ static unsigned applyObjectSharingVerdict(std::vector<Diagnostic> &diagnostics,
     return settled;
 }
 
+
+// What the machine actually moved between cores, joined to the findings by
+// storage identity.
+//
+// The static side asks whether two roles could reach one object. This asks
+// whether the hardware saw them do it, and it answers on the object rather
+// than on the type, because a type has instances and only one of them may be
+// hot. Establishing beats refuting here: a sample the profile missed is a
+// sample, while a sample it took is a fact.
+struct MemoryProfileVerdict {
+    unsigned established = 0;
+    unsigned ranked = 0;
+    unsigned refuted = 0;
+};
+
+static MemoryProfileVerdict
+applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
+                          const MemoryProfile &prof, uint64_t lineBytes) {
+    MemoryProfileVerdict out;
+    if (!prof.live())
+        return out;
+
+    // Absence only means something when the profile could name most of what
+    // it saw. On a heap-heavy target it names very little, and refuting there
+    // would retire findings for want of an allocator map.
+    constexpr double kRefuteFloor = 0.80;
+    const bool mayRefute = prof.resolutionRate() >= kRefuteFloor;
+
+    for (auto &d : diagnostics) {
+        if (d.suppressed) continue;
+        auto gi = d.structuralEvidence.find("global_instances");
+        if (gi == d.structuralEvidence.end() || gi->second.empty()) continue;
+
+        const ObjectCoherence *hit = nullptr;
+        std::string hitName;
+        for (size_t start = 0; start < gi->second.size();) {
+            const size_t end = gi->second.find(';', start);
+            const std::string g = gi->second.substr(
+                start, end == std::string::npos ? std::string::npos : end - start);
+            if (!g.empty())
+                if (const auto *o = prof.find("g:" + g)) {
+                    if (!hit || o->samples > hit->samples) { hit = o; hitName = g; }
+                }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+
+        if (!hit) {
+            if (!mayRefute) continue;
+            d.addSettledGate(
+                "two threads reach the same instance",
+                "the machine moved this line between cores",
+                ClaimState::Refuted, Severity::Medium,
+                "no cross-core transfer reached any instance of this type in " +
+                    prof.origin + ", which named " +
+                    std::to_string(static_cast<int>(prof.resolutionRate() * 100)) +
+                    "% of what it sampled");
+            ++out.refuted;
+            continue;
+        }
+
+        const double share = prof.shareOf("g:" + hitName);
+        const auto fs = hit->falseSharedLines(lineBytes);
+        d.structuralEvidence["measured_share_pct"] =
+            std::to_string(static_cast<int>(share * 100.0 + 0.5));
+        d.structuralEvidence["measured_cores"] =
+            std::to_string(hit->cpus.size());
+
+        if (hit->cpus.size() >= 2) {
+            const std::string obs =
+                "'" + hitName + "' moved between " +
+                std::to_string(hit->cpus.size()) + " cores under " +
+                prof.origin;
+            // settleClaim addresses a claim the rule declared. A rule that
+            // declared none would silently absorb the measurement, so the
+            // gate is added outright when nothing matched.
+            if (!d.settleClaim("two threads reach the same instance",
+                               ClaimState::Established, obs))
+                d.addSettledGate("two threads reach the same instance",
+                                 "the machine moved this line between cores",
+                                 ClaimState::Established, Severity::High, obs);
+            d.settleClaim("MESI invalidation ping-pong", ClaimState::Established,
+                          "measured cross-core hit-modified traffic on '" +
+                              hitName + "'");
+            ++out.established;
+        }
+
+        // Share of traffic, not a cost. Turning one into the other needs a
+        // cycles-per-transfer figure and the run's own cycle count, and
+        // reporting a share as if it were a cost overstates it by whatever
+        // ratio those happen to have.
+        std::string note =
+            "measured: '" + hitName + "' took " +
+            std::to_string(static_cast<int>(share * 100.0 + 0.5)) +
+            "% of every cross-core transfer the hardware sampled, across " +
+            std::to_string(hit->cpus.size()) +
+            " core(s). That is a share of traffic and not a share of runtime; "
+            "converting it needs a cycles-per-transfer figure this profile "
+            "does not carry";
+        if (!fs.empty()) {
+            note += "; " + std::to_string(fs.size()) +
+                    " line(s) carried traffic at more than one byte offset, "
+                    "which is the false-sharing signature rather than "
+                    "contention on a single field";
+            d.structuralEvidence["measured_false_shared_lines"] =
+                std::to_string(fs.size());
+        }
+        d.escalations.push_back(note);
+        ++out.ranked;
+    }
+    return out;
+}
+
 struct SharingRouteVerdict {
     unsigned refuted = 0;  // no route, and absence of one is observable
     unsigned capped  = 0;  // no route found, but the tracker could not have seen one
@@ -3984,6 +4098,39 @@ ScanResult ScanPipeline::run(
             phases, rates, *machine, workload, costCalib, workloadName))
         report("cost_model", std::to_string(costGraded) +
                " finding(s) carry an estimated cycles-per-operation");
+
+    // Measured evidence last among the sharing passes: it settles what the
+    // structural passes could only bound, and a fact outranks an inference.
+    if (!request.memoryProfilePath.empty()) {
+        std::string raw, perr;
+        if (auto buf = llvm::MemoryBuffer::getFile(request.memoryProfilePath)) {
+            MemoryProfile prof;
+            raw = (*buf)->getBuffer().str();
+            if (!parseMemoryProfile(raw, prof, perr)) {
+                report("memory_profile", "ignored " +
+                       request.memoryProfilePath + ": " + perr);
+            } else if (!prof.live()) {
+                report("memory_profile",
+                       "profile names no storage: not applied, since a profile "
+                       "of nothing reads like a machine that moved no lines");
+            } else {
+                auto mv = applyMemoryProfileVerdict(
+                    result.diagnostics, prof, request.config.cacheLineBytes);
+                report("memory_profile",
+                       std::to_string(prof.totalSamples) +
+                       " cross-core sample(s) on " +
+                       std::to_string(prof.objects.size()) + " object(s), " +
+                       std::to_string(static_cast<int>(prof.resolutionRate() * 100)) +
+                       "% of sampled traffic named; " +
+                       std::to_string(mv.established) + " finding(s) established, " +
+                       std::to_string(mv.ranked) + " ranked, " +
+                       std::to_string(mv.refuted) + " refuted");
+            }
+        } else {
+            report("memory_profile",
+                   "cannot read " + request.memoryProfilePath);
+        }
+    }
 
     if (unsigned phaseRefuted = applyPhaseVerdict(result.diagnostics))
         report("phase", std::to_string(phaseRefuted) +

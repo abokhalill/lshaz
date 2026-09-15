@@ -80,6 +80,10 @@ struct ScanRequest {
 
     // Perf profile for hotness-guided analysis.
     std::string perfProfilePath;
+
+    // Measured cross-core traffic keyed by ObjectId, from `lshaz sample`.
+    // Settles the sharing claim on evidence instead of on structure.
+    std::string memoryProfilePath;
     double hotnessThreshold = 1.0;
 };
 

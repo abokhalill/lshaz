@@ -108,6 +108,7 @@ set(LSHAZ_SOURCES
     src/analysis/coherence_profile.cpp
     src/analysis/contention.cpp
     src/analysis/points_to.cpp
+    src/analysis/memory_profile.cpp
     src/analysis/constraints.cpp
     src/analysis/event_profile.cpp
     src/analysis/rate_model.cpp
@@ -160,6 +161,7 @@ set(LSHAZ_SOURCES
     src/cli/explain.cpp
     src/cli/init.cpp
     src/cli/observe.cpp
+    src/cli/sample.cpp
     src/cli/diff.cpp
     src/cli/fix.cpp
     src/cli/hyp.cpp
@@ -214,6 +216,7 @@ add_executable(pipeline_test
     src/pipeline/shard_ipc.cpp
     src/analysis/contention.cpp
     src/analysis/points_to.cpp
+    src/analysis/memory_profile.cpp
     src/analysis/event_profile.cpp
     src/analysis/thread_role.cpp
     src/analysis/phase.cpp

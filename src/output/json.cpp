@@ -90,7 +90,10 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
                << "\", \"state\": \"" << claimStateName(c.state) << "\""
                << ", \"gating\": " << (c.gating ? "true" : "false")
                << ", \"supports\": \"" << severityToString(c.supports)
-               << "\"}";
+               << "\"";
+            if (!c.observation.empty())
+                os << ", \"observation\": \"" << escape(c.observation) << "\"";
+            os << "}";
             if (j + 1 < d.mechanismClaims.size()) os << ",";
         }
         os << "\n      ]";

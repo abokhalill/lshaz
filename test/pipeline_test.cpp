@@ -7,6 +7,7 @@
 #include "lshaz/hypothesis/pmu_calibration.h"
 #include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/phase.h"
+#include "lshaz/analysis/memory_profile.h"
 #include "lshaz/core/diagnostic.h"
 #include "lshaz/core/ladder.h"
 #include "lshaz/analysis/memory.h"
@@ -927,6 +928,89 @@ void testPhaseNoReturn() {
     check(dead.isPreThread("check"), "and the window reopens past it");
 }
 
+
+// ===== Measured memory profile =====
+
+void testMemoryProfileParse() {
+    std::cerr << "test: memory profile round trip and shape checks\n";
+    using namespace lshaz;
+    const std::string js = R"({
+      "kind": "lshaz.memory-profile",
+      "origin": "lshaz sample --pid 42",
+      "machine": "i9-9900K", "workload": "bench",
+      "samplePeriod": 50, "wallNanos": 8000000000,
+      "unresolvedSamples": 52139,
+      "objects": [
+        {"id": "g:redisCommandTable", "samples": 9867, "offsets": [
+          {"offset": 93888, "samples": 9000, "weightSum": 90000, "weightCount": 1000,
+           "cpus": [0,1,2,3]},
+          {"offset": 93896, "samples": 867, "weightSum": 0, "weightCount": 0,
+           "cpus": [5]}]},
+        {"id": "g:quiet", "samples": 4, "offsets": [
+          {"offset": 0, "samples": 4, "weightSum": 0, "weightCount": 0, "cpus": [1]}]}
+      ]})";
+    MemoryProfile p;
+    std::string err;
+    check(parseMemoryProfile(js, p, err), "a well formed profile parses");
+    check(p.live(), "it is live");
+    check(p.objects.size() == 2, "both objects arrived");
+    check(p.totalSamples == 9871, "samples summed across objects");
+    check(p.machine == "i9-9900K" && p.samplePeriod == 50, "scalars arrived");
+
+    const auto *o = p.find("g:redisCommandTable");
+    check(o != nullptr, "lookup by ObjectId");
+    check(o->byOffset.size() == 2, "both byte offsets arrived");
+    check(o->cpus.size() == 5, "core set is the union over offsets");
+    check(o->byOffset.at(93888).meanCycles() == 90, "weighted mean latency");
+    check(o->byOffset.at(93896).meanCycles() == 0,
+          "unweighted offset reports no latency rather than a made up one");
+
+    // Share is against everything sampled, not against what we could name.
+    // 9867 of 9871 named plus 52139 unnamed.
+    const int pct = static_cast<int>(p.shareOf("g:redisCommandTable") * 100 + 0.5);
+    check(pct == 16, "share is of all sampled traffic, not of the named subset");
+    check(static_cast<int>(p.resolutionRate() * 100) == 15,
+          "resolution rate reported so absence can be weighed");
+}
+
+void testMemoryProfileFalseSharingShape() {
+    std::cerr << "test: false-sharing shape needs two offsets and two cores\n";
+    using namespace lshaz;
+    ObjectCoherence oc;
+    oc.objectId = "g:t";
+    // two offsets on one 64B line, different cores: the signature
+    oc.byOffset[0]  = {0,  100, {1}, 0, 0};
+    oc.byOffset[8]  = {8,  100, {2}, 0, 0};
+    // one offset alone on the next line, many cores: contention on a field
+    oc.byOffset[64] = {64, 100, {1,2,3}, 0, 0};
+    // two offsets on a third line but only ever one core: no transfer
+    oc.byOffset[128] = {128, 50, {4}, 0, 0};
+    oc.byOffset[136] = {136, 50, {4}, 0, 0};
+
+    const auto fs = oc.falseSharedLines(64);
+    check(fs.size() == 1, "exactly one line has the false-sharing shape");
+    check(fs[0] == 0, "and it is the line with two offsets and two cores");
+    check(oc.linesOf(64).size() == 3, "offsets group onto their lines");
+}
+
+void testMemoryProfileRejectsImposters() {
+    std::cerr << "test: a document that is not a profile is refused\n";
+    using namespace lshaz;
+    MemoryProfile p;
+    std::string err;
+    check(!parseMemoryProfile("{}", p, err), "empty object refused");
+    check(!err.empty(), "and says why");
+    check(!parseMemoryProfile(R"({"kind":"other","objects":[]})", p, err),
+          "wrong kind refused");
+    check(!parseMemoryProfile(R"({"kind":"lshaz.memory-profile"})", p, err),
+          "no objects array refused, since it would read as a clean machine");
+    MemoryProfile q;
+    check(parseMemoryProfile(R"({"kind":"lshaz.memory-profile","objects":[]})",
+                             q, err),
+          "an empty but well formed profile parses");
+    check(!q.live(), "but is not live, so it can settle nothing");
+}
+
 void testFilterSourcesSkipsVendored() {
     std::vector<std::string> src = {
         "/p/src/server.c", "/p/deps/jemalloc/jemalloc.c",
@@ -1498,6 +1582,9 @@ int main() {
     testPhaseLoopReachesBackward();
     testPhaseIndirectResolution();
     testPhaseNoReturn();
+    testMemoryProfileParse();
+    testMemoryProfileFalseSharingShape();
+    testMemoryProfileRejectsImposters();
 
     // PMU instrument election
     testMechanismClaimCeiling();
