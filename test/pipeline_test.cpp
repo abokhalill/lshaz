@@ -993,6 +993,192 @@ void testMemoryProfileFalseSharingShape() {
     check(oc.linesOf(64).size() == 3, "offsets group onto their lines");
 }
 
+void testSharingDiscrimination() {
+    std::cerr << "test: measured offsets separate false sharing from true\n";
+    using namespace lshaz;
+
+    // Two fields of one line, both busy. Padding them apart works.
+    const std::vector<ClaimedField> pair = {{"head", 0, 8}, {"tail", 8, 8}};
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 400, {1}, 0, 0};
+        oc.byOffset[8] = {8, 300, {2}, 0, 0};
+        oc.samples = 700;
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::MultiField,
+              "traffic in two named fields of one line is false sharing");
+        check(e.fieldsHit.size() == 2, "both fields reported");
+        check(e.fieldsHit[0] == "head", "busiest field first");
+        check(e.lineBase == 0, "on the line they share");
+    }
+
+    // One field of that line carries everything. Padding moves the traffic
+    // and removes none of it: a different mechanism with a different fix.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 700, {1, 2, 3}, 0, 0};
+        oc.samples = 700;
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::SingleField,
+              "all traffic in one named field is true sharing, not false");
+        check(e.fieldsHit.size() == 1 && e.fieldsHit[0] == "head",
+              "and it names which field");
+    }
+
+    // Same shape, too little of it. A second field taking a fifth of the line
+    // would be missed at this count, so the profile must not refute.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 20, {1, 2}, 0, 0};
+        oc.samples = 20;
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::TooFewSamples,
+              "one field with thin evidence refutes nothing");
+    }
+
+    // The object is contended somewhere else entirely. The measurement is
+    // real and the finding's explanation of it is not.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[4096] = {4096, 900, {1, 2}, 0, 0};
+        oc.samples = 900;
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::OffClaimedLines,
+              "traffic away from the named pair leaves the pair unsupported");
+        check(e.samplesOnObject == 900, "while still reporting the object moved");
+    }
+
+    // A straddling field belongs to both lines its bytes touch.
+    {
+        const std::vector<ClaimedField> straddle = {{"wide", 56, 16},
+                                                    {"next", 72, 8}};
+        ObjectCoherence oc;
+        oc.objectId = "g:s";
+        oc.byOffset[68] = {68, 400, {1}, 0, 0};
+        oc.byOffset[72] = {72, 400, {2}, 0, 0};
+        oc.samples = 800;
+        const auto e = discriminateSharing(oc, straddle, 64);
+        check(e.verdict == SharingVerdict::MultiField,
+              "a field crossing a boundary is not lost from the second line");
+        check(e.lineBase == 64, "reported on the line the traffic landed on");
+    }
+
+    // The linker put a different object on the line. Traffic in one field no
+    // longer means one field is contended, and padding the struct fixes
+    // nothing. Measured on an i9-9900K: a read-only flag took 6370 samples
+    // because a counter eight bytes below it was written from another core.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 700, {1, 2}, 0, 0};
+        oc.samples = 700;
+        oc.neighbours.push_back({"g:alpha_counter", -8, 0});
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::CrossObjectLine,
+              "a line shared with another object is not field contention");
+        check(e.lineNeighbours.size() == 1 &&
+                  e.lineNeighbours[0] == "g:alpha_counter",
+              "and the other object is named");
+    }
+
+    // A neighbour on some other line does not contaminate this one.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 700, {1, 2}, 0, 0};
+        oc.samples = 700;
+        oc.neighbours.push_back({"g:far", 4096, 4096});
+        const auto e = discriminateSharing(oc, pair, 64);
+        check(e.verdict == SharingVerdict::SingleField,
+              "a neighbour off the contended line leaves the verdict alone");
+        check(e.lineNeighbours.empty(), "and is not reported against it");
+    }
+
+    // No claim to check against, so nothing is decided rather than assumed.
+    {
+        ObjectCoherence oc;
+        oc.objectId = "g:q";
+        oc.byOffset[0] = {0, 700, {1, 2}, 0, 0};
+        oc.samples = 700;
+        const auto e = discriminateSharing(oc, {}, 64);
+        check(e.verdict == SharingVerdict::NoTraffic,
+              "with no named fields the offsets settle nothing");
+    }
+}
+
+void testInstrumentProvenance() {
+    std::cerr << "test: an unverified instrument ranks but settles nothing\n";
+    using namespace lshaz;
+    auto parse = [](const char *extra) {
+        MemoryProfile p;
+        std::string err, js = std::string("{\"kind\":\"lshaz.memory-profile\",") +
+            extra + ",\"objects\":[{\"id\":\"g:x\",\"samples\":9,\"offsets\":["
+            "{\"offset\":0,\"samples\":9,\"cpus\":[1,2]}]}]}";
+        parseMemoryProfile(js, p, err);
+        return p;
+    };
+
+    const auto pass = parse("\"event\":\"0x4d2\",\"cpu\":\"GenuineIntel-6-158\","
+                            "\"selfTest\":\"pass\",\"selfTestSamples\":41233");
+    check(pass.coherenceVerified(), "a profile whose control fired may settle");
+    check(pass.provenanceProblem().empty(), "and reports no problem");
+    check(pass.selfTestSamples == 41233, "the control's count is carried");
+
+    const auto fail = parse("\"event\":\"0xc0\",\"cpu\":\"GenuineIntel-6-158\","
+                            "\"selfTest\":\"fail\",\"selfTestSamples\":0");
+    check(!fail.coherenceVerified(),
+          "an encoding that missed a hazard built on purpose settles nothing");
+    check(fail.provenanceProblem().find("0xc0") != std::string::npos,
+          "and the refusal names the encoding it distrusts");
+
+    const auto skipped = parse("\"event\":\"0x4d2\",\"selfTest\":\"skipped\"");
+    check(!skipped.coherenceVerified(), "skipping the control is not passing it");
+
+    // The instrument's own blind spot, measured by the instrument. XSNP_HITM
+    // reports 20016 samples on a line two cores read-modify-write and 0 on the
+    // same line written with plain stores, so its silence cannot refute.
+    check(!pass.seesStoreOnlySharing(),
+          "a profile that did not record store visibility does not claim it");
+    const auto blind = parse("\"selfTest\":\"pass\",\"storeOnlySharing\":\"blind\"");
+    check(blind.coherenceVerified() && !blind.seesStoreOnlySharing(),
+          "an instrument can be verified for coherence and still be store-blind");
+    const auto sees = parse("\"selfTest\":\"pass\",\"storeOnlySharing\":\"visible\"");
+    check(sees.seesStoreOnlySharing(),
+          "and one that saw store-only sharing says so");
+
+    // Neighbours arrive with their sign: a negative offset is an object the
+    // linker placed before this one on the same line.
+    MemoryProfile n;
+    std::string nerr;
+    check(parseMemoryProfile(
+              R"({"kind":"lshaz.memory-profile","objects":[{"id":"g:stopf",
+                  "samples":6370,"neighbours":[{"id":"g:alpha_counter","at":-8,"witness":0}],
+                  "offsets":[{"offset":0,"samples":6370,"cpus":[1,2]}]}]})",
+              n, nerr),
+          "a profile carrying line neighbours parses");
+    const auto *so = n.find("g:stopf");
+    check(so && so->neighbours.size() == 1, "the neighbour arrived");
+    check(so->neighbours[0].at == -8,
+          "a negative offset survives the unsigned number parser");
+    check(so->neighboursOnLine(0, 64).size() == 1,
+          "and it lands on the line the traffic did");
+
+    // The samples are real whatever produced them, so ranking survives.
+    check(fail.live() && fail.shareOf("g:x") > 0.0,
+          "an unverified profile still carries a share to rank by");
+
+    // A profile written before the control existed must not be grandfathered:
+    // it was taken with an instrument nobody checked.
+    const auto legacy = parse("\"event\":\"0x4d2\"");
+    check(!legacy.coherenceVerified(),
+          "a profile with no self-test field is unverified, not trusted");
+    check(!legacy.provenanceProblem().empty(), "and says so");
+}
+
 void testMemoryProfileRejectsImposters() {
     std::cerr << "test: a document that is not a profile is refused\n";
     using namespace lshaz;
@@ -1584,6 +1770,8 @@ int main() {
     testPhaseNoReturn();
     testMemoryProfileParse();
     testMemoryProfileFalseSharingShape();
+    testSharingDiscrimination();
+    testInstrumentProvenance();
     testMemoryProfileRejectsImposters();
 
     // PMU instrument election

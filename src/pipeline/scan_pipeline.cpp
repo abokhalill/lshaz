@@ -2560,7 +2560,43 @@ struct MemoryProfileVerdict {
     unsigned established = 0;
     unsigned ranked = 0;
     unsigned refuted = 0;
+    unsigned reattributed = 0;   // mechanism measured, but not the one claimed
+    unsigned unsupported = 0;    // object contended, claimed fields quiet
+    unsigned crossObject = 0;    // the line is shared with a different object
+    bool verified = false;       // the instrument proved it measures coherence
 };
+
+// "name@offset+size|name@offset+size;..." as FL002 writes it.
+static std::vector<ClaimedField> parsePairExtents(const std::string &s) {
+    std::vector<ClaimedField> out;
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t end = s.find_first_of(";|", i);
+        const std::string tok =
+            s.substr(i, end == std::string::npos ? std::string::npos : end - i);
+        const size_t at = tok.rfind('@'), plus = tok.rfind('+');
+        if (at != std::string::npos && plus != std::string::npos && plus > at) {
+            ClaimedField f;
+            f.name = tok.substr(0, at);
+            f.offset = strtoull(tok.c_str() + at + 1, nullptr, 10);
+            f.size = strtoull(tok.c_str() + plus + 1, nullptr, 10);
+            if (!f.name.empty()) out.push_back(std::move(f));
+        }
+        if (end == std::string::npos) break;
+        i = end + 1;
+    }
+    return out;
+}
+
+static std::string joinNames(const std::vector<std::string> &v, size_t cap) {
+    std::string o;
+    for (size_t i = 0; i < v.size() && i < cap; ++i) {
+        if (i) o += " and ";
+        o += "'" + v[i] + "'";
+    }
+    if (v.size() > cap) o += " and " + std::to_string(v.size() - cap) + " more";
+    return o;
+}
 
 static MemoryProfileVerdict
 applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
@@ -2573,7 +2609,24 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
     // it saw. On a heap-heavy target it names very little, and refuting there
     // would retire findings for want of an allocator map.
     constexpr double kRefuteFloor = 0.80;
-    const bool mayRefute = prof.resolutionRate() >= kRefuteFloor;
+
+    // Two separate permissions, and they fail for different reasons.
+    //
+    // A profile may only SETTLE anything if its instrument was shown to
+    // measure coherence. Sample counts are real whatever encoding produced
+    // them, so an unverified profile still ranks; it just cannot say what the
+    // hardware was doing, because nothing established that.
+    const bool maySettle = prof.coherenceVerified();
+
+    // Absence only means something when the profile could name most of what
+    // it saw, AND when its instrument can see the class of sharing being
+    // refuted. On a heap-heavy target it names very little, and refuting there
+    // would retire findings for want of an allocator map. On a store-blind
+    // instrument it would retire findings for want of an event, which is
+    // worse: the hazard is there and the hardware never reports it.
+    const bool mayRefute = maySettle && prof.seesStoreOnlySharing() &&
+                           prof.resolutionRate() >= kRefuteFloor;
+    out.verified = maySettle;
 
     for (auto &d : diagnostics) {
         if (d.suppressed) continue;
@@ -2614,11 +2667,19 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
             std::to_string(static_cast<int>(share * 100.0 + 0.5));
         d.structuralEvidence["measured_cores"] =
             std::to_string(hit->cpus.size());
+        d.structuralEvidence["measured_samples"] =
+            std::to_string(hit->samples);
 
-        if (hit->cpus.size() >= 2) {
+        // The gate is about two threads reaching the object, and every
+        // hit-modified sample is on its own a line found dirty in another
+        // core. A count that rules out a stray settles it; a count of distinct
+        // sampling cores does not, and would miss a pinned producer/consumer
+        // pair, which is one consumer and real sharing.
+        if (maySettle && hit->samples >= kMinSamplesToEstablish) {
             const std::string obs =
-                "'" + hitName + "' moved between " +
-                std::to_string(hit->cpus.size()) + " cores under " +
+                "'" + hitName + "' took " + std::to_string(hit->samples) +
+                " cross-core hit-modified sample(s) on " +
+                std::to_string(hit->cpus.size()) + " core(s) under " +
                 prof.origin;
             // settleClaim addresses a claim the rule declared. A rule that
             // declared none would silently absorb the measurement, so the
@@ -2628,10 +2689,118 @@ applyMemoryProfileVerdict(std::vector<Diagnostic> &diagnostics,
                 d.addSettledGate("two threads reach the same instance",
                                  "the machine moved this line between cores",
                                  ClaimState::Established, Severity::High, obs);
-            d.settleClaim("MESI invalidation ping-pong", ClaimState::Established,
-                          "measured cross-core hit-modified traffic on '" +
-                              hitName + "'");
             ++out.established;
+        }
+
+        // The mechanism claim is about a field pair, and object traffic does
+        // not settle it. False sharing and two threads contending one field
+        // produce the same object-level number and take different fixes, so
+        // settling the mechanism from that number establishes whichever one
+        // the rule happened to guess.
+        auto pe = d.structuralEvidence.find("pair_extents");
+        const std::vector<ClaimedField> claimed =
+            pe == d.structuralEvidence.end() ? std::vector<ClaimedField>{}
+                                             : parsePairExtents(pe->second);
+        if (!claimed.empty()) {
+            const SharingEvidence se =
+                discriminateSharing(*hit, claimed, lineBytes);
+            d.structuralEvidence["measured_sharing"] =
+                sharingVerdictName(se.verdict);
+            d.structuralEvidence["measured_line_base"] =
+                std::to_string(se.lineBase);
+
+            switch (maySettle ? se.verdict : SharingVerdict::NoTraffic) {
+                case SharingVerdict::MultiField:
+                    d.settleClaim(
+                        "MESI invalidation ping-pong", ClaimState::Established,
+                        std::to_string(se.samplesOnLine) +
+                            " hit-modified sample(s) on the line at offset " +
+                            std::to_string(se.lineBase) + " of '" + hitName +
+                            "', split across " + joinNames(se.fieldsHit, 3));
+                    break;
+                case SharingVerdict::SingleField:
+                    // Re-attributing to true sharing asserts the OTHER field
+                    // on the line was quiet. A store-blind instrument cannot
+                    // establish that: a neighbour written with plain stores
+                    // contends exactly as hard and reports nothing.
+                    if (!prof.seesStoreOnlySharing()) {
+                        d.escalations.push_back(
+                            "measured: all " +
+                            std::to_string(se.samplesOnLine) +
+                            " hit-modified sample(s) on this line landed in " +
+                            joinNames(se.fieldsHit, 1) +
+                            ". That is the true-sharing shape, but this "
+                            "instrument is blind to a neighbour written with "
+                            "plain stores, so it cannot rule one out");
+                        break;
+                    }
+                    d.settleClaim(
+                        "MESI invalidation ping-pong", ClaimState::Refuted,
+                        "all " + std::to_string(se.samplesOnLine) +
+                            " hit-modified sample(s) on this line landed in " +
+                            joinNames(se.fieldsHit, 1) +
+                            ", on an instrument that was shown to see "
+                            "store-only sharing too, so the contention is on "
+                            "that field and not between the fields sharing its "
+                            "line; padding would move the traffic, not remove "
+                            "it");
+                    d.escalations.push_back(
+                        "measured: the line is contended, but on one field. "
+                        "That is true sharing, whose fix is fewer writers or a "
+                        "per-core replica, not alignment");
+                    ++out.reattributed;
+                    break;
+                case SharingVerdict::CrossObjectLine: {
+                    // Not a variant of the rule's claim: a distinct mechanism
+                    // the source cannot state, because which globals share a
+                    // line is the linker's decision and appears nowhere in an
+                    // AST. Padding the struct does not fix it; separating the
+                    // objects does.
+                    std::string others;
+                    for (size_t k = 0; k < se.lineNeighbours.size() && k < 3; ++k) {
+                        if (k) others += ", ";
+                        others += "'" + se.lineNeighbours[k] + "'";
+                    }
+                    d.settleClaim(
+                        "MESI invalidation ping-pong", ClaimState::Established,
+                        std::to_string(se.samplesOnLine) +
+                            " hit-modified sample(s) on a line this object "
+                            "shares with " + others);
+                    d.escalations.push_back(
+                        "measured: the contended line is shared with " +
+                        others +
+                        ", which the source does not place there. The linker "
+                        "does, so this survives any change to the struct and "
+                        "is fixed by separating the objects rather than by "
+                        "padding fields");
+                    d.structuralEvidence["measured_line_neighbours"] = others;
+                    ++out.crossObject;
+                    break;
+                }
+                case SharingVerdict::OffClaimedLines:
+                    d.escalations.push_back(
+                        "measured: '" + hitName + "' carried " +
+                        std::to_string(hit->samples) +
+                        " hit-modified sample(s), none of them inside the "
+                        "field pair(s) this finding named. The object is "
+                        "contended and this explanation of it is unsupported");
+                    ++out.unsupported;
+                    break;
+                case SharingVerdict::TooFewSamples:
+                case SharingVerdict::NoTraffic:
+                    break;
+            }
+        } else if (maySettle && !fs.empty()) {
+            // No field extents from the rule, so the join is offset-level:
+            // two distinct offsets on one line is the false-sharing signature
+            // without naming which fields they are.
+            d.settleClaim("MESI invalidation ping-pong",
+                          ClaimState::Established,
+                          std::to_string(fs.size()) +
+                              " line(s) of '" + hitName +
+                              "' carried cross-core traffic at more than one "
+                              "byte offset");
+            d.structuralEvidence["measured_sharing"] = "multi-offset";
         }
 
         // Share of traffic, not a cost. Turning one into the other needs a
@@ -4116,6 +4285,10 @@ ScanResult ScanPipeline::run(
             } else {
                 auto mv = applyMemoryProfileVerdict(
                     result.diagnostics, prof, request.config.cacheLineBytes);
+                if (!mv.verified)
+                    report("memory_profile",
+                           "ranking only, settling nothing: " +
+                           prof.provenanceProblem());
                 report("memory_profile",
                        std::to_string(prof.totalSamples) +
                        " cross-core sample(s) on " +
@@ -4124,7 +4297,13 @@ ScanResult ScanPipeline::run(
                        "% of sampled traffic named; " +
                        std::to_string(mv.established) + " finding(s) established, " +
                        std::to_string(mv.ranked) + " ranked, " +
-                       std::to_string(mv.refuted) + " refuted");
+                       std::to_string(mv.refuted) + " refuted, " +
+                       std::to_string(mv.reattributed) +
+                       " re-attributed to true sharing, " +
+                       std::to_string(mv.unsupported) +
+                       " with the object contended and the named pair quiet, " +
+                       std::to_string(mv.crossObject) +
+                       " on a line the linker shares with another object");
             }
         } else {
             report("memory_profile",

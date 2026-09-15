@@ -40,6 +40,127 @@ unsigned ObjectCoherence::meanCycles() const {
     return n ? static_cast<unsigned>(sum / n) : 0;
 }
 
+std::vector<const LineNeighbour *>
+ObjectCoherence::neighboursOnLine(uint64_t lineBase, uint64_t lineBytes) const {
+    std::vector<const LineNeighbour *> out;
+    if (!lineBytes) return out;
+    for (const auto &n : neighbours)
+        if (n.witness >= lineBase && n.witness < lineBase + lineBytes)
+            out.push_back(&n);
+    return out;
+}
+
+const char *sharingVerdictName(SharingVerdict v) {
+    switch (v) {
+        case SharingVerdict::NoTraffic:       return "no-traffic";
+        case SharingVerdict::OffClaimedLines: return "off-claimed-lines";
+        case SharingVerdict::TooFewSamples:   return "too-few-samples";
+        case SharingVerdict::SingleField:     return "single-field";
+        case SharingVerdict::MultiField:      return "multi-field";
+        case SharingVerdict::CrossObjectLine: return "cross-object-line";
+    }
+    return "no-traffic";
+}
+
+SharingEvidence discriminateSharing(const ObjectCoherence &oc,
+                                    const std::vector<ClaimedField> &claimed,
+                                    uint64_t lineBytes) {
+    SharingEvidence e;
+    e.samplesOnObject = oc.samples;
+    if (!lineBytes || claimed.empty() || oc.byOffset.empty())
+        return e;
+
+    // A field wider than the gap to the next boundary belongs to every line its
+    // bytes touch, so a straddling field is not lost from the line where the
+    // traffic happened to land.
+    std::map<uint64_t, std::vector<const ClaimedField *>> byLine;
+    for (const auto &f : claimed) {
+        const uint64_t last = f.offset + (f.size ? f.size - 1 : 0);
+        for (uint64_t b = (f.offset / lineBytes) * lineBytes; b <= last;
+             b += lineBytes)
+            byLine[b].push_back(&f);
+    }
+
+    struct LineTally {
+        uint64_t samples = 0;
+        std::set<unsigned> cores;
+        std::map<std::string, uint64_t> fieldSamples;
+        std::vector<uint64_t> unclaimed;
+    };
+    std::map<uint64_t, LineTally> tally;
+
+    for (const auto &[off, oc2] : oc.byOffset) {
+        const uint64_t base = (off / lineBytes) * lineBytes;
+        auto fl = byLine.find(base);
+        if (fl == byLine.end())
+            continue;
+        auto &t = tally[base];
+        t.samples += oc2.samples;
+        t.cores.insert(oc2.cpus.begin(), oc2.cpus.end());
+        const ClaimedField *hit = nullptr;
+        for (const auto *f : fl->second)
+            if (f->contains(off)) { hit = f; break; }
+        if (hit) t.fieldSamples[hit->name] += oc2.samples;
+        else     t.unclaimed.push_back(off);
+    }
+
+    if (tally.empty()) {
+        e.verdict = oc.samples ? SharingVerdict::OffClaimedLines
+                               : SharingVerdict::NoTraffic;
+        for (const auto &[off, unused] : oc.byOffset)
+            e.unclaimedOffsets.push_back(off);
+        return e;
+    }
+
+    // Lowest offset breaks a tie, so the reported line does not depend on map
+    // iteration order changing under a different sample distribution.
+    const uint64_t best = std::max_element(
+        tally.begin(), tally.end(),
+        [](const auto &a, const auto &b) {
+            return a.second.samples != b.second.samples
+                       ? a.second.samples < b.second.samples
+                       : a.first > b.first;
+        })->first;
+    const LineTally &t = tally[best];
+
+    e.lineBase = best;
+    e.samplesOnLine = t.samples;
+    e.cores = t.cores;
+    e.unclaimedOffsets = t.unclaimed;
+
+    std::vector<std::pair<std::string, uint64_t>> hits(t.fieldSamples.begin(),
+                                                       t.fieldSamples.end());
+    std::stable_sort(hits.begin(), hits.end(),
+                     [](const auto &a, const auto &b) {
+                         return a.second > b.second;
+                     });
+    for (const auto &[name, n] : hits)
+        e.fieldsHit.push_back(name);
+
+    for (const auto *n : oc.neighboursOnLine(best, lineBytes))
+        e.lineNeighbours.push_back(n->objectId);
+
+    if (t.samples < kMinSamplesToEstablish)
+        e.verdict = SharingVerdict::TooFewSamples;
+    else if (e.fieldsHit.size() >= 2)
+        e.verdict = SharingVerdict::MultiField;
+    else if (!e.lineNeighbours.empty())
+        // A different object shares this line, so traffic landing in one field
+        // does not mean one field is contended. Measured on an i9-9900K: a
+        // read-only flag took 9727 samples because a counter eight bytes below
+        // it was written from another core. Calling that field contention
+        // names the wrong cause and recommends the wrong fix.
+        e.verdict = SharingVerdict::CrossObjectLine;
+    else if (t.samples < kMinSamplesToDiscriminate)
+        e.verdict = SharingVerdict::TooFewSamples;
+    else if (e.fieldsHit.size() == 1)
+        e.verdict = SharingVerdict::SingleField;
+    else
+        // Enough traffic on the line, none of it inside a field the rule named.
+        e.verdict = SharingVerdict::OffClaimedLines;
+    return e;
+}
+
 double MemoryProfile::shareOf(const std::string &objectId) const {
     // Against everything the hardware sampled, not against what we managed to
     // name. On a heap-heavy target only a sixth of the traffic resolves, and
@@ -111,6 +232,15 @@ struct P {
         return v;
     }
 
+    // A neighbour offset is negative when the other object comes first, and
+    // num() parses into an unsigned, so -8 would arrive as a huge positive.
+    int64_t snum() {
+        ws();
+        const bool neg = i < s.size() && s[i] == '-';
+        if (neg) ++i;
+        return neg ? -(int64_t)num() : (int64_t)num();
+    }
+
     // Always advances when input remains, so a malformed document cannot spin
     // a caller's loop. Same guarantee shard_ipc's parser makes.
     void skip() {
@@ -164,6 +294,27 @@ void parseOffsets(P &p, ObjectCoherence &oc) {
     p.take(']');
 }
 
+void parseNeighbours(P &p, ObjectCoherence &oc) {
+    if (!p.take('[')) { p.skip(); return; }
+    while (!p.peek(']') && p.i < p.s.size()) {
+        if (!p.take('{')) { p.skip(); break; }
+        LineNeighbour n;
+        while (!p.peek('}') && p.i < p.s.size()) {
+            const std::string k = p.str();
+            p.take(':');
+            if (k == "id")      n.objectId = p.str();
+            else if (k == "at") n.at = p.snum();
+            else if (k == "witness") n.witness = p.num();
+            else p.skip();
+            p.take(',');
+        }
+        p.take('}');
+        if (!n.objectId.empty()) oc.neighbours.push_back(std::move(n));
+        p.take(',');
+    }
+    p.take(']');
+}
+
 } // namespace
 
 bool parseMemoryProfile(const std::string &json, MemoryProfile &out,
@@ -179,6 +330,11 @@ bool parseMemoryProfile(const std::string &json, MemoryProfile &out,
         } else if (k == "origin")   out.origin = p.str();
         else if (k == "machine")    out.machine = p.str();
         else if (k == "workload")   out.workload = p.str();
+        else if (k == "event")      out.event = p.str();
+        else if (k == "cpu")        out.cpuModel = p.str();
+        else if (k == "selfTest")   out.selfTest = p.str();
+        else if (k == "selfTestSamples") out.selfTestSamples = p.num();
+        else if (k == "storeOnlySharing") out.storeOnlySharing = p.str();
         else if (k == "samplePeriod") out.samplePeriod = p.num();
         else if (k == "wallNanos")    out.wallNanos = p.num();
         else if (k == "unresolvedSamples") out.unresolvedSamples = p.num();
@@ -194,6 +350,7 @@ bool parseMemoryProfile(const std::string &json, MemoryProfile &out,
                     if (ok == "id")           oc.objectId = p.str();
                     else if (ok == "samples") oc.samples = p.num();
                     else if (ok == "offsets") parseOffsets(p, oc);
+                    else if (ok == "neighbours") parseNeighbours(p, oc);
                     else p.skip();
                     p.take(',');
                 }

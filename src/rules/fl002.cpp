@@ -15,6 +15,41 @@
 #include <sstream>
 
 namespace lshaz {
+namespace {
+
+// "name@offset+size|name@offset+size", the wire the memory-profile join parses.
+//
+// An array self-pair (a == b) is two ELEMENTS on one line, so naming the field
+// once would collapse to a single extent and read as contention on one field.
+// The elements resident on the shared line are named individually instead.
+std::string extentsOf(const CacheLineMap::SharedLinePair &q, uint64_t lineBytes) {
+    auto one = [](const std::string &n, uint64_t off, uint64_t sz) {
+        return n + "@" + std::to_string(off) + "+" + std::to_string(sz);
+    };
+    if (q.a != q.b)
+        return one(q.a->name, q.a->offsetBytes, q.a->sizeBytes) + "|" +
+               one(q.b->name, q.b->offsetBytes, q.b->sizeBytes);
+
+    const uint64_t g = q.a->accessGranuleBytes ? q.a->accessGranuleBytes
+                                               : q.a->sizeBytes;
+    if (!g || !lineBytes)
+        return one(q.a->name, q.a->offsetBytes, q.a->sizeBytes);
+
+    const uint64_t base = q.lineIndex * lineBytes;
+    std::string out;
+    // Two elements prove the mechanism; the rest only lengthen the wire.
+    for (uint64_t i = 0; i < q.a->elementCount; ++i) {
+        const uint64_t off = q.a->offsetBytes + i * g;
+        if (off < base) continue;
+        if (off >= base + lineBytes) break;
+        if (!out.empty()) out += '|';
+        out += one(q.a->name + "[" + std::to_string(i) + "]", off, g);
+        if (out.find('|') != std::string::npos) break;
+    }
+    return out.empty() ? one(q.a->name, q.a->offsetBytes, q.a->sizeBytes) : out;
+}
+
+} // namespace
 
 class FL002_FalseSharing : public Rule {
 public:
@@ -365,6 +400,7 @@ public:
         // gets one before any line gets a second.
         constexpr size_t kMaxPairEvidence = 64;
         std::string pairFields;
+        std::string pairExtents;
         {
             std::map<uint64_t, std::vector<size_t>> byLine;
             for (size_t pi = 0; pi < evPairs.size(); ++pi)
@@ -383,9 +419,10 @@ public:
                     if (round >= ps.size())
                         continue;
                     any = true;
-                    if (emitted++) pairFields += ';';
+                    if (emitted++) { pairFields += ';'; pairExtents += ';'; }
                     const auto &q = evPairs[ps[round]];
                     pairFields += q.a->name + "|" + q.b->name;
+                    pairExtents += extentsOf(q, map.cacheLineBytes());
                     if (emitted >= kMaxPairEvidence) break;
                 }
                 if (!any) break;
@@ -402,6 +439,7 @@ public:
             {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
             {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
             {"pair_fields", pairFields},
+            {"pair_extents", pairExtents},
             // Linker names of this type's global instances: the key a
             // runtime write-attribution trace is reported under.
             {"global_instances", escape.globalInstanceNames(RD)},
