@@ -167,10 +167,14 @@ struct MachineModel {
     // unmeasured. No static term reads it: rates carry no phase, so a scan
     // cannot derive coincidence from it. It exists to interpret a measurement.
     uint32_t coherenceWindowCycles = 0;
+    uint32_t coherenceRoundTripCycles = 0;
 
     bool hasCoherenceCost() const { return cyclesHitmLocal != 0; }
     bool hasOverlap() const { return mlpOverlapPct != 0; }
     bool hasCoherenceWindow() const { return coherenceWindowCycles != 0; }
+    bool hasCoherenceRoundTrip() const {
+        return coherenceRoundTripCycles != 0;
+    }
 };
 
 // Cycles the target spends per unit of its own work. A property of the

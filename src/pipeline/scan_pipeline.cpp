@@ -3863,6 +3863,8 @@ ScanResult ScanPipeline::run(
     machineStorage.cyclesMispredict = request.config.cyclesMispredict;
     machineStorage.mlpOverlapPct = request.config.mlpOverlapPct;
     machineStorage.coherenceWindowCycles = request.config.coherenceWindowCycles;
+    machineStorage.coherenceRoundTripCycles =
+        request.config.coherenceRoundTripCycles;
     const MachineModel *machine = &machineStorage;
     WorkloadModel workload;
     workload.cyclesPerOp = request.config.workloadCyclesPerOp;
